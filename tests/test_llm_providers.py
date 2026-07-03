@@ -48,7 +48,7 @@ def test_build_payload_ollama_format(mock_active_notes, mock_nodes, monkeypatch)
 
 def test_build_payload_openrouter_format(mock_active_notes, mock_nodes, monkeypatch):
     """OpenRouter payload uses 'temperature' and 'max_tokens' at top level."""
-    monkeypatch.setattr(bdh_providers, 'CONFIG', {
+    monkeypatch.setattr(bdh_config, 'CONFIG', {
         'llm_provider': 'openrouter',
         'llm_model': 'openrouter/free',
         'llm_temperature': 0.3,

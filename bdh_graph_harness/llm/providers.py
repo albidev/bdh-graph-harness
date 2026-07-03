@@ -7,7 +7,7 @@ delegate to ollama.py or openrouter.py based on CONFIG['llm_provider'].
 import json
 import re
 
-from bdh_graph_harness.config import CONFIG, retry_with_backoff
+from bdh_graph_harness.config import retry_with_backoff
 import bdh_graph_harness.config as _config
 from bdh_graph_harness.llm.prompt import build_messages, format_context
 from bdh_graph_harness.llm.ollama import build_ollama_payload, parse_ollama_response
@@ -24,12 +24,12 @@ def _build_llm_payload(query, active_notes, nodes, stream=False):
     Returns (data_bytes, headers_dict).
     """
     messages = build_messages(query, active_notes, nodes)
-    provider = CONFIG.get('llm_provider', 'ollama')
+    provider = _config.CONFIG.get('llm_provider', 'ollama')
 
     if provider == 'openrouter':
-        return build_openrouter_payload(messages, stream, CONFIG)
+        return build_openrouter_payload(messages, stream, _config.CONFIG)
     else:
-        return build_ollama_payload(messages, stream, CONFIG)
+        return build_ollama_payload(messages, stream, _config.CONFIG)
 
 
 def _parse_llm_response(result, provider='ollama'):
@@ -56,11 +56,11 @@ def llm_respond(query, active_notes, nodes):
     import urllib.request
 
     data, headers = _build_llm_payload(query, active_notes, nodes, stream=False)
-    provider = CONFIG.get('llm_provider', 'ollama')
+    provider = _config.CONFIG.get('llm_provider', 'ollama')
 
     def _llm_call():
         req = urllib.request.Request(_config.OLLAMA_LLM_URL, data=data, headers=headers)
-        with urllib.request.urlopen(req, timeout=CONFIG.get('llm_timeout', 300)) as resp:
+        with urllib.request.urlopen(req, timeout=_config.CONFIG.get('llm_timeout', 300)) as resp:
             result = json.loads(resp.read())
             return _parse_llm_response(result, provider)
 
@@ -85,12 +85,12 @@ def llm_stream(query, active_notes, nodes):
     import urllib.request
 
     data, headers = _build_llm_payload(query, active_notes, nodes, stream=True)
-    provider = CONFIG.get('llm_provider', 'ollama')
+    provider = _config.CONFIG.get('llm_provider', 'ollama')
 
     req = urllib.request.Request(_config.OLLAMA_LLM_URL, data=data, headers=headers)
 
     try:
-        with urllib.request.urlopen(req, timeout=CONFIG.get('llm_timeout', 300)) as resp:
+        with urllib.request.urlopen(req, timeout=_config.CONFIG.get('llm_timeout', 300)) as resp:
             buffer = b''
             for chunk in iter(lambda: resp.read(1), b''):
                 buffer += chunk
