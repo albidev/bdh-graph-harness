@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/cover.png" alt="BDH Graph Harness" width="100%">
+</p>
+
 # BDH Graph Harness
 
 Graph-based retrieval system for Obsidian vaults with Hebbian synaptic plasticity.
