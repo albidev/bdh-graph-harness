@@ -34,8 +34,9 @@ WebSocket → vis.js visualization (nodes light up, synapses pulse)
 
 ```
 bdh_graph_harness/
-├── __main__.py              # CLI entry point (--serve, --query, --refresh)
+├── __main__.py              # CLI entry point (--serve, --mcp, --query, --refresh)
 ├── config.py                # Config loading, env var expansion, retry logic
+├── mcp_server.py            # MCP server (FastMCP, stdio + HTTP transport)
 ├── graph/
 │   ├── parser.py            # Frontmatter + wikilink parsing
 │   ├── builder.py           # Graph construction + incremental cache
@@ -144,6 +145,24 @@ The web UI at `:8643` shows:
 - **Hebbian synapses** in cyan, width proportional to synaptic weight
 - **Real-time activation cascade** — nodes light up in sequence, edges pulse green (`#39d353`) when Hebbian weights strengthen during a query
 - **Dark theme** with staggered animation (120ms cascade, 4-step fade over 2.5s)
+
+## MCP Server
+
+The harness includes a [Model Context Protocol](https://modelcontextprotocol.io) server that exposes the Hebbian graph as tools to any MCP-compatible client (Claude Desktop, Cursor, Windsurf, Continue).
+
+```bash
+# stdio mode (Claude Desktop, Cursor)
+python -m bdh_graph_harness --mcp
+
+# HTTP mode (web clients)
+python -m bdh_graph_harness --mcp --mcp-transport http --mcp-port 8644
+```
+
+**Tools:** `query` (grounded Q&A with citations), `stats` (graph overview), `hebbian` (learned synapses), `graph` (full network), `refresh` (rebuild embeddings).
+
+The MCP server imports the package directly — no dependency on the HTTP API server. Both can run independently or simultaneously.
+
+See [`docs/mcp-server.md`](docs/mcp-server.md) for client configuration (Claude Desktop, Cursor, etc.).
 
 ## Hermes Agent integration
 

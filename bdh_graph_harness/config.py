@@ -81,7 +81,7 @@ logger = logging.getLogger('bdh')
 # Config loading
 # ---------------------------------------------------------------------------
 
-def load_config(config_path=None):
+def load_config(config_path: str | None = None):
     """Load configuration from YAML file and merge with defaults.
 
     Tries the given path, then DEFAULT_CONFIG_PATHS. Sets global

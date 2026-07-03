@@ -26,6 +26,11 @@
 - [x] Modular package structure (2600-line monolith → 29-file package)
 - [x] Dynamic config resolution (no stale imports)
 
+### MCP Server
+- [x] Model Context Protocol server (FastMCP, stdio + HTTP transport)
+- [x] 5 tools: query, stats, hebbian, graph, refresh
+- [x] Compatible with Claude Desktop, Cursor, Windsurf, Continue
+
 ## Future
 
 ### Multi-vault
