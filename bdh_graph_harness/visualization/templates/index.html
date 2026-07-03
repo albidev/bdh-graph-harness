@@ -1,0 +1,611 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🐉 BDH Graph Harness</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0d1117;
+    color: #c9d1d9;
+    font-family: system-ui, -apple-system, sans-serif;
+    overflow: hidden;
+    height: 100vh;
+  }
+  #titlebar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 20px;
+    background: #161b22;
+    border-bottom: 1px solid #30363d;
+    height: 52px;
+  }
+  #titlebar h1 {
+    font-size: 18px;
+    font-weight: 600;
+    color: #f0883e;
+  }
+  #titlebar .stats {
+    font-size: 13px;
+    color: #8b949e;
+  }
+  #titlebar .stats span { color: #58a6ff; font-weight: 600; }
+  #main {
+    display: flex;
+    height: calc(100vh - 52px);
+  }
+  #graph-container {
+    width: 70%;
+    height: 100%;
+    background: #0d1117;
+  }
+  #side-panel {
+    width: 30%;
+    height: 100%;
+    background: #161b22;
+    border-left: 1px solid #30363d;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  #query-section {
+    padding: 16px;
+    border-bottom: 1px solid #30363d;
+  }
+  #query-input {
+    width: 100%;
+    padding: 10px 12px;
+    background: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    color: #c9d1d9;
+    font-size: 14px;
+    font-family: inherit;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  #query-input:focus { border-color: #58a6ff; }
+  #query-btn {
+    width: 100%;
+    margin-top: 10px;
+    padding: 10px;
+    background: #238636;
+    border: none;
+    border-radius: 6px;
+    color: #fff;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+  #query-btn:hover { background: #2ea043; }
+  #query-btn:disabled { background: #21262d; color: #6e7681; cursor: not-allowed; }
+  #response-section {
+    padding: 16px;
+    border-bottom: 1px solid #30363d;
+    max-height: 200px;
+    overflow-y: auto;
+  }
+  #response-section h3, #activated-section h3, #stats-section h3 {
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #8b949e;
+    margin-bottom: 10px;
+  }
+  #response-text {
+    font-size: 13px;
+    line-height: 1.5;
+    color: #c9d1d9;
+  }
+  #activated-section {
+    padding: 16px;
+    flex: 1;
+    overflow-y: auto;
+    border-bottom: 1px solid #30363d;
+  }
+  #activated-list { list-style: none; }
+  #activated-list li {
+    padding: 8px 10px;
+    margin-bottom: 6px;
+    background: #0d1117;
+    border-radius: 6px;
+    border-left: 3px solid #f0883e;
+    font-size: 13px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    transition: all 0.3s;
+  }
+  #activated-list li.seed { border-left-color: #58a6ff; }
+  #activated-list li .score {
+    color: #8b949e;
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+  }
+  #activated-list .empty {
+    color: #6e7681;
+    font-style: italic;
+    padding: 8px 0;
+  }
+  #stats-section {
+    padding: 16px;
+    font-size: 13px;
+  }
+  #stats-section .stat-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 4px 0;
+    color: #8b949e;
+  }
+  #stats-section .stat-row .val { color: #58a6ff; font-weight: 600; }
+  #status-indicator {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-left: 8px;
+    background: #6e7681;
+    transition: background 0.3s;
+  }
+  #status-indicator.connected { background: #2ea043; }
+  #status-indicator.active { background: #f0883e; }
+
+  /* ======== MOBILE RESPONSIVE ======== */
+  @media (max-width: 768px) {
+    #titlebar {
+      padding: 8px 12px;
+      height: 44px;
+      flex-direction: row;
+      flex-wrap: wrap;
+    }
+    #titlebar h1 { font-size: 15px; }
+    #titlebar .stats { font-size: 11px; }
+    #main {
+      flex-direction: column;
+      height: calc(100vh - 44px - 36px);  /* minus tabbar */
+    }
+    #graph-container {
+      width: 100%;
+      height: 100%;
+      flex: 1;
+      display: block;
+    }
+    #side-panel {
+      width: 100%;
+      height: 100%;
+      flex: 1;
+      border-left: none;
+      border-top: 1px solid #30363d;
+      display: none;  /* hidden by default, toggle via tab */
+    }
+    /* Mobile tab bar */
+    #mobile-tabs {
+      display: flex;
+      height: 36px;
+      background: #161b22;
+      border-bottom: 1px solid #30363d;
+    }
+    #mobile-tabs .tab {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 13px;
+      font-weight: 600;
+      color: #6e7681;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      transition: all 0.2s;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    #mobile-tabs .tab.active {
+      color: #f0883e;
+      border-bottom-color: #f0883e;
+    }
+    /* When graph tab active on mobile */
+    body.graph-tab #graph-container { display: block; flex: 1; }
+    body.graph-tab #side-panel { display: none; }
+    /* When panel tab active on mobile */
+    body.panel-tab #graph-container { display: none; }
+    body.panel-tab #side-panel { display: flex; flex-direction: column; flex: 1; overflow-y: auto; }
+    body.panel-tab #side-panel #activated-section { flex: 0 1 auto; max-height: 250px; }
+    body.panel-tab #side-panel #response-section { max-height: none; flex: 0 1 auto; }
+    /* Larger touch targets */
+    #query-input { font-size: 16px; padding: 12px 14px; }
+    #query-btn { padding: 14px; font-size: 15px; }
+    #activated-list li { padding: 12px 10px; font-size: 14px; }
+  }
+  /* Hide mobile tabs on desktop */
+  @media (min-width: 769px) {
+    #mobile-tabs { display: none; }
+  }
+</style>
+</head>
+<body class="graph-tab">
+<div id="titlebar">
+  <h1>🐉 BDH Graph Harness</h1>
+  <div class="stats">
+    Neurons: <span id="stat-neurons">{neuron_count}</span>
+    | Synapses: <span id="stat-synapses">{synapse_count}</span>
+    | Hebbian: <span id="stat-hebbian">{hebbian_count}</span>
+    <span id="status-indicator"></span>
+  </div>
+</div>
+<div id="mobile-tabs">
+  <div class="tab active" onclick="switchTab('graph-tab')">🗺️ Graph</div>
+  <div class="tab" onclick="switchTab('panel-tab')">📋 Panel</div>
+</div>
+<div id="main">
+  <div id="graph-container"></div>
+  <div id="side-panel">
+    <div id="query-section">
+      <input type="text" id="query-input" placeholder="Enter a query..." autocomplete="off">
+      <button id="query-btn" onclick="sendQuery()">Query</button>
+    </div>
+    <div id="response-section">
+      <h3>Response</h3>
+      <div id="response-text">—</div>
+    </div>
+    <div id="activated-section">
+      <h3>Activated Notes</h3>
+      <ul id="activated-list"><div class="empty">No activations yet</div></ul>
+    </div>
+    <div id="stats-section">
+      <h3>Stats</h3>
+      <div class="stat-row"><span>Queries processed</span><span class="val" id="stat-queries">0</span></div>
+      <div class="stat-row"><span>Last query</span><span class="val" id="stat-last">—</span></div>
+    </div>
+  </div>
+</div>
+<script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+<script>
+const COLORS = {
+  inactive: '#6e7681',
+  activated: '#f0883e',
+  seed: '#58a6ff',
+  edgeWikilink: '#30363d',
+  edgeHebbian: '#58a6ff',
+  edgeHebbianPulse: '#39d353',  // green pulse for strengthened synapses
+  bg: '#0d1117',
+};
+let network = null;
+let nodesDS = null;
+let edgesDS = null;
+let hebbianMap = {};  // "a|b" -> weight
+let allNodeIds = [];
+let allEdgeIds = [];
+
+function initNetwork(graphData) {
+  allNodeIds = graphData.nodes.map(n => n.id);
+  const visNodes = graphData.nodes.map(n => ({
+    id: n.id,
+    label: n.title,
+    title: n.title + (n.tags ? '\\n[' + (Array.isArray(n.tags) ? n.tags.join(', ') : n.tags) + ']' : ''),
+    group: 'inactive',
+  }));
+
+  const edgeSet = new Set();
+  const visEdges = [];
+  graphData.edges.forEach(e => {
+    const eid = e.source + '→' + e.target;
+    if (edgeSet.has(eid)) return;
+    edgeSet.add(eid);
+    visEdges.push({
+      id: eid,
+      from: e.source,
+      to: e.target,
+      color: { color: COLORS.edgeWikilink, highlight: COLORS.edgeWikilink },
+      width: 0.5,
+    });
+  });
+
+  // Add hebbian edges
+  hebbianMap = {};
+  graphData.hebbian.forEach(h => {
+    const key = h.note_a + '|' + h.note_b;
+    hebbianMap[key] = h.weight;
+    const eid = 'hebb_' + h.note_a + '→' + h.note_b;
+    if (edgeSet.has(eid)) return;
+    edgeSet.add(eid);
+    const w = Math.min(1 + h.weight * 3, 5);
+    visEdges.push({
+      id: eid,
+      from: h.note_a,
+      to: h.note_b,
+      color: { color: COLORS.edgeHebbian, highlight: COLORS.edgeHebbian },
+      width: w,
+      dashes: false,
+    });
+  });
+
+  allEdgeIds = Array.from(edgeSet);
+
+  nodesDS = new vis.DataSet(visNodes);
+  edgesDS = new vis.DataSet(visEdges);
+
+  const container = document.getElementById('graph-container');
+  const data = { nodes: nodesDS, edges: edgesDS };
+  const options = {
+    nodes: {
+      shape: 'dot',
+      size: 8,
+      font: { color: '#c9d1d9', size: 12, face: 'system-ui' },
+      borderWidth: 1,
+      borderWidthSelected: 2,
+    },
+    edges: {
+      smooth: { type: 'continuous', roundness: 0.15 },
+      selectionWidth: 0,
+    },
+    groups: {
+      inactive: { color: { background: COLORS.inactive, border: COLORS.inactive } },
+      activated: { color: { background: COLORS.activated, border: COLORS.activated } },
+      seed: { color: { background: COLORS.seed, border: COLORS.seed } },
+    },
+    physics: {
+      solver: 'barnesHut',
+      barnesHut: { gravitationalConstant: -3000, springLength: 120, springConstant: 0.04 },
+      stabilization: { iterations: 100, updateInterval: 25 },
+    },
+    interaction: { hover: true, tooltipDelay: 150 },
+  };
+
+  if (network) network.destroy();
+  network = new vis.Network(container, data, options);
+
+  document.getElementById('stat-neurons').textContent = graphData.stats.neurons;
+  document.getElementById('stat-synapses').textContent = graphData.stats.synapses;
+  document.getElementById('stat-hebbian').textContent = graphData.stats.hebbian_synapses;
+}
+
+function animateNodeColor(nodeId, newGroup) {
+  if (!nodesDS) return;
+  nodesDS.update({ id: nodeId, group: newGroup });
+}
+
+function handleActivation(event) {
+  const activated = event.activated_notes || [];
+  const activatedIds = new Set(activated.map(n => n.id));
+  const seedId = activated.length > 0 ? activated[0].id : null;
+
+  // Dim all nodes first
+  allNodeIds.forEach(id => {
+    if (nodesDS.get(id)) {
+      nodesDS.update({ id, group: 'inactive', opacity: activatedIds.size > 0 ? 0.3 : 1.0 });
+    }
+  });
+
+  // Light up activated nodes with staggered timing for cascade effect
+  activated.forEach((note, i) => {
+    setTimeout(() => {
+      const group = note.id === seedId ? 'seed' : 'activated';
+      if (nodesDS.get(note.id)) {
+        nodesDS.update({ id: note.id, group: group, opacity: 1.0 });
+      }
+    }, i * 80);
+  });
+
+  // Highlight edges between activated nodes + pulse Hebbian synapses
+  allEdgeIds.forEach(eid => {
+    const edge = edgesDS.get(eid);
+    if (!edge) return;
+    const bothActive = activatedIds.has(edge.from) && activatedIds.has(edge.to);
+    if (bothActive) {
+      edgesDS.update({ id: eid, opacity: 1.0 });
+    } else {
+      edgesDS.update({ id: eid, opacity: 0.15 });
+    }
+  });
+
+  // Pulse Hebbian synapses that were strengthened in this query
+  const hebbianUpdates = event.hebbian_updates || [];
+  hebbianUpdates.forEach((h, idx) => {
+    const parts = h.pair.split('|');
+    if (parts.length !== 2) return;
+    const [a, b] = parts;
+    // Update hebbianMap with new weight
+    hebbianMap[h.pair] = h.weight;
+
+    // Find the Hebbian edge in vis (could be a→b or b→a)
+    const eid1 = 'hebb_' + a + '→' + b;
+    const eid2 = 'hebb_' + b + '→' + a;
+    const eid = edgesDS.get(eid1) ? eid1 : (edgesDS.get(eid2) ? eid2 : null);
+
+    // Stagger pulses so they cascade instead of all firing at once
+    const delay = idx * 120;
+    const newWidth = Math.min(1 + h.weight * 3, 5);
+
+    if (eid) {
+      // Existing edge: multi-step fade from pulse → settle
+      const pulseSteps = [
+        { w: newWidth + 5, c: COLORS.edgeHebbianPulse, t: 0 },
+        { w: newWidth + 3, c: COLORS.edgeHebbianPulse, t: 600 },
+        { w: newWidth + 1.5, c: COLORS.edgeHebbian,    t: 1400 },
+        { w: newWidth,      c: COLORS.edgeHebbian,    t: 2500 },
+      ];
+      pulseSteps.forEach(s => {
+        setTimeout(() => {
+          if (edgesDS.get(eid)) {
+            edgesDS.update({
+              id: eid,
+              color: { color: s.c, highlight: s.c },
+              width: s.w,
+              opacity: 1.0,
+            });
+          }
+        }, delay + s.t);
+      });
+    } else if (activatedIds.has(a) || activatedIds.has(b)) {
+      // New Hebbian synapse — create edge if both nodes exist
+      if (nodesDS.get(a) && nodesDS.get(b)) {
+        const newEid = 'hebb_' + a + '→' + b;
+        if (!edgesDS.get(newEid)) {
+          const pulseStepsNew = [
+            { w: newWidth + 5,   c: COLORS.edgeHebbianPulse, t: 0 },
+            { w: newWidth + 3,   c: COLORS.edgeHebbianPulse, t: 600 },
+            { w: newWidth + 1.5, c: COLORS.edgeHebbian,    t: 1400 },
+            { w: newWidth,       c: COLORS.edgeHebbian,    t: 2500 },
+          ];
+          pulseStepsNew.forEach(s => {
+            setTimeout(() => {
+              if (edgesDS.get(newEid)) {
+                edgesDS.update({
+                  id: newEid,
+                  color: { color: s.c, highlight: s.c },
+                  width: s.w,
+                  opacity: 1.0,
+                });
+              } else if (s.t === 0) {
+                // First step — create the edge
+                edgesDS.add({
+                  id: newEid,
+                  from: a,
+                  to: b,
+                  color: { color: s.c, highlight: s.c },
+                  width: s.w,
+                  dashes: false,
+                  opacity: 1.0,
+                });
+                allEdgeIds.push(newEid);
+              }
+            }, delay + s.t);
+          });
+        }
+      }
+    }
+  });
+
+  // Reset non-Hebbian edge opacity after 4s
+  setTimeout(() => {
+    allEdgeIds.forEach(eid => {
+      const edge = edgesDS.get(eid);
+      if (!edge) return;
+      // Don't reset Hebbian edges — they keep their weight-based width
+      if (!eid.startsWith('hebb_')) {
+        edgesDS.update({ id: eid, opacity: 1.0 });
+      }
+    });
+  }, 4000);
+
+  // Update side panel
+  const listEl = document.getElementById('activated-list');
+  listEl.innerHTML = '';
+  if (activated.length === 0) {
+    listEl.innerHTML = '<div class="empty">No notes activated</div>';
+  } else {
+    activated.forEach(note => {
+      const li = document.createElement('li');
+      if (note.id === seedId) li.className = 'seed';
+      li.innerHTML = '<span>' + escapeHtml(note.title) + '</span><span class="score">' + note.score.toFixed(4) + '</span>';
+      listEl.appendChild(li);
+    });
+  }
+
+  // Update stats
+  document.getElementById('stat-last').textContent = event.query || '—';
+  if (hebbianUpdates.length > 0) {
+    const hebbEl = document.getElementById('stat-hebbian');
+    if (hebbEl) {
+      // Flash the hebbian count
+      hebbEl.textContent = hebbianUpdates.length;
+      hebbEl.style.color = COLORS.edgeHebbianPulse;
+      setTimeout(() => { hebbEl.style.color = ''; }, 1000);
+    }
+  }
+
+  // Show indicator pulse
+  const ind = document.getElementById('status-indicator');
+  ind.classList.add('active');
+  setTimeout(() => ind.classList.remove('active'), 1000);
+}
+
+function escapeHtml(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+function sendQuery() {
+  const input = document.getElementById('query-input');
+  const btn = document.getElementById('query-btn');
+  const query = input.value.trim();
+  if (!query) return;
+  btn.disabled = true;
+  btn.textContent = 'Processing...';
+  fetch('/api/query', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query }),
+  }).then(r => r.json()).then(data => {
+    if (data.error) {
+      document.getElementById('response-text').textContent = 'Error: ' + data.error;
+    } else {
+      if (data.response) {
+        document.getElementById('response-text').textContent = data.response;
+      }
+      // Update activation panel from HTTP response (works even if WS is down)
+      if (data.activated_notes) {
+        handleActivation({ type: 'activation', query: query, activated_notes: data.activated_notes, hebbian_updates: data.hebbian_updates || [] });
+      }
+    }
+    btn.disabled = false;
+    btn.textContent = 'Query';
+  }).catch(err => {
+    btn.disabled = false;
+    btn.textContent = 'Query';
+    document.getElementById('response-text').textContent = 'Request failed: ' + err;
+  });
+}
+
+// WebSocket connection
+function connectWS() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const ws = new WebSocket(proto + '//' + location.host + '/ws');
+  const ind = document.getElementById('status-indicator');
+
+  ws.onopen = () => { ind.classList.add('connected'); };
+
+  ws.onmessage = (msg) => {
+    try {
+      const event = JSON.parse(msg.data);
+      if (event.type === 'graph') {
+        initNetwork(event);
+      } else if (event.type === 'activation') {
+        handleActivation(event);
+      }
+    } catch (e) { console.error('Parse error:', e); }
+  };
+
+  ws.onclose = () => {
+    ind.classList.remove('connected');
+    setTimeout(connectWS, 2000);  // auto-reconnect
+  };
+
+  ws.onerror = () => { ws.close(); };
+}
+
+// Mobile tab switching
+function switchTab(tabClass) {
+  document.body.className = tabClass;
+  document.querySelectorAll('#mobile-tabs .tab').forEach(t => t.classList.remove('active'));
+  const labels = { 'graph-tab': 0, 'panel-tab': 1 };
+  const tabs = document.querySelectorAll('#mobile-tabs .tab');
+  if (tabs[labels[tabClass]]) tabs[labels[tabClass]].classList.add('active');
+  // Force vis.js to redraw when switching back to graph
+  if (tabClass === 'graph-tab' && network) setTimeout(() => network.redraw(), 50);
+}
+
+// Enter key sends query
+document.getElementById('query-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') sendQuery();
+});
+
+// Init
+connectWS();
+</script>
+</body>
+</html>

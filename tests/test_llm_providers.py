@@ -6,6 +6,8 @@ helper functions that abstract provider differences (Ollama vs OpenRouter).
 import json
 import pytest
 import harness
+from bdh_graph_harness import config as bdh_config
+from bdh_graph_harness.llm import providers as bdh_providers
 
 
 @pytest.fixture
@@ -27,7 +29,7 @@ def mock_nodes():
 
 def test_build_payload_ollama_format(mock_active_notes, mock_nodes, monkeypatch):
     """Ollama payload uses 'options' key for params."""
-    monkeypatch.setattr(harness, 'CONFIG', {
+    monkeypatch.setattr(bdh_config, 'CONFIG', {
         'llm_provider': 'ollama',
         'llm_model': 'gemma4:12b-mlx',
         'llm_temperature': 0.3,
@@ -46,7 +48,7 @@ def test_build_payload_ollama_format(mock_active_notes, mock_nodes, monkeypatch)
 
 def test_build_payload_openrouter_format(mock_active_notes, mock_nodes, monkeypatch):
     """OpenRouter payload uses 'temperature' and 'max_tokens' at top level."""
-    monkeypatch.setattr(harness, 'CONFIG', {
+    monkeypatch.setattr(bdh_providers, 'CONFIG', {
         'llm_provider': 'openrouter',
         'llm_model': 'openrouter/free',
         'llm_temperature': 0.3,
@@ -67,7 +69,7 @@ def test_build_payload_openrouter_format(mock_active_notes, mock_nodes, monkeypa
 
 def test_build_payload_messages_always_present(mock_active_notes, mock_nodes, monkeypatch):
     """Both providers get messages array with system + user roles."""
-    monkeypatch.setattr(harness, 'CONFIG', {
+    monkeypatch.setattr(bdh_config, 'CONFIG', {
         'llm_provider': 'ollama',
         'llm_model': 'test',
         'llm_temperature': 0.3,
@@ -149,15 +151,15 @@ def test_parse_stream_token_openrouter_no_choices():
 
 def test_llm_respond_strips_pad_tokens(mock_active_notes, mock_nodes, monkeypatch):
     """llm_respond strips <pad> tokens from response."""
-    monkeypatch.setattr(harness, 'CONFIG', {
+    monkeypatch.setattr(bdh_config, 'CONFIG', {
         'llm_provider': 'ollama',
         'llm_model': 'test',
         'llm_temperature': 0.3,
         'llm_max_ctx': 4096,
         'llm_timeout': 10,
     })
-    monkeypatch.setattr(harness, 'OLLAMA_LLM_URL', 'http://fake')
-    monkeypatch.setattr(harness, 'retry_with_backoff', lambda fn: '<pad><pad>Hello world<pad>')
+    monkeypatch.setattr(bdh_providers, 'OLLAMA_LLM_URL', 'http://fake')
+    monkeypatch.setattr(bdh_providers, 'retry_with_backoff', lambda fn: '<pad><pad>Hello world<pad>')
     result = harness.llm_respond('test', mock_active_notes, mock_nodes)
     assert '<pad>' not in result
     assert result == 'Hello world'
@@ -165,15 +167,15 @@ def test_llm_respond_strips_pad_tokens(mock_active_notes, mock_nodes, monkeypatc
 
 def test_llm_respond_empty_after_strip(mock_active_notes, mock_nodes, monkeypatch):
     """llm_respond returns fallback when only <pad> tokens."""
-    monkeypatch.setattr(harness, 'CONFIG', {
+    monkeypatch.setattr(bdh_config, 'CONFIG', {
         'llm_provider': 'ollama',
         'llm_model': 'test',
         'llm_temperature': 0.3,
         'llm_max_ctx': 4096,
         'llm_timeout': 10,
     })
-    monkeypatch.setattr(harness, 'OLLAMA_LLM_URL', 'http://fake')
-    monkeypatch.setattr(harness, 'retry_with_backoff', lambda fn: '<pad><pad><pad>')
+    monkeypatch.setattr(bdh_providers, 'OLLAMA_LLM_URL', 'http://fake')
+    monkeypatch.setattr(bdh_providers, 'retry_with_backoff', lambda fn: '<pad><pad><pad>')
     result = harness.llm_respond('test', mock_active_notes, mock_nodes)
     assert result == '[no response from LLM]'
 

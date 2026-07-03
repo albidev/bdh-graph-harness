@@ -4,6 +4,7 @@ import json
 import tempfile
 import pytest
 import harness
+import bdh_graph_harness.neurogenesis.creator as bdh_creator
 
 
 @pytest.fixture
@@ -195,7 +196,7 @@ def test_extract_new_concepts_mocked(monkeypatch):
         {'title': 'Neural Plasticity', 'definition': 'Brain adaptation.'},
     ]
 
-    monkeypatch.setattr(harness, 'retry_with_backoff', lambda fn: mock_concepts)
+    monkeypatch.setattr(bdh_creator, 'retry_with_backoff', lambda fn: mock_concepts)
 
     nodes = {'a': {'title': 'Existing'}}
     result = harness.extract_new_concepts('Some response', 'query', {'a': 0.5}, nodes)
@@ -209,7 +210,7 @@ def test_extract_new_concepts_empty(monkeypatch):
     def raise_error(fn):
         raise Exception('LLM unavailable')
 
-    monkeypatch.setattr(harness, 'retry_with_backoff', raise_error)
+    monkeypatch.setattr(bdh_creator, 'retry_with_backoff', raise_error)
 
     nodes = {'a': {'title': 'Existing'}}
     result = harness.extract_new_concepts('response', 'query', {}, nodes)
@@ -236,9 +237,9 @@ def test_extract_new_concepts_json_with_fences(monkeypatch):
     import urllib.request as urlreq
     monkeypatch.setattr(urlreq, 'urlopen', lambda req, timeout=120: MockResp(mock_result))
     # Ensure OLLAMA_LLM_URL is set so the request URL is valid
-    monkeypatch.setattr(harness, 'OLLAMA_LLM_URL', 'http://localhost:11434/api/chat')
+    monkeypatch.setattr(bdh_creator, 'OLLAMA_LLM_URL', 'http://localhost:11434/api/chat')
     # Skip retry delays
-    monkeypatch.setattr(harness, 'retry_with_backoff', lambda fn: fn())
+    monkeypatch.setattr(bdh_creator, 'retry_with_backoff', lambda fn: fn())
 
     nodes = {'a': {'title': 'Existing'}}
     result = harness.extract_new_concepts('response', 'query', {}, nodes)

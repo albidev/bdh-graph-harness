@@ -25,4 +25,4 @@ bdh_*.json
 
 # Claude/Hermes
 .claude/
-CLAUDE.md
+CLAUDE.mdharness_original.py
