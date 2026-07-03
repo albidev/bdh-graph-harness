@@ -145,6 +145,16 @@ The web UI at `:8643` shows:
 - **Real-time activation cascade** — nodes light up in sequence, edges pulse green (`#39d353`) when Hebbian weights strengthen during a query
 - **Dark theme** with staggered animation (120ms cascade, 4-step fade over 2.5s)
 
+## Hermes Agent integration
+
+The harness ships with a [Hermes Agent](https://hermes-agent.nousresearch.com) skill that lets you query the graph from chat. The skill definition is in [`docs/hermes-skill.md`](docs/hermes-skill.md) — copy it to `~/.hermes/skills/research/bdh-graph-harness/SKILL.md` to activate it.
+
+Once installed, your Hermes agent can:
+- Query the graph via natural language ("bdh query: how does Hebbian learning work?")
+- Show graph stats and Hebbian synaptic state
+- Start/stop the API server
+- Present answers with source citations
+
 ## License
 
 MIT
