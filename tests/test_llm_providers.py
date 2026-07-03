@@ -158,7 +158,7 @@ def test_llm_respond_strips_pad_tokens(mock_active_notes, mock_nodes, monkeypatc
         'llm_max_ctx': 4096,
         'llm_timeout': 10,
     })
-    monkeypatch.setattr(bdh_providers, 'OLLAMA_LLM_URL', 'http://fake')
+    monkeypatch.setattr(bdh_config, 'OLLAMA_LLM_URL', 'http://fake')
     monkeypatch.setattr(bdh_providers, 'retry_with_backoff', lambda fn: '<pad><pad>Hello world<pad>')
     result = harness.llm_respond('test', mock_active_notes, mock_nodes)
     assert '<pad>' not in result
@@ -174,7 +174,7 @@ def test_llm_respond_empty_after_strip(mock_active_notes, mock_nodes, monkeypatc
         'llm_max_ctx': 4096,
         'llm_timeout': 10,
     })
-    monkeypatch.setattr(bdh_providers, 'OLLAMA_LLM_URL', 'http://fake')
+    monkeypatch.setattr(bdh_config, 'OLLAMA_LLM_URL', 'http://fake')
     monkeypatch.setattr(bdh_providers, 'retry_with_backoff', lambda fn: '<pad><pad><pad>')
     result = harness.llm_respond('test', mock_active_notes, mock_nodes)
     assert result == '[no response from LLM]'

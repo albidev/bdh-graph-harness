@@ -1,7 +1,7 @@
 # BDH Graph Harness Configuration
 
 # Vault
-vault_path: ./vault  # path to your Obsidian vault
+vault_path: /Users/albi/Documents/Hermes
 
 # Ollama
 ollama_url: http://127.0.0.1:11434

@@ -5,7 +5,8 @@ import re
 import sys
 import json
 
-from bdh_graph_harness.config import CONFIG, OLLAMA_LLM_URL, retry_with_backoff
+from bdh_graph_harness.config import CONFIG, retry_with_backoff
+import bdh_graph_harness.config as _config
 from bdh_graph_harness.neurogenesis.dedupe import is_duplicate
 
 
@@ -56,7 +57,7 @@ def extract_new_concepts(llm_response, query, active_notes, nodes):
         headers['X-Title'] = 'BDH Graph Harness'
 
     def _extract_call():
-        req = urllib.request.Request(OLLAMA_LLM_URL, data=data, headers=headers)
+        req = urllib.request.Request(_config.OLLAMA_LLM_URL, data=data, headers=headers)
         with urllib.request.urlopen(req, timeout=120) as resp:
             result = json.loads(resp.read())
             if provider == 'openrouter':

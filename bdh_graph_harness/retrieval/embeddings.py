@@ -7,7 +7,8 @@ Ollama-based text embeddings and cosine similarity.
 import sys
 import json
 
-from bdh_graph_harness.config import CONFIG, OLLAMA_EMBED_URL, logger, retry_with_backoff
+from bdh_graph_harness.config import CONFIG, logger, retry_with_backoff
+import bdh_graph_harness.config as _config
 
 
 def get_embeddings(texts, batch_size=32):
@@ -25,7 +26,7 @@ def get_embeddings(texts, batch_size=32):
                 "model": CONFIG['embedding_model'],
                 "input": batch,
             }).encode()
-            req = urllib.request.Request(OLLAMA_EMBED_URL, data=data,
+            req = urllib.request.Request(_config.OLLAMA_EMBED_URL, data=data,
                                          headers={'Content-Type': 'application/json'})
             with urllib.request.urlopen(req, timeout=120) as resp:
                 result = json.loads(resp.read())

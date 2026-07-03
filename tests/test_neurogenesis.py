@@ -4,6 +4,7 @@ import json
 import tempfile
 import pytest
 import harness
+import bdh_graph_harness.config as bdh_config
 import bdh_graph_harness.neurogenesis.creator as bdh_creator
 
 
@@ -237,7 +238,7 @@ def test_extract_new_concepts_json_with_fences(monkeypatch):
     import urllib.request as urlreq
     monkeypatch.setattr(urlreq, 'urlopen', lambda req, timeout=120: MockResp(mock_result))
     # Ensure OLLAMA_LLM_URL is set so the request URL is valid
-    monkeypatch.setattr(bdh_creator, 'OLLAMA_LLM_URL', 'http://localhost:11434/api/chat')
+    monkeypatch.setattr(bdh_config, 'OLLAMA_LLM_URL', 'http://localhost:11434/api/chat')
     # Skip retry delays
     monkeypatch.setattr(bdh_creator, 'retry_with_backoff', lambda fn: fn())
 

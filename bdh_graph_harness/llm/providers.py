@@ -7,7 +7,8 @@ delegate to ollama.py or openrouter.py based on CONFIG['llm_provider'].
 import json
 import re
 
-from bdh_graph_harness.config import CONFIG, OLLAMA_LLM_URL, retry_with_backoff
+from bdh_graph_harness.config import CONFIG, retry_with_backoff
+import bdh_graph_harness.config as _config
 from bdh_graph_harness.llm.prompt import build_messages, format_context
 from bdh_graph_harness.llm.ollama import build_ollama_payload, parse_ollama_response
 from bdh_graph_harness.llm.openrouter import (
@@ -58,7 +59,7 @@ def llm_respond(query, active_notes, nodes):
     provider = CONFIG.get('llm_provider', 'ollama')
 
     def _llm_call():
-        req = urllib.request.Request(OLLAMA_LLM_URL, data=data, headers=headers)
+        req = urllib.request.Request(_config.OLLAMA_LLM_URL, data=data, headers=headers)
         with urllib.request.urlopen(req, timeout=CONFIG.get('llm_timeout', 300)) as resp:
             result = json.loads(resp.read())
             return _parse_llm_response(result, provider)
@@ -86,7 +87,7 @@ def llm_stream(query, active_notes, nodes):
     data, headers = _build_llm_payload(query, active_notes, nodes, stream=True)
     provider = CONFIG.get('llm_provider', 'ollama')
 
-    req = urllib.request.Request(OLLAMA_LLM_URL, data=data, headers=headers)
+    req = urllib.request.Request(_config.OLLAMA_LLM_URL, data=data, headers=headers)
 
     try:
         with urllib.request.urlopen(req, timeout=CONFIG.get('llm_timeout', 300)) as resp:
