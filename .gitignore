@@ -19,6 +19,7 @@ bdh_*.json
 # Env
 .env
 *.env
+*.local.yaml
 
 # OS
 .DS_Store

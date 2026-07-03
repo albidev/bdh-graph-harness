@@ -11,4 +11,7 @@ if [ -z "$OPENROUTER_API_KEY" ]; then
   done
 fi
 cd "$(dirname "$0")"
-exec python3 -m bdh_graph_harness --config bdh-config.yaml --serve
+# Use local config if it exists (not committed), otherwise the public one
+CONFIG="bdh-config.yaml"
+[ -f "bdh-config.local.yaml" ] && CONFIG="bdh-config.local.yaml"
+exec python3 -m bdh_graph_harness --config "$CONFIG" --serve
