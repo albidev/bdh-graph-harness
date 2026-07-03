@@ -25,4 +25,7 @@ bdh_*.json
 
 # Claude/Hermes
 .claude/
-CLAUDE.mdharness_original.py
+CLAUDE.md
+
+# Legacy
+harness_original.py
