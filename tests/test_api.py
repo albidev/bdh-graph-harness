@@ -5,6 +5,11 @@ import tempfile
 import pytest
 import chromadb
 import harness
+import bdh_graph_harness.api.routes as bdh_routes
+import bdh_graph_harness.retrieval.attention as bdh_attention_mod
+import bdh_graph_harness.llm.providers as bdh_providers
+import bdh_graph_harness.neurogenesis.creator as bdh_creator
+import bdh_graph_harness.memory.state_store as bdh_state_store
 
 pytest_plugins = ['pytest_asyncio']
 
@@ -49,11 +54,11 @@ def mock_app_setup(monkeypatch):
     config['vault_path'] = d
     config['neurogenesis_enabled'] = False  # disable to avoid file creation in query tests
 
-    # Monkeypatch LLM and embedding calls
-    monkeypatch.setattr(harness, 'get_embeddings', lambda texts: [[1.0, 0.0, 0.0]])
-    monkeypatch.setattr(harness, 'llm_respond', lambda q, a, n: 'Mock LLM response')
-    monkeypatch.setattr(harness, 'extract_new_concepts', lambda r, q, a, n: [])
-    monkeypatch.setattr(harness, 'save_state', lambda vr, s: None)
+    # Monkeypatch LLM and embedding calls — must patch the modules that routes.py imports from
+    monkeypatch.setattr(bdh_attention_mod, 'get_embeddings', lambda texts: [[1.0, 0.0, 0.0]])
+    monkeypatch.setattr(bdh_routes, 'llm_respond', lambda q, a, n: 'Mock LLM response')
+    monkeypatch.setattr(bdh_routes, 'extract_new_concepts', lambda r, q, a, n: [])
+    monkeypatch.setattr(bdh_routes, 'save_state', lambda vr, s: None)
 
     return nodes, edges, collection, state, config, d
 

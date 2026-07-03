@@ -4,6 +4,8 @@ import tempfile
 import pytest
 import chromadb
 import harness
+from bdh_graph_harness import config as bdh_config
+import bdh_graph_harness.retrieval.attention as bdh_attention_mod
 
 
 # ---------------------------------------------------------------------------
@@ -109,9 +111,9 @@ def test_attention_seed_selection(monkeypatch, mock_graph, mock_collection):
     """Verify seed selection picks highest similarity nodes."""
     nodes, edges = mock_graph
     # Query embedding similar to apple/banana/cherry
-    monkeypatch.setattr(harness, 'get_embeddings', lambda texts: [[1.0, 0.0, 0.0, 0.0]])
+    monkeypatch.setattr(bdh_attention_mod, 'get_embeddings', lambda texts: [[1.0, 0.0, 0.0, 0.0]])
 
-    active = harness.attention('fruit', nodes, edges, mock_collection, k=3, max_hop=0)
+    active = bdh_attention_mod.attention('fruit', nodes, edges, mock_collection, k=3, max_hop=0)
     # With max_hop=0, only seeds — apple/banana/cherry should be top
     assert 'apple' in active
     assert active['apple'] > 0.25  # above threshold
@@ -120,12 +122,12 @@ def test_attention_seed_selection(monkeypatch, mock_graph, mock_collection):
 def test_attention_khop_expansion(monkeypatch, mock_graph, mock_collection):
     """Verify k-hop expansion brings in neighbors."""
     nodes, edges = mock_graph
-    monkeypatch.setattr(harness, 'get_embeddings', lambda texts: [[1.0, 0.0, 0.0, 0.0]])
+    monkeypatch.setattr(bdh_attention_mod, 'get_embeddings', lambda texts: [[1.0, 0.0, 0.0, 0.0]])
 
     # With max_hop=0, only seeds
-    active_seeds = harness.attention('fruit', nodes, edges, mock_collection, k=3, max_hop=0)
+    active_seeds = bdh_attention_mod.attention('fruit', nodes, edges, mock_collection, k=3, max_hop=0)
     # With max_hop=1, banana→cherry expansion should include cherry if not already
-    active_expanded = harness.attention('fruit', nodes, edges, mock_collection, k=3, max_hop=2)
+    active_expanded = bdh_attention_mod.attention('fruit', nodes, edges, mock_collection, k=3, max_hop=2)
     # Expansion should include at least as many nodes
     assert len(active_expanded) >= len(active_seeds)
 
@@ -133,9 +135,9 @@ def test_attention_khop_expansion(monkeypatch, mock_graph, mock_collection):
 def test_attention_max_hop_limit(monkeypatch, mock_graph, mock_collection):
     """Verify max_hop=0 prevents any traversal."""
     nodes, edges = mock_graph
-    monkeypatch.setattr(harness, 'get_embeddings', lambda texts: [[1.0, 0.0, 0.0, 0.0]])
+    monkeypatch.setattr(bdh_attention_mod, 'get_embeddings', lambda texts: [[1.0, 0.0, 0.0, 0.0]])
 
-    active = harness.attention('fruit', nodes, edges, mock_collection, k=2, max_hop=0)
+    active = bdh_attention_mod.attention('fruit', nodes, edges, mock_collection, k=2, max_hop=0)
     # All active notes should be seed-level (high similarity to query)
     for nid, score in active.items():
         # Seeds have direct similarity; traversed nodes have decayed scores
@@ -145,50 +147,50 @@ def test_attention_max_hop_limit(monkeypatch, mock_graph, mock_collection):
 def test_attention_neighbor_cap(monkeypatch, mock_graph, mock_collection):
     """Verify max_neighbors_per_hop caps traversal breadth."""
     nodes, edges = mock_graph
-    monkeypatch.setattr(harness, 'get_embeddings', lambda texts: [[0.5, 0.5, 0.5, 0.0]])
+    monkeypatch.setattr(bdh_attention_mod, 'get_embeddings', lambda texts: [[0.5, 0.5, 0.5, 0.0]])
 
     # index has 5 neighbors; with cap at 3, only 3 should be traversed
-    original_cap = harness.CONFIG['max_neighbors_per_hop']
-    harness.CONFIG['max_neighbors_per_hop'] = 2
+    original_cap = bdh_config.CONFIG['max_neighbors_per_hop']
+    bdh_config.CONFIG['max_neighbors_per_hop'] = 2
     try:
-        active = harness.attention('everything', nodes, edges, mock_collection, k=3, max_hop=1)
+        active = bdh_attention_mod.attention('everything', nodes, edges, mock_collection, k=3, max_hop=1)
         # Should not explode — cap limits expansion
         assert len(active) <= 10  # reasonable upper bound
     finally:
-        harness.CONFIG['max_neighbors_per_hop'] = original_cap
+        bdh_config.CONFIG['max_neighbors_per_hop'] = original_cap
 
 
 def test_attention_hub_dampening(monkeypatch, mock_graph, mock_collection):
     """Verify hub dampening reduces scores for high-degree nodes."""
     nodes, edges = mock_graph
     # Make 'index' a hub with degree > threshold
-    harness.CONFIG['hub_degree_threshold'] = 3
-    monkeypatch.setattr(harness, 'get_embeddings', lambda texts: [[0.5, 0.5, 0.5, 0.0]])
+    bdh_config.CONFIG['hub_degree_threshold'] = 3
+    monkeypatch.setattr(bdh_attention_mod, 'get_embeddings', lambda texts: [[0.5, 0.5, 0.5, 0.0]])
 
-    active = harness.attention('everything', nodes, edges, mock_collection, k=6, max_hop=0)
+    active = bdh_attention_mod.attention('everything', nodes, edges, mock_collection, k=6, max_hop=0)
     # index should be dampened since it has 5 edges (> threshold 3)
     if 'index' in active:
         # Dampened score should be less than raw similarity (1.0 - 0.0 = 1.0)
         # dampen = 1/(1+0.15*(5-3)) = 1/1.3 ≈ 0.769
         assert active['index'] < 1.0
-    harness.CONFIG['hub_degree_threshold'] = 15  # reset
+    bdh_config.CONFIG['hub_degree_threshold'] = 15  # reset
 
 
 def test_attention_empty_embedding(monkeypatch, mock_graph, mock_collection):
     """Verify empty embedding returns empty dict."""
     nodes, edges = mock_graph
-    monkeypatch.setattr(harness, 'get_embeddings', lambda texts: [[]])
+    monkeypatch.setattr(bdh_attention_mod, 'get_embeddings', lambda texts: [[]])
 
-    active = harness.attention('test', nodes, edges, mock_collection)
+    active = bdh_attention_mod.attention('test', nodes, edges, mock_collection)
     assert active == {}
 
 
 def test_attention_returns_scores(monkeypatch, mock_graph, mock_collection):
     """Verify returned dict has note_id→score mapping."""
     nodes, edges = mock_graph
-    monkeypatch.setattr(harness, 'get_embeddings', lambda texts: [[1.0, 0.0, 0.0, 0.0]])
+    monkeypatch.setattr(bdh_attention_mod, 'get_embeddings', lambda texts: [[1.0, 0.0, 0.0, 0.0]])
 
-    active = harness.attention('fruit', nodes, edges, mock_collection, k=3, max_hop=1)
+    active = bdh_attention_mod.attention('fruit', nodes, edges, mock_collection, k=3, max_hop=1)
     assert isinstance(active, dict)
     for nid, score in active.items():
         assert isinstance(score, float)
