@@ -19,6 +19,7 @@ The codebase is a Python package (`bdh_graph_harness/`) with 8 subpackages:
 - `llm/` — provider abstraction (Ollama, OpenRouter), prompt building
 - `neurogenesis/` — concept extraction and note creation in the vault
 - `api/` — aiohttp REST + WebSocket server
+- `mcp_server.py` — MCP (Model Context Protocol) server for Claude Desktop, Cursor, etc.
 - `visualization/` — vis.js real-time graph UI
 - `config.py` — YAML config loading with env var expansion
 

@@ -171,6 +171,12 @@ def main():
     parser.add_argument('--interactive', action='store_true', help='Interactive REPL mode')
     parser.add_argument('--no-cache', action='store_true',
                         help='Force full graph rebuild (skip cache)')
+    parser.add_argument('--mcp', action='store_true',
+                        help='Start the MCP (Model Context Protocol) server')
+    parser.add_argument('--mcp-transport', choices=['stdio', 'http'], default='stdio',
+                        help='MCP transport mode (default: stdio)')
+    parser.add_argument('--mcp-port', type=int, default=8644,
+                        help='MCP HTTP server port (default: 8644)')
     args = parser.parse_args()
 
     # Load configuration
@@ -204,6 +210,12 @@ def main():
     state = load_state(vault_root)
 
     # --- Mode dispatch ---
+
+    if args.mcp:
+        from bdh_graph_harness.mcp_server import run_mcp_server
+        print(f"🐉 BDH Graph Harness — MCP Server ({args.mcp_transport})")
+        run_mcp_server(transport=args.mcp_transport, port=args.mcp_port, config_path=args.config)
+        return
 
     if args.serve:
         start_api_server(config, nodes, edges, collection, state)
