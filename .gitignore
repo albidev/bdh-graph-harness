@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Data & embeddings
+*.npy
+*.npz
+embeddings_cache/
+bdh_*.json
+!bdh-config.yaml
+
+# Logs
+*.log
+*.error.log
+
+# Env
+.env
+*.env
+
+# OS
+.DS_Store
+
+# Claude/Hermes
+.claude/
+CLAUDE.md
