@@ -386,9 +386,12 @@ function initNetwork(graphData) {
   graphData.nodes.forEach(n => {
     const tags = n.tags || '';
     if (Array.isArray(tags)) {
-      tags.forEach(t => tagSet.add(t));
+      tags.forEach(t => tagSet.add(t.replace(/^[\[\]]+|[\[\]]+$/g, '').trim()));
     } else if (typeof tags === 'string' && tags.trim()) {
-      tags.split(',').forEach(t => tagSet.add(t.trim()));
+      tags.replace(/^[\[\]]+|[\[\]]+$/g, '').split(',').forEach(t => {
+        const clean = t.trim();
+        if (clean) tagSet.add(clean);
+      });
     }
   });
   tagColorMap = {};
@@ -452,7 +455,7 @@ function initNetwork(graphData) {
     return {
       id: n.id,
       label: n.title,
-      title: n.title + (n.tags ? '\\n[' + (Array.isArray(n.tags) ? n.tags.join(', ') : n.tags) + ']' : ''),
+      title: n.title + (n.tags ? '\\n[' + (Array.isArray(n.tags) ? n.tags.map(function(t){return t.replace(/^[\[\]]+|[\[\]]+$/g,'').trim()}).join(', ') : (n.tags||'').replace(/^[\[\]]+|[\[\]]+$/g,'').trim()) + ']' : ''),
       group: nodeGroup,
       color: nodeColor ? { background: nodeColor, border: nodeColor, highlight: { background: nodeColor, border: nodeColor } } : undefined,
     };
@@ -869,7 +872,7 @@ function toggleOrphans(show) {
           nodesDS.add({
             id: n.id,
             label: n.title,
-            title: n.title + (n.tags ? '\\n[' + (Array.isArray(n.tags) ? n.tags.join(', ') : n.tags) + ']' : ''),
+            title: n.title + (n.tags ? '\\n[' + (Array.isArray(n.tags) ? n.tags.map(function(t){return t.replace(/^[\[\]]+|[\[\]]+$/g,'').trim()}).join(', ') : (n.tags||'').replace(/^[\[\]]+|[\[\]]+$/g,'').trim()) + ']' : ''),
             group: 'inactive',
             opacity: 0.3,
           });
@@ -926,10 +929,10 @@ function toggleTagColors(enabled) {
     if (!n) return;
     let color = undefined;
     if (enabled && tagColorMap) {
-      const tags = n.tags || '';
+      const tags = (n.tags || '').replace(/^[\[\]]+|[\[\]]+$/g, '');
       let primaryTag = '';
-      if (Array.isArray(tags) && tags.length > 0) {
-        primaryTag = tags[0];
+      if (Array.isArray(n.tags) && n.tags.length > 0) {
+        primaryTag = n.tags[0].replace(/^[\[\]]+|[\[\]]+$/g, '').trim();
       } else if (typeof tags === 'string' && tags.trim()) {
         primaryTag = tags.split(',')[0].trim();
       }
