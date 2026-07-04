@@ -23,8 +23,12 @@ from bdh_graph_harness.graph.builder import _resolve_target
 def compute_adaptive_threshold(scores, floor=0.15):
     """Compute a dynamic threshold from score distribution.
 
-    Uses max(percentile_75, mean + 1*std, floor) to adaptively
+    Uses max(percentile_75, median + 0.5*std, floor) to adaptively
     select only genuinely relevant notes per query.
+
+    The 0.5*std multiplier (instead of 1*std) prevents clustered
+    scores from pushing the threshold too high and filtering out
+    relevant notes that are close to the median.
 
     Args:
         scores: list of float scores from attention
@@ -42,13 +46,13 @@ def compute_adaptive_threshold(scores, floor=0.15):
     q75_idx = int(n * 0.75)
     q75 = sorted_scores[min(q75_idx, n - 1)]
 
-    # Mean + 1 std
-    mean = statistics.mean(scores)
+    # Median + 0.5 std — less aggressive than mean + 1 std
+    median = statistics.median(scores)
     stdev = statistics.stdev(scores) if len(scores) > 1 else 0.0
-    mean_plus_std = mean + stdev
+    median_half_std = median + 0.5 * stdev
 
-    threshold = max(q75, mean_plus_std, floor)
-    logger.info(f"Adaptive threshold: Q75={q75:.3f}, mean+std={mean_plus_std:.3f}, floor={floor} → {threshold:.3f}")
+    threshold = max(q75, median_half_std, floor)
+    logger.info(f"Adaptive threshold: Q75={q75:.3f}, median+0.5std={median_half_std:.3f}, floor={floor} → {threshold:.3f}")
     return threshold
 
 

@@ -45,7 +45,7 @@ CONFIG = {
     'max_hop': 2,
     'active_threshold': 0.25,
     'hub_dampening': True,
-    'hub_degree_threshold': 15,
+    'hub_degree_threshold': 25,      # dampen only very high-degree hubs (e.g. wiki/index)
     'max_neighbors_per_hop': 10,
     'alpha': 0.7,
     'beta': 0.3,
