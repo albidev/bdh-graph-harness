@@ -3,13 +3,13 @@ BDH Graph Harness — Graph builder module.
 
 Builds the note graph from an Obsidian vault with caching support.
 """
-
 import os
 import json
+import fnmatch
 from collections import defaultdict
 from datetime import datetime
 
-from bdh_graph_harness.config import logger
+from bdh_graph_harness.config import CONFIG, logger
 from bdh_graph_harness.graph.parser import (
     extract_note_id,
     parse_frontmatter,
@@ -22,6 +22,22 @@ from bdh_graph_harness.graph.parser import (
 # ---------------------------------------------------------------------------
 
 GRAPH_CACHE_FILE = ".bdh-graph-cache.json"
+
+
+# ---------------------------------------------------------------------------
+# Ignore filter
+# ---------------------------------------------------------------------------
+
+def _is_ignored(note_id: str) -> bool:
+    """Check if a note_id should be excluded from the graph.
+
+    Matches against CONFIG['graph_ignore'] patterns (fnmatch-style).
+    """
+    ignore_list = CONFIG.get('graph_ignore', [])
+    for pattern in ignore_list:
+        if fnmatch.fnmatch(note_id, pattern):
+            return True
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -59,6 +75,7 @@ def _full_graph_build(vault_root):
     """Full graph build by walking the entire vault."""
     nodes = {}  # note_id -> {text, title, tags, path, mtime}
     edges = defaultdict(list)  # note_id -> [(target_id, ...), ...]
+    ignored = set()
 
     for root, dirs, files in os.walk(vault_root):
         # Skip hidden dirs, .obsidian, raw/
@@ -68,6 +85,11 @@ def _full_graph_build(vault_root):
                 continue
             filepath = os.path.join(root, f)
             note_id = extract_note_id(filepath, vault_root)
+
+            # Skip ignored notes
+            if _is_ignored(note_id):
+                ignored.add(note_id)
+                continue
 
             mtime = os.path.getmtime(filepath)
             with open(filepath, 'r', encoding='utf-8') as fh:
@@ -92,6 +114,13 @@ def _full_graph_build(vault_root):
                     'display': display,
                 })
 
+    # Filter edges pointing to ignored nodes
+    if ignored:
+        for src in list(edges.keys()):
+            edges[src] = [l for l in edges[src]
+                         if _resolve_target(l['target'], nodes) is not None]
+        logger.info(f"Graph ignore: excluded {len(ignored)} nodes")
+
     return nodes, dict(edges)
 
 
@@ -115,6 +144,9 @@ def _incremental_graph_update(vault_root, cached, cache_path):
                 continue
             filepath = os.path.join(root, f)
             note_id = extract_note_id(filepath, vault_root)
+            # Skip ignored notes
+            if _is_ignored(note_id):
+                continue
             mtime = os.path.getmtime(filepath)
             current_files[note_id] = (filepath, mtime)
 
@@ -151,7 +183,7 @@ def _incremental_graph_update(vault_root, cached, cache_path):
     nodes = dict(cached_nodes)
     edges = dict(cached_edges)
 
-    # Remove deleted notes
+    # Remove deleted notes (also remove notes that are now ignored)
     for nid in deleted_notes:
         nodes.pop(nid, None)
         edges.pop(nid, None)
