@@ -371,6 +371,7 @@
       <h3>Stats</h3>
       <div class="stat-row"><span>Queries processed</span><span class="val" id="stat-queries">0</span></div>
       <div class="stat-row"><span>Last query</span><span class="val" id="stat-last">—</span></div>
+      <div class="stat-row"><span>New concepts</span><span class="val" id="stat-concepts">0</span></div>
     </div>
   </div>
 </div>
@@ -381,10 +382,10 @@ const COLORS = {
   activated: '#f0883e',
   seed: '#58a6ff',
   edgeWikilink: '#484f58',
-  edgeHebbianLow: '#1a4a2e',
-  edgeHebbianMid: '#238636',
-  edgeHebbianHigh: '#39d353',
-  edgeHebbianPulse: '#39d353',
+  edgeHebbianLow: '#3b2066',
+  edgeHebbianMid: '#8957e5',
+  edgeHebbianHigh: '#d2a8ff',
+  edgeHebbianPulse: '#d2a8ff',
   edgeNeurogenesis: '#f0883e',
   bg: '#0d1117',
 };
@@ -424,6 +425,7 @@ let degreeMap = {};      // node_id -> degree (computed from edges)
 let neighborMap = {};    // node_id -> [connected node titles]
 let tooltipEl = null;    // custom HTML tooltip element
 let edgeInfoMap = {};    // edge_id -> {source_title, target_title, type, weight?, frequency?}
+let totalConcepts = 0;   // cumulative neurogenesis counter
 
 // Create the tooltip element (once)
 function ensureTooltip() {
@@ -908,6 +910,9 @@ function handleActivation(event) {
         opacity: 1.0,
       });
       allNodeIds.push(nc.id);
+      totalConcepts++;
+      const cEl = document.getElementById('stat-concepts');
+      if (cEl) { cEl.textContent = totalConcepts; cEl.style.color = '#f0883e'; setTimeout(() => { cEl.style.color = ''; }, 1000); }
       // Add edges to source notes (live wikilinks)
       const sources = nc.source_notes || [];
       sources.forEach(srcTitle => {
