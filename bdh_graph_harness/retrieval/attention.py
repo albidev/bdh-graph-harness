@@ -107,25 +107,22 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
     hybrid_enabled = CONFIG.get('hybrid_search', False) and bm25_index is not None
 
     if hybrid_enabled:
-        # Get BM25 scores via hybrid_score for the same candidate set
         candidate_ids = list(raw_vector_scores.keys())
         scores = {}
         for nid in candidate_ids:
             combined = hybrid_score(nid, raw_vector_scores, bm25_index, query)
-            if combined > CONFIG['active_threshold']:
-                # Hub dampening
-                if CONFIG['hub_dampening'] and degree.get(nid, 0) > CONFIG['hub_degree_threshold']:
-                    dampen = 1.0 / (1.0 + 0.15 * (degree[nid] - CONFIG['hub_degree_threshold']))
-                    combined *= dampen
-                scores[nid] = combined
+            # Hub dampening
+            if CONFIG['hub_dampening'] and degree.get(nid, 0) > CONFIG['hub_degree_threshold']:
+                dampen = 1.0 / (1.0 + 0.15 * (degree[nid] - CONFIG['hub_degree_threshold']))
+                combined *= dampen
+            scores[nid] = combined
     else:
         scores = {}
         for note_id, sim in raw_vector_scores.items():
-            if sim > CONFIG['active_threshold']:
-                if CONFIG['hub_dampening'] and degree.get(note_id, 0) > CONFIG['hub_degree_threshold']:
-                    dampen = 1.0 / (1.0 + 0.15 * (degree[note_id] - CONFIG['hub_degree_threshold']))
-                    sim *= dampen
-                scores[note_id] = sim
+            if CONFIG['hub_dampening'] and degree.get(note_id, 0) > CONFIG['hub_degree_threshold']:
+                dampen = 1.0 / (1.0 + 0.15 * (degree[note_id] - CONFIG['hub_degree_threshold']))
+                sim *= dampen
+            scores[note_id] = sim
 
     # Adaptive threshold (Phase 3.3)
     if CONFIG.get('adaptive_threshold', False) and len(scores) >= 5:
