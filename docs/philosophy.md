@@ -6,7 +6,7 @@ Why this project exists, what it borrows from neuroscience, and how Obsidian bec
 
 ## The observation
 
-In May 2026, Andrej Karpathy published [Baby Dragon Hatchling (BDH)](https://arxiv.org/abs/2505.04659) — a minimal neural network that learns through Hebbian synaptic plasticity, neurogenesis, and persistent memory. No backpropagation. No gradient descent. Just a graph that changes shape as it's used.
+In September 2025, Adrian Kosowski et al. published [The Dragon Hatchling (BDH)](https://arxiv.org/abs/2509.26507) — a Large Language Model architecture based on a scale-free biologically inspired network of locally-interacting neuron particles. Its working memory relies entirely on synaptic plasticity with Hebbian learning using spiking neurons. Specific synapses strengthen whenever the model hears or reasons about a specific concept while processing language inputs.
 
 The core idea: a network of neurons connected by weighted synapses. When two neurons fire together, their connection strengthens. When neurons stop being co-activated, connections decay. New neurons are born when the system encounters concepts it doesn't have a representation for.
 
@@ -94,7 +94,7 @@ These aren't bugs — they're research directions. The system works today as a r
 
 ## Further reading
 
-- Karpathy, A. (2026). *Baby Dragon Hatchling: A minimal neural network with Hebbian learning and neurogenesis.* arXiv:2505.04659
+- Kosowski, A. et al. (2025). *The Dragon Hatchling: The Missing Link between the Transformer and Models of the Brain.* arXiv:2509.26507
 - Hebb, D.O. (1949). *The Organization of Behavior.* Wiley.
 - Eriksson, P.S. et al. (1998). *Neurogenesis in the adult human hippocampus.* Nature Medicine, 4(11), 1313–1317.
 - [BDH Graph Harness — README](../README.md)
