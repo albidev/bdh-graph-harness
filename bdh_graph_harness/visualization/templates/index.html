@@ -40,6 +40,7 @@
     width: 70%;
     height: 100%;
     background: #0d1117;
+    position: relative;
   }
   #side-panel {
     width: 30%;
@@ -194,19 +195,22 @@
   }
   .tag-legend {
     position: absolute;
-    top: 52px;
-    right: 0;
-    background: #161b22;
+    bottom: 60px;
+    left: 12px;
+    background: rgba(22, 27, 34, 0.92);
     border: 1px solid #30363d;
-    border-radius: 0 0 8px 8px;
-    padding: 10px 16px;
+    border-radius: 8px;
+    padding: 10px 14px;
     z-index: 100;
     display: flex;
     flex-wrap: wrap;
-    gap: 6px 16px;
-    max-width: 100%;
-    font-size: 12px;
+    gap: 4px 14px;
+    max-width: 420px;
+    max-height: 180px;
+    overflow-y: auto;
+    font-size: 11px;
     transition: opacity 0.2s;
+    pointer-events: auto;
   }
   .tag-legend.hidden { display: none; }
   .tag-legend .tag-item {
@@ -313,13 +317,13 @@
     <span class="toggle-text">Tags</span>
   </label>
 </div>
-<div id="tag-legend" class="tag-legend hidden"></div>
 <div id="mobile-tabs">
   <div class="tab active" onclick="switchTab('graph-tab')">🗺️ Graph</div>
   <div class="tab" onclick="switchTab('panel-tab')">📋 Panel</div>
 </div>
 <div id="main">
-  <div id="graph-container"></div>
+  <div id="graph-container">
+  <div id="tag-legend" class="tag-legend hidden"></div></div>
   <div id="side-panel">
     <div id="query-section">
       <input type="text" id="query-input" placeholder="Enter a query..." autocomplete="off">
