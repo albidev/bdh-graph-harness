@@ -177,6 +177,8 @@ async def run_attention_and_plasticity(
         'hebbian_updates': hebbian_updates,
         'hebbian_synapses': len(app_state['state']['synapses']),
         'queries_processed': app_state['state'].get('queries', 0),
+        'neuron_count': len(app_state['nodes']),
+        'synapse_count': sum(len(links) for links in app_state['edges'].values()),
         'timestamp': datetime.now().isoformat(),
     }
     await broadcast_activation(activation_event, ws_clients)
@@ -246,6 +248,9 @@ async def api_query(request, app_state: dict, ws_clients: set) -> web.Response:
         'new_concepts': new_concepts_list,
         'hebbian_synapses': len(app_state['state']['synapses']),
         'hebbian_updates': hebbian_updates,
+        'queries_processed': app_state['state'].get('queries', 0),
+        'neuron_count': len(app_state['nodes']),
+        'synapse_count': sum(len(links) for links in app_state['edges'].values()),
     })
 
 

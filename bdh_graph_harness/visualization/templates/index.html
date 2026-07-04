@@ -517,9 +517,6 @@ function handleActivation(event) {
         opacity: 1.0,
       });
       allNodeIds.push(nc.id);
-      // Increment neuron counter
-      const el = document.getElementById('stat-neurons');
-      if (el) el.textContent = parseInt(el.textContent) + 1;
       // Flash green to indicate new node
       setTimeout(() => {
         if (nodesDS.get(nc.id)) {
@@ -531,6 +528,22 @@ function handleActivation(event) {
 
   // Update stats
   document.getElementById('stat-last').textContent = event.query || '—';
+
+  // Update neuron count — prefer server total, fall back to local increment
+  const nEl = document.getElementById('stat-neurons');
+  if (nEl) {
+    if (event.neuron_count != null) {
+      nEl.textContent = event.neuron_count;
+    } else if (newConcepts.length > 0) {
+      nEl.textContent = parseInt(nEl.textContent) + newConcepts.length;
+    }
+  }
+
+  // Update synapse count from server total when available
+  const sEl = document.getElementById('stat-synapses');
+  if (sEl && event.synapse_count != null) {
+    sEl.textContent = event.synapse_count;
+  }
 
   // Update queries processed counter
   if (event.queries_processed != null) {
@@ -591,7 +604,9 @@ function sendQuery() {
           hebbian_updates: data.hebbian_updates || [],
           new_concepts: data.new_concepts || [],
           hebbian_synapses: data.hebbian_synapses,
-          queries_processed: null,  // not available in HTTP response
+          queries_processed: data.queries_processed,
+          neuron_count: data.neuron_count,
+          synapse_count: data.synapse_count,
         });
       }
     }
