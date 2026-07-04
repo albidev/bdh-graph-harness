@@ -21,7 +21,6 @@ from bdh_graph_harness.retrieval.attention import (
 from bdh_graph_harness.retrieval.bm25 import BM25Index
 from bdh_graph_harness.retrieval.hybrid import hybrid_score
 from bdh_graph_harness.retrieval.embeddings import get_embeddings
-from bdh_graph_harness.retrieval.attention import extract_date_from_query, date_boost
 
 from benchmarks.dataset import load_dataset
 
@@ -57,10 +56,8 @@ def run_single_query(query, nodes, edges, collection, bm25, method="hybrid"):
     # Get embeddings
     q_emb = get_embeddings([query])[0]
 
-    # Vector search via ChromaDB — overfetch more when date is detected
-    query_date = extract_date_from_query(query)
-    base_overfetch = CONFIG.get("seed_count", 5) * 10
-    overfetch = min(base_overfetch * 2 if query_date else base_overfetch, collection.count())
+    # Vector search via ChromaDB
+    overfetch = min(CONFIG.get("seed_count", 5) * 10, collection.count())
     results = collection.query(
         query_embeddings=[q_emb],
         n_results=overfetch,
@@ -74,11 +71,6 @@ def run_single_query(query, nodes, edges, collection, bm25, method="hybrid"):
         for nid, dist in zip(ids, distances):
             sim = max(0.0, 1.0 - dist)
             raw_vector_scores[nid] = sim
-
-    # Date-aware retrieval boost (Issue #2 fix)
-    if query_date:
-        for nid in raw_vector_scores:
-            raw_vector_scores[nid] += date_boost(nid, query_date)
 
     # Score by method
     scored = {}
