@@ -379,6 +379,7 @@ let showTagColors = false; // toggle for tag-based coloring
 let degreeMap = {};      // node_id -> degree (computed from edges)
 let neighborMap = {};    // node_id -> [connected node titles]
 let tooltipEl = null;    // custom HTML tooltip element
+let edgeInfoMap = {};    // edge_id -> {source_title, target_title, type, weight?, frequency?}
 
 // Create the tooltip element (once)
 function ensureTooltip() {
@@ -445,6 +446,41 @@ function positionTooltip(evt) {
 
 function hideTooltip() {
   if (tooltipEl) tooltipEl.style.display = 'none';
+}
+
+// Show tooltip for an edge (synapse)
+function showEdgeTooltip(edgeId, evt) {
+  ensureTooltip();
+  const info = edgeInfoMap[edgeId];
+  if (!info) { hideTooltip(); return; }
+
+  const isHebbian = info.type === 'hebbian';
+  const icon = isHebbian ? '⚡' : '🔗';
+  const typeLabel = isHebbian ? 'Hebbian Synapse' : 'Wikilink';
+
+  let html = '<div style="max-width:280px">';
+  html += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">';
+  html += '<span style="font-size:14px">' + icon + '</span>';
+  html += '<span style="font-weight:600;color:' + (isHebbian ? '#39d353' : '#8b949e') + '">' + typeLabel + '</span>';
+  html += '</div>';
+  html += '<div style="margin-bottom:4px">';
+  html += '<span style="color:#58a6ff">' + escapeHtml(info.source_title) + '</span>';
+  html += ' <span style="color:#6e7681">→</span> ';
+  html += '<span style="color:#58a6ff">' + escapeHtml(info.target_title) + '</span>';
+  html += '</div>';
+
+  if (isHebbian) {
+    html += '<div style="display:flex;gap:16px;font-size:11px;color:#8b949e">';
+    html += '<span>Weight: <b style="color:#39d353">' + info.weight.toFixed(3) + '</b></span>';
+    html += '<span>Freq: <b>' + info.frequency + '</b></span>';
+    html += '</div>';
+  }
+
+  html += '</div>';
+
+  tooltipEl.innerHTML = html;
+  tooltipEl.style.display = 'block';
+  positionTooltip(evt);
 }
 
 function initNetwork(graphData) {
@@ -545,11 +581,15 @@ function initNetwork(graphData) {
   // Rebuild visEdges properly
   const visEdges = [];
   edgeSet.clear();
+  edgeInfoMap = {};
   graphData.edges.forEach(e => {
     const eid = e.source + '→' + e.target;
     if (edgeSet.has(eid)) return;
     if (!connectedNodes.has(e.source) || !connectedNodes.has(e.target)) return;
     edgeSet.add(eid);
+    const srcTitle = (allGraphNodes.find(n => n.id === e.source) || {}).title || e.source;
+    const tgtTitle = (allGraphNodes.find(n => n.id === e.target) || {}).title || e.target;
+    edgeInfoMap[eid] = { source_title: srcTitle, target_title: tgtTitle, type: 'wikilink' };
     visEdges.push({
       id: eid,
       from: e.source,
@@ -564,6 +604,9 @@ function initNetwork(graphData) {
     if (edgeSet.has(eid)) return;
     if (!connectedNodes.has(h.note_a) || !connectedNodes.has(h.note_b)) return;
     edgeSet.add(eid);
+    const srcTitle = (allGraphNodes.find(n => n.id === h.note_a) || {}).title || h.note_a;
+    const tgtTitle = (allGraphNodes.find(n => n.id === h.note_b) || {}).title || h.note_b;
+    edgeInfoMap[eid] = { source_title: srcTitle, target_title: tgtTitle, type: 'hebbian', weight: h.weight, frequency: h.frequency };
     const w = Math.min(1 + h.weight * 3, 5);
     visEdges.push({
       id: eid,
@@ -615,7 +658,7 @@ function initNetwork(graphData) {
     showTooltip(params.node, params.event);
   });
   network.on('hoverEdge', function(params) {
-    hideTooltip();
+    showEdgeTooltip(params.edge, params.event);
   });
   network.on('blurNode', function(params) {
     hideTooltip();
