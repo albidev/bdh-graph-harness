@@ -86,6 +86,8 @@ async def api_graph(request, app_state: dict) -> web.Response:
             'id': note_id,
             'title': node['title'],
             'tags': node['tags'],
+            'path': node.get('path', ''),
+            'text': node.get('text', '')[:200],
         })
 
     edge_list = []
