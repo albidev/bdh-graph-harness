@@ -18,6 +18,8 @@ Turns an Obsidian vault into a living knowledge graph where:
 - **LLM responses** — OpenRouter (`openrouter/free`) or local Ollama, with citations back to source notes
 - **Real-time visualization** — vis.js network showing nodes activating, edges pulsing as Hebbian weights update during queries
 
+For the theory behind these choices — why Hebbian plasticity, why Obsidian, why not just RAG — see [`docs/philosophy.md`](docs/philosophy.md).
+
 ## Architecture
 
 ```
