@@ -663,6 +663,9 @@ function initNetwork(graphData) {
   network.on('blurNode', function(params) {
     hideTooltip();
   });
+  network.on('blurEdge', function(params) {
+    hideTooltip();
+  });
   network.on('mousemove', function(params) {
     if (params.node) {
       positionTooltip(params.event);
