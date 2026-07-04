@@ -70,7 +70,10 @@ class BM25Index:
         _logger.info(f"BM25 index built: {self.N} docs, {len(self.df)} unique terms, avg_dl={self.avg_dl:.1f}")
 
     def score(self, query, note_id):
-        """Compute BM25 score for a single note against a query."""
+        """Compute BM25 score for a single note against a query.
+
+        Returns raw unnormalized score. Use score_batch() for normalized [0,1] scores.
+        """
         if note_id not in self.docs or self.N == 0:
             return 0.0
 
@@ -92,8 +95,38 @@ class BM25Index:
             denom = f + self.k1 * (1 - self.b + self.b * dl / max(self.avg_dl, 1.0))
             score += idf * f * (self.k1 + 1) / denom
 
-        # Normalize to [0, 1] range (approximate)
-        return min(score / 10.0, 1.0)
+        return score
+
+    def score_normalized(self, query, note_id, max_score=None):
+        """Compute normalized BM25 score [0, 1] for a note.
+
+        If max_score is provided, normalizes by it. Otherwise uses log-scaling.
+        """
+        raw = self.score(query, note_id)
+        if raw == 0:
+            return 0.0
+        if max_score and max_score > 0:
+            return min(raw / max_score, 1.0)
+        # Log-normalize as fallback
+        return min(math.log1p(raw) / math.log1p(10.0), 1.0)
+
+    def score_batch(self, query, note_ids=None):
+        """Score all notes and return normalized scores [0, 1].
+
+        Returns dict {note_id: normalized_score} with proper max-based normalization.
+        """
+        ids = note_ids if note_ids is not None else list(self.docs.keys())
+        raw_scores = {}
+        for nid in ids:
+            s = self.score(query, nid)
+            if s > 0:
+                raw_scores[nid] = s
+
+        if not raw_scores:
+            return {}
+
+        max_score = max(raw_scores.values())
+        return {nid: s / max_score for nid, s in raw_scores.items()}
 
     def search(self, query, note_ids=None, top_k=None):
         """Score all (or subset of) notes against query.

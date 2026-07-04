@@ -74,13 +74,23 @@ def run_single_query(query, nodes, edges, collection, bm25, method="hybrid"):
 
     # Score by method
     scored = {}
-    for nid in raw_vector_scores:
-        if method == "hybrid":
-            scored[nid] = hybrid_score(nid, raw_vector_scores, bm25, query)
-        elif method == "vector":
+    if method == "hybrid":
+        # Compute BM25 ONCE for all candidates, normalized [0,1]
+        bm25_scores = bm25.score_batch(query, list(raw_vector_scores.keys()))
+        alpha = CONFIG.get("hybrid_alpha", 0.7)
+        beta = CONFIG.get("hybrid_beta", 0.3)
+        for nid in raw_vector_scores:
+            vec_s = raw_vector_scores.get(nid, 0.0)
+            bm_s = bm25_scores.get(nid, 0.0)
+            scored[nid] = alpha * vec_s + beta * bm_s
+    elif method == "vector":
+        for nid in raw_vector_scores:
             scored[nid] = raw_vector_scores.get(nid, 0.0)
-        elif method == "bm25":
-            scored[nid] = bm25.score(query, nid)
+    elif method == "bm25":
+        # Use batch normalization
+        bm25_scores = bm25.score_batch(query, list(raw_vector_scores.keys()))
+        for nid in raw_vector_scores:
+            scored[nid] = bm25_scores.get(nid, 0.0)
 
     # Sort by score
     sorted_notes = sorted(scored.items(), key=lambda x: -x[1])

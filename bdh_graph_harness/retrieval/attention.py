@@ -103,14 +103,20 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
             sim = max(0.0, 1.0 - dist)
             raw_vector_scores[note_id] = sim
 
-    # Hybrid search: combine vector + BM25
+    # Hybrid search: combine vector + BM25 (with proper batch normalization)
     hybrid_enabled = CONFIG.get('hybrid_search', False) and bm25_index is not None
 
     if hybrid_enabled:
         candidate_ids = list(raw_vector_scores.keys())
+        # Compute BM25 scores ONCE for all candidates, normalized [0,1]
+        bm25_scores = bm25_index.score_batch(query, candidate_ids)
+        alpha = CONFIG.get('hybrid_alpha', 0.7)
+        beta = CONFIG.get('hybrid_beta', 0.3)
         scores = {}
         for nid in candidate_ids:
-            combined = hybrid_score(nid, raw_vector_scores, bm25_index, query)
+            vec_s = raw_vector_scores.get(nid, 0.0)
+            bm_s = bm25_scores.get(nid, 0.0)
+            combined = alpha * vec_s + beta * bm_s
             # Hub dampening
             if CONFIG['hub_dampening'] and degree.get(nid, 0) > CONFIG['hub_degree_threshold']:
                 dampen = 1.0 / (1.0 + 0.15 * (degree[nid] - CONFIG['hub_degree_threshold']))
@@ -281,10 +287,15 @@ def integrate_and_fire_attention(query, nodes, edges, collection, k=None, max_ho
 
     if hybrid_enabled:
         candidate_ids = list(raw_vector_scores.keys())
+        # Compute BM25 scores ONCE for all candidates, normalized [0,1]
+        bm25_scores = bm25_index.score_batch(query, candidate_ids)
+        alpha = CONFIG.get('hybrid_alpha', 0.7)
+        beta = CONFIG.get('hybrid_beta', 0.3)
         seed_scores = {}
         for nid in candidate_ids:
-            combined = hybrid_score(nid, raw_vector_scores, bm25_index, query)
-            seed_scores[nid] = combined
+            vec_s = raw_vector_scores.get(nid, 0.0)
+            bm_s = bm25_scores.get(nid, 0.0)
+            seed_scores[nid] = alpha * vec_s + beta * bm_s
     else:
         seed_scores = dict(raw_vector_scores)
 
