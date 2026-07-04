@@ -393,8 +393,13 @@ function initNetwork(graphData) {
   });
   tagColorMap = {};
   let ci = 0;
+  const seenTags = new Set();
   tagSet.forEach(tag => {
-    if (tag) tagColorMap[tag] = TAG_COLORS[ci++ % TAG_COLORS.length];
+    const t = (tag || '').trim();
+    if (t && !seenTags.has(t.toLowerCase())) {
+      seenTags.add(t.toLowerCase());
+      tagColorMap[t] = TAG_COLORS[ci++ % TAG_COLORS.length];
+    }
   });
 
   // Build edge set first to know which nodes have connections
@@ -894,10 +899,18 @@ function toggleTagColors(enabled) {
   // Show/hide legend
   if (legend) {
     if (enabled && Object.keys(tagColorMap).length > 0) {
-      legend.innerHTML = Object.entries(tagColorMap)
+      const seen = new Set();
+      const items = [];
+      Object.entries(tagColorMap)
         .sort((a, b) => a[0].localeCompare(b[0]))
-        .map(([tag, color]) => '<span class="tag-item"><span class="tag-dot" style="background:' + color + '"></span>' + escapeHtml(tag) + '</span>')
-        .join('');
+        .forEach(([tag, color]) => {
+          const key = tag.trim().toLowerCase();
+          if (!seen.has(key)) {
+            seen.add(key);
+            items.push('<span class="tag-item"><span class="tag-dot" style="background:' + color + '"></span>' + escapeHtml(tag) + '</span>');
+          }
+        });
+      legend.innerHTML = items.join('');
       legend.classList.remove('hidden');
     } else {
       legend.classList.add('hidden');
