@@ -280,19 +280,51 @@ let allNodeIds = [];
 let allEdgeIds = [];
 
 function initNetwork(graphData) {
-  allNodeIds = graphData.nodes.map(n => n.id);
-  const visNodes = graphData.nodes.map(n => ({
-    id: n.id,
-    label: n.title,
-    title: n.title + (n.tags ? '\\n[' + (Array.isArray(n.tags) ? n.tags.join(', ') : n.tags) + ']' : ''),
-    group: 'inactive',
-  }));
-
+  // Build edge set first to know which nodes have connections
   const edgeSet = new Set();
-  const visEdges = [];
+  const connectedNodes = new Set();
+
   graphData.edges.forEach(e => {
     const eid = e.source + '→' + e.target;
     if (edgeSet.has(eid)) return;
+    edgeSet.add(eid);
+    connectedNodes.add(e.source);
+    connectedNodes.add(e.target);
+  });
+
+  // Add hebbian edges
+  hebbianMap = {};
+  graphData.hebbian.forEach(h => {
+    const key = h.note_a + '|' + h.note_b;
+    hebbianMap[key] = h.weight;
+    const eid = 'hebb_' + h.note_a + '→' + h.note_b;
+    if (edgeSet.has(eid)) return;
+    edgeSet.add(eid);
+    connectedNodes.add(h.note_a);
+    connectedNodes.add(h.note_b);
+    const w = Math.min(1 + h.weight * 3, 5);
+    visEdges_tmp = []; // placeholder
+  });
+
+  // Only include nodes that have at least one connection
+  allNodeIds = graphData.nodes.filter(n => connectedNodes.has(n.id)).map(n => n.id);
+  const visNodes = allNodeIds.map(id => {
+    const n = graphData.nodes.find(x => x.id === id);
+    return {
+      id: n.id,
+      label: n.title,
+      title: n.title + (n.tags ? '\\n[' + (Array.isArray(n.tags) ? n.tags.join(', ') : n.tags) + ']' : ''),
+      group: 'inactive',
+    };
+  });
+
+  // Rebuild visEdges properly
+  const visEdges = [];
+  edgeSet.clear();
+  graphData.edges.forEach(e => {
+    const eid = e.source + '→' + e.target;
+    if (edgeSet.has(eid)) return;
+    if (!connectedNodes.has(e.source) || !connectedNodes.has(e.target)) return;
     edgeSet.add(eid);
     visEdges.push({
       id: eid,
@@ -303,13 +335,10 @@ function initNetwork(graphData) {
     });
   });
 
-  // Add hebbian edges
-  hebbianMap = {};
   graphData.hebbian.forEach(h => {
-    const key = h.note_a + '|' + h.note_b;
-    hebbianMap[key] = h.weight;
     const eid = 'hebb_' + h.note_a + '→' + h.note_b;
     if (edgeSet.has(eid)) return;
+    if (!connectedNodes.has(h.note_a) || !connectedNodes.has(h.note_b)) return;
     edgeSet.add(eid);
     const w = Math.min(1 + h.weight * 3, 5);
     visEdges.push({
@@ -440,9 +469,21 @@ function handleActivation(event) {
         }, delay + s.t);
       });
     } else if (activatedIds.has(a) || activatedIds.has(b)) {
-      // New Hebbian synapse — create edge if both nodes exist
-      if (nodesDS.get(a) && nodesDS.get(b)) {
-        const newEid = 'hebb_' + a + '→' + b;
+      // New Hebbian synapse — add nodes if missing, then create edge
+      [a, b].forEach(nid => {
+        if (!nodesDS.get(nid)) {
+          // Node not in graph yet — add it live
+          nodesDS.add({
+            id: nid,
+            label: nid.split('/').pop(),
+            title: nid,
+            group: 'inactive',
+            opacity: 0.3,
+          });
+          allNodeIds.push(nid);
+        }
+      });
+      const newEid = 'hebb_' + a + '→' + b;
         if (!edgesDS.get(newEid)) {
           const pulseStepsNew = [
             { w: newWidth + 5,   c: COLORS.edgeHebbianPulse, t: 0 },
@@ -476,8 +517,7 @@ function handleActivation(event) {
           });
         }
       }
-    }
-  });
+    });
 
   // Reset non-Hebbian edge opacity after 4s
   setTimeout(() => {
