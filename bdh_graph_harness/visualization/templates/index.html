@@ -505,15 +505,50 @@ function handleActivation(event) {
     });
   }
 
+  // Add new concept nodes to the graph (neurogenesis)
+  const newConcepts = event.new_concepts || [];
+  newConcepts.forEach(nc => {
+    if (nc.id && nodesDS && !nodesDS.get(nc.id)) {
+      nodesDS.add({
+        id: nc.id,
+        label: nc.title || nc.id,
+        title: nc.title || nc.id,
+        group: 'seed',
+        opacity: 1.0,
+      });
+      allNodeIds.push(nc.id);
+      // Increment neuron counter
+      const el = document.getElementById('stat-neurons');
+      if (el) el.textContent = parseInt(el.textContent) + 1;
+      // Flash green to indicate new node
+      setTimeout(() => {
+        if (nodesDS.get(nc.id)) {
+          nodesDS.update({ id: nc.id, group: 'inactive', opacity: 0.3 });
+        }
+      }, 3000);
+    }
+  });
+
   // Update stats
   document.getElementById('stat-last').textContent = event.query || '—';
-  if (hebbianUpdates.length > 0) {
+
+  // Update queries processed counter
+  if (event.queries_processed != null) {
+    const qEl = document.getElementById('stat-queries');
+    if (qEl) qEl.textContent = event.queries_processed;
+  }
+
+  // Update hebbian synapse count with the real total
+  if (event.hebbian_synapses != null) {
     const hebbEl = document.getElementById('stat-hebbian');
     if (hebbEl) {
-      // Flash the hebbian count
-      hebbEl.textContent = hebbianUpdates.length;
-      hebbEl.style.color = COLORS.edgeHebbianPulse;
-      setTimeout(() => { hebbEl.style.color = ''; }, 1000);
+      const prev = parseInt(hebbEl.textContent) || 0;
+      hebbEl.textContent = event.hebbian_synapses;
+      if (event.hebbian_synapses > prev) {
+        // Flash green when new synapses were learned
+        hebbEl.style.color = COLORS.edgeHebbianPulse;
+        setTimeout(() => { hebbEl.style.color = ''; }, 1000);
+      }
     }
   }
 
@@ -549,7 +584,15 @@ function sendQuery() {
       }
       // Update activation panel from HTTP response (works even if WS is down)
       if (data.activated_notes) {
-        handleActivation({ type: 'activation', query: query, activated_notes: data.activated_notes, hebbian_updates: data.hebbian_updates || [] });
+        handleActivation({
+          type: 'activation',
+          query: query,
+          activated_notes: data.activated_notes,
+          hebbian_updates: data.hebbian_updates || [],
+          new_concepts: data.new_concepts || [],
+          hebbian_synapses: data.hebbian_synapses,
+          queries_processed: null,  // not available in HTTP response
+        });
       }
     }
     btn.disabled = false;
