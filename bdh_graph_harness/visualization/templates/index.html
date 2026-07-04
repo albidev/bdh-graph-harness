@@ -314,6 +314,14 @@
   @media (min-width: 769px) {
     #mobile-tabs { display: none; }
   }
+
+  @media (max-width: 768px) {
+    #main { flex-direction: column; }
+    #graph-container { width: 100%; height: 65vh; }
+    #side-panel { width: 100%; height: 35vh; border-left: none; border-top: 1px solid #30363d; }
+    #titlebar h1 { font-size: 15px; }
+    #titlebar .stats { font-size: 11px; }
+  }
 </style>
 </head>
 <body class="graph-tab">
@@ -456,17 +464,36 @@ function showTooltip(nodeId, evt) {
   positionTooltip(evt);
 }
 
+function isMobile() {
+  return window.innerWidth <= 768 || 'ontouchstart' in window;
+}
 function positionTooltip(evt) {
   if (!tooltipEl) return;
-  const pad = 16;
-  let x = evt.clientX + pad;
-  let y = evt.clientY + pad;
-  // Keep within viewport
-  const rect = tooltipEl.getBoundingClientRect();
-  if (x + rect.width > window.innerWidth) x = evt.clientX - rect.width - pad;
-  if (y + rect.height > window.innerHeight) y = evt.clientY - rect.height - pad;
-  tooltipEl.style.left = x + 'px';
-  tooltipEl.style.top = y + 'px';
+  if (isMobile()) {
+    // On mobile: fixed at bottom, above query input area
+    tooltipEl.style.left = '10px';
+    tooltipEl.style.right = '10px';
+    tooltipEl.style.bottom = (60 + envInset()) + 'px';
+    tooltipEl.style.top = 'auto';
+    tooltipEl.style.maxWidth = 'calc(100vw - 20px)';
+    tooltipEl.style.width = 'auto';
+  } else {
+    const pad = 16;
+    let x = evt.clientX + pad;
+    let y = evt.clientY + pad;
+    tooltipEl.style.width = '';
+    tooltipEl.style.right = '';
+    tooltipEl.style.bottom = '';
+    const rect = tooltipEl.getBoundingClientRect();
+    if (x + rect.width > window.innerWidth) x = evt.clientX - rect.width - pad;
+    if (y + rect.height > window.innerHeight) y = evt.clientY - rect.height - pad;
+    tooltipEl.style.left = x + 'px';
+    tooltipEl.style.top = y + 'px';
+  }
+}
+function envInset() {
+  try { return parseInt(getComputedStyle(document.documentElement).getPropertyValue('env(safe-area-inset-bottom)')) || 0; }
+  catch(e) { return 0; }
 }
 
 function hideTooltip() {
