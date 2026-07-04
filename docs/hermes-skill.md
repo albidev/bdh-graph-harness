@@ -197,14 +197,18 @@ The harness caches the full graph (nodes + edges + per-file mtimes) in `.bdh-gra
 Override with `--no-cache` to force full rebuild.
 
 ## Visualization
-
+## Visualization
 The web UI at `:8643` shows:
-- **Nodes** colored by type: inactive gray, activated orange, seed blue
+- **Nodes** colored by activation state or by Obsidian tags (toggle)
 - **Wikilink edges** in dark gray (thin)
 - **Hebbian synapses** in blue, width proportional to synaptic weight
+- **Edge tooltips** — hover synapses to see weight, type, connected notes
+- **Tag legend overlay** — bottom-left, shows tag→color mapping
+- **Orphan nodes toggle** — hidden by default, show isolated nodes on demand
 - **Hebbian pulse animation:** during a query, strengthened synapses flash green (`#39d353`), thicken, then settle back — staggered cascade (120ms per edge, 4-step fade over 2.5s)
+- **Live neurogenesis** — new edges appear in real-time as concepts are created
 - **WebSocket auto-reconnect** with status indicator
-- **Dark theme**, mobile responsive (tab-based layout ≤768px)
+- **Dark theme**, mobile responsive (iPhone safe area, touch dismiss, tab-based layout ≤768px)
 
 ## Critical Techniques
 

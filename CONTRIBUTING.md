@@ -20,7 +20,7 @@ The codebase is a Python package (`bdh_graph_harness/`) with 8 subpackages:
 - `neurogenesis/` — concept extraction and note creation in the vault
 - `api/` — aiohttp REST + WebSocket server
 - `mcp_server.py` — MCP (Model Context Protocol) server for Claude Desktop, Cursor, etc.
-- `visualization/` — vis.js real-time graph UI
+- `visualization/` — vis.js real-time graph UI (see `docs/visualization.md`)
 - `config.py` — YAML config loading with env var expansion
 
 `harness.py` is a compatibility shim re-exporting from the package (tests use `import harness`).

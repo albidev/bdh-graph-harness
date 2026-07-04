@@ -56,3 +56,8 @@ stream_enabled: true
 
 # Python executable (for ChromaDB dependency) — auto-detected if omitted
 # python_exec: /path/to/venv/bin/python
+
+# Graph ignore — fnmatch patterns to exclude nodes from the graph
+# graph_ignore:
+#   - ".bdh-*"          # exclude BDH operational files
+#   - "templates/*"     # exclude template directories
