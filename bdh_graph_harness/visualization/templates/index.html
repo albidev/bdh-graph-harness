@@ -536,7 +536,7 @@ function initNetwork(graphData) {
     return {
       id: n.id,
       label: n.title,
-      title: buildTooltip(n),
+      title: n.title,
       group: nodeGroup,
       color: nodeColor ? { background: nodeColor, border: nodeColor, highlight: { background: nodeColor, border: nodeColor } } : undefined,
     };
@@ -717,7 +717,7 @@ function handleActivation(event) {
           nodesDS.add({
             id: nid,
             label: hNode.title || nid.split('/').pop(),
-            title: buildTooltip(hNode),
+            title: hNode.title || nid.split('/').pop(),
             group: 'inactive',
             opacity: 0.3,
           });
@@ -794,7 +794,7 @@ function handleActivation(event) {
       nodesDS.add({
         id: nc.id,
         label: nc.title || nc.id.split('/').pop(),
-        title: buildTooltip(ncNode),
+        title: nc.title || nc.id,
         group: 'seed',
         opacity: 1.0,
       });
@@ -971,7 +971,7 @@ function toggleOrphans(show) {
           nodesDS.add({
             id: n.id,
             label: n.title,
-            title: buildTooltip(n),
+            title: n.title,
             group: 'inactive',
             opacity: 0.3,
           });
