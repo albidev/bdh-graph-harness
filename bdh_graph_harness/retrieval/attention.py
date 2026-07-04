@@ -2,12 +2,10 @@
 BDH Graph Harness — Attention module.
 
 BDH-style attention: embedding seed (ChromaDB KNN) + graph traversal (k-hop expansion).
-Includes adaptive threshold, hybrid search support, Integrate-and-Fire model,
-and date-aware retrieval boost.
+Includes adaptive threshold, hybrid search support, and Integrate-and-Fire model.
 """
 import math
 import os
-import re
 import statistics
 from collections import defaultdict, deque
 
@@ -16,100 +14,6 @@ from bdh_graph_harness.retrieval.embeddings import get_embeddings
 from bdh_graph_harness.retrieval.bm25 import BM25Index
 from bdh_graph_harness.retrieval.hybrid import hybrid_score
 from bdh_graph_harness.graph.builder import _resolve_target
-
-
-# ---------------------------------------------------------------------------
-# Date-aware retrieval (Issue #2 fix)
-# ---------------------------------------------------------------------------
-
-# Italian month names → month numbers
-_IT_MONTHS = {
-    "gennaio": 1, "febbraio": 2, "marzo": 3, "aprile": 4,
-    "maggio": 5, "giugno": 6, "luglio": 7, "agosto": 8,
-    "settembre": 9, "ottobre": 10, "novembre": 11, "dicembre": 12,
-}
-
-
-def extract_date_from_query(query):
-    """Extract a date (YYYY-MM-DD or YYYY-MM) from an Italian query string.
-
-    Supports formats:
-      - "2 luglio 2026", "2/07/2026", "02/07/2026"
-      - "il 2 luglio", "luglio 2026", "giugno 2026"
-      - "2026-07-02", "2026-07"
-
-    Returns:
-        dict with 'year', 'month', 'day' (day optional), or empty dict
-    """
-    q = query.lower().strip()
-
-    # Pattern: DD/MM/YYYY or DD-MM-YYYY or DD/MM/YY
-    m = re.search(r'(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})', q)
-    if m:
-        day, month, year = int(m.group(1)), int(m.group(2)), int(m.group(3))
-        if year < 100:
-            year += 2000
-        return {"year": year, "month": month, "day": day}
-
-    # Pattern: YYYY-MM-DD or YYYY-MM
-    m = re.search(r'(\d{4})-(\d{2})(?:-(\d{2}))?', q)
-    if m:
-        result = {"year": int(m.group(1)), "month": int(m.group(2))}
-        if m.group(3):
-            result["day"] = int(m.group(3))
-        return result
-
-    # Pattern: "DD mese YYYY" or "DD mese" or "mese YYYY"
-    for month_name, month_num in _IT_MONTHS.items():
-        if month_name in q:
-            result = {"month": month_num}
-            # Try to find year
-            ym = re.search(r'(\d{4})', q)
-            if ym:
-                result["year"] = int(ym.group(1))
-            # Try to find day (before month name)
-            dm = re.search(r'(\d{1,2})\s+' + month_name, q)
-            if dm:
-                result["day"] = int(dm.group(1))
-            return result
-
-    return {}
-
-
-def date_boost(note_id, extracted_date, boost_factor=0.3):
-    """Compute a score boost if the note's title contains a matching date.
-
-    Args:
-        note_id: the note identifier (e.g., "daily/morning-signal-2026-07-01")
-        extracted_date: dict from extract_date_from_query()
-        boost_factor: how much to boost matching notes (added to score)
-
-    Returns:
-        float boost value (0.0 if no match)
-    """
-    if not extracted_date:
-        return 0.0
-
-    nid_lower = note_id.lower()
-
-    # Check for YYYY-MM-DD match
-    if "year" in extracted_date and "month" in extracted_date and "day" in extracted_date:
-        date_str = f"{extracted_date['year']}-{extracted_date['month']:02d}-{extracted_date['day']:02d}"
-        if date_str in nid_lower:
-            return boost_factor
-
-    # Check for YYYY-MM match
-    if "year" in extracted_date and "month" in extracted_date:
-        ym_str = f"{extracted_date['year']}-{extracted_date['month']:02d}"
-        if ym_str in nid_lower:
-            return boost_factor * 0.7  # slightly less than exact day match
-
-    # Check for month name in title
-    for month_name, month_num in _IT_MONTHS.items():
-        if extracted_date.get("month") == month_num and month_name in nid_lower:
-            return boost_factor * 0.5
-
-    return 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -184,10 +88,7 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
         return {}
 
     # ChromaDB returns distances (lower = more similar), convert to similarity
-    # Overfetch more when date is detected to capture date-matching notes
-    query_date = extract_date_from_query(query)
-    base_overfetch = k * 5
-    overfetch = min(base_overfetch * 4 if query_date else base_overfetch, collection.count()) if collection.count() > 0 else base_overfetch
+    overfetch = min(k * 5, collection.count()) if collection.count() > 0 else k * 5
     results = collection.query(
         query_embeddings=[query_emb],
         n_results=overfetch,
@@ -202,33 +103,31 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
             sim = max(0.0, 1.0 - dist)
             raw_vector_scores[note_id] = sim
 
-    # Date-aware retrieval boost (Issue #2 fix) — uses query_date from overfetch
-    if query_date:
-        for nid in raw_vector_scores:
-            raw_vector_scores[nid] += date_boost(nid, query_date)
-
     # Hybrid search: combine vector + BM25
     hybrid_enabled = CONFIG.get('hybrid_search', False) and bm25_index is not None
 
     if hybrid_enabled:
+        # Get BM25 scores via hybrid_score for the same candidate set
         candidate_ids = list(raw_vector_scores.keys())
         scores = {}
         for nid in candidate_ids:
             combined = hybrid_score(nid, raw_vector_scores, bm25_index, query)
-            # Hub dampening
-            if CONFIG['hub_dampening'] and degree.get(nid, 0) > CONFIG['hub_degree_threshold']:
-                dampen = 1.0 / (1.0 + 0.15 * (degree[nid] - CONFIG['hub_degree_threshold']))
-                combined *= dampen
-            scores[nid] = combined
+            if combined > CONFIG['active_threshold']:
+                # Hub dampening
+                if CONFIG['hub_dampening'] and degree.get(nid, 0) > CONFIG['hub_degree_threshold']:
+                    dampen = 1.0 / (1.0 + 0.15 * (degree[nid] - CONFIG['hub_degree_threshold']))
+                    combined *= dampen
+                scores[nid] = combined
     else:
         scores = {}
         for note_id, sim in raw_vector_scores.items():
-            if CONFIG['hub_dampening'] and degree.get(note_id, 0) > CONFIG['hub_degree_threshold']:
-                dampen = 1.0 / (1.0 + 0.15 * (degree[note_id] - CONFIG['hub_degree_threshold']))
-                sim *= dampen
-            scores[note_id] = sim
+            if sim > CONFIG['active_threshold']:
+                if CONFIG['hub_dampening'] and degree.get(note_id, 0) > CONFIG['hub_degree_threshold']:
+                    dampen = 1.0 / (1.0 + 0.15 * (degree[note_id] - CONFIG['hub_degree_threshold']))
+                    sim *= dampen
+                scores[note_id] = sim
 
-    # Adaptive threshold (Phase 3.3) — single threshold, no double filtering
+    # Adaptive threshold (Phase 3.3)
     if CONFIG.get('adaptive_threshold', False) and len(scores) >= 5:
         threshold = compute_adaptive_threshold(
             list(scores.values()),
@@ -380,12 +279,6 @@ def integrate_and_fire_attention(query, nodes, edges, collection, k=None, max_ho
             dist = results['distances'][0][i]
             sim = max(0.0, 1.0 - dist)
             raw_vector_scores[note_id] = sim
-
-    # Date-aware retrieval boost (Issue #2 fix)
-    query_date = extract_date_from_query(query)
-    if query_date:
-        for nid in raw_vector_scores:
-            raw_vector_scores[nid] += date_boost(nid, query_date)
 
     hybrid_enabled = CONFIG.get('hybrid_search', False) and bm25_index is not None
 
