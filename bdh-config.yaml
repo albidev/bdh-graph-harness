@@ -48,7 +48,7 @@ bm25_b: 0.75
 
 # Adaptive threshold (Phase 3.3)
 adaptive_threshold: true
-threshold_floor: 0.15
+threshold_floor: 0.05
 
 # Online plasticity (Phase 3.2)
 online_plasticity: true

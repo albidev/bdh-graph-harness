@@ -20,39 +20,30 @@ from bdh_graph_harness.graph.builder import _resolve_target
 # Adaptive Threshold (Phase 3.3)
 # ---------------------------------------------------------------------------
 
-def compute_adaptive_threshold(scores, floor=0.15):
+def compute_adaptive_threshold(scores, floor=0.05, min_activations=3):
     """Compute a dynamic threshold from score distribution.
 
-    Uses max(percentile_75, median + 0.5*std, floor) to adaptively
-    select only genuinely relevant notes per query.
-
-    The 0.5*std multiplier (instead of 1*std) prevents clustered
-    scores from pushing the threshold too high and filtering out
-    relevant notes that are close to the median.
+    Uses median + 0.3*std with a low floor, but guarantees at least
+    min_activations notes are always kept (regardless of threshold).
 
     Args:
         scores: list of float scores from attention
         floor: minimum threshold (never go below this)
+        min_activations: guaranteed minimum number of notes to activate
     Returns:
         float threshold value
     """
     if not scores or len(scores) < 3:
         return floor
 
-    sorted_scores = sorted(scores)
-    n = len(sorted_scores)
+    sorted_scores = sorted(scores, reverse=True)
 
-    # Percentile 75 (Q3)
-    q75_idx = int(n * 0.75)
-    q75 = sorted_scores[min(q75_idx, n - 1)]
-
-    # Median + 0.5 std — less aggressive than mean + 1 std
+    # Statistical threshold
     median = statistics.median(scores)
     stdev = statistics.stdev(scores) if len(scores) > 1 else 0.0
-    median_half_std = median + 0.5 * stdev
+    threshold = max(median + 0.3 * stdev, floor)
 
-    threshold = max(q75, median_half_std, floor)
-    logger.info(f"Adaptive threshold: Q75={q75:.3f}, median+0.5std={median_half_std:.3f}, floor={floor} → {threshold:.3f}")
+    logger.info(f"Adaptive threshold: median+0.3std={median + 0.3 * stdev:.3f}, floor={floor} → {threshold:.3f}")
     return threshold
 
 
@@ -140,11 +131,11 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
     if CONFIG.get('adaptive_threshold', False) and len(scores) >= 5:
         threshold = compute_adaptive_threshold(
             list(scores.values()),
-            floor=CONFIG.get('threshold_floor', 0.15),
+            floor=CONFIG.get('threshold_floor', 0.05),
         )
         scores = {nid: s for nid, s in scores.items() if s >= threshold}
 
-    # Top-k seeds
+    # Top-k seeds — always keep at least k regardless of threshold
     seeds = sorted(scores.items(), key=lambda x: -x[1])[:k]
 
     # Step 2: Graph traversal — expand from seeds via wikilinks
@@ -304,7 +295,7 @@ def integrate_and_fire_attention(query, nodes, edges, collection, k=None, max_ho
     if CONFIG.get('adaptive_threshold', False) and len(seed_scores) >= 5:
         threshold = compute_adaptive_threshold(
             list(seed_scores.values()),
-            floor=CONFIG.get('threshold_floor', tau_base),
+            floor=CONFIG.get('threshold_floor', 0.05),
         )
         seed_scores = {nid: s for nid, s in seed_scores.items() if s >= threshold}
 
