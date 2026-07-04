@@ -37,16 +37,16 @@ def test_adaptive_threshold_low_scores():
     assert threshold >= 0.15
 
 
-def test_adaptive_threshold_uses_max_of_q75_and_mean_std():
-    """Threshold = max(Q75, mean+1std, floor)."""
-    # Create scores where mean+1std > Q75
+def test_adaptive_threshold_uses_max_of_q75_and_median_half_std():
+    """Threshold = max(Q75, median+0.5std, floor)."""
+    # Create scores where median+0.5std > Q75
     scores = [0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.9, 1.0]
     threshold = harness.compute_adaptive_threshold(scores, floor=0.0)
-    # Q75 is 0.1 (most scores), but mean+1std should be higher due to outliers
+    # Q75 is 0.1 (most scores), but median+0.5std should be higher due to outliers
     import statistics
-    mean = statistics.mean(scores)
+    median = statistics.median(scores)
     stdev = statistics.stdev(scores)
-    expected = max(0.1, mean + stdev, 0.0)
+    expected = max(0.1, median + 0.5 * stdev, 0.0)
     assert abs(threshold - expected) < 0.001
 
 
