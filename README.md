@@ -128,6 +128,7 @@ See `bdh-config.yaml` for all parameters. Key ones:
 | `llm_provider` | `openrouter` | `openrouter` or `ollama` |
 | `llm_model` | `openrouter/free` | Auto-selects available free models |
 | `api_port` | 8643 | Server port |
+| `graph_ignore` | `[]` | fnmatch patterns to exclude nodes from the graph (e.g. `[".bdh-*"]`) |
 
 ## Tests
 
@@ -139,12 +140,13 @@ pytest tests/ -v
 
 ## Visualization
 
-The web UI at `:8643` shows:
-- **Nodes** colored by type (note, concept, seed, activated)
-- **Wikilink edges** in blue
-- **Hebbian synapses** in cyan, width proportional to synaptic weight
-- **Real-time activation cascade** — nodes light up in sequence, edges pulse green (`#39d353`) when Hebbian weights strengthen during a query
-- **Dark theme** with staggered animation (120ms cascade, 4-step fade over 2.5s)
+The web UI at `:8643` shows a real-time vis.js graph with:
+- **Nodes** colored by activation state or by Obsidian tags (toggle)
+- **Wikilink edges** + **Hebbian synapses** with hover tooltips (weight, type, connected notes)
+- **Live neurogenesis** — new edges appear in real-time as concepts are created
+- **Orphan nodes toggle**, **tag legend overlay**, **dark theme**, **mobile responsive** (iPhone safe area, touch dismiss)
+
+See [`docs/visualization.md`](docs/visualization.md) for full details on controls, tooltips, and mobile support.
 
 ## MCP Server
 
