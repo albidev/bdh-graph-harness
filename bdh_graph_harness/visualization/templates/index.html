@@ -152,6 +152,46 @@
   }
   #status-indicator.connected { background: #2ea043; }
   #status-indicator.active { background: #f0883e; }
+  .toggle-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    font-size: 12px;
+    color: #8b949e;
+    user-select: none;
+    -webkit-user-select: none;
+    margin-left: 12px;
+  }
+  .toggle-label input[type="checkbox"] {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 32px;
+    height: 18px;
+    background: #21262d;
+    border-radius: 9px;
+    position: relative;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+  .toggle-label input[type="checkbox"]::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 14px;
+    height: 14px;
+    background: #6e7681;
+    border-radius: 50%;
+    transition: all 0.2s;
+  }
+  .toggle-label input[type="checkbox"]:checked {
+    background: #238636;
+  }
+  .toggle-label input[type="checkbox"]:checked::after {
+    left: 16px;
+    background: #fff;
+  }
 
   /* ======== MOBILE RESPONSIVE ======== */
   @media (max-width: 768px) {
@@ -234,6 +274,10 @@
     | Hebbian: <span id="stat-hebbian">{hebbian_count}</span>
     <span id="status-indicator"></span>
   </div>
+  <label class="toggle-label" title="Show orphan nodes (no connections)">
+    <input type="checkbox" id="orphan-toggle" onchange="toggleOrphans(this.checked)">
+    <span class="toggle-text">Orphans</span>
+  </label>
 </div>
 <div id="mobile-tabs">
   <div class="tab active" onclick="switchTab('graph-tab')">🗺️ Graph</div>
@@ -278,8 +322,13 @@ let edgesDS = null;
 let hebbianMap = {};  // "a|b" -> weight
 let allNodeIds = [];
 let allEdgeIds = [];
+let orphanNodeIds = [];  // nodes with no connections (hidden by default)
+let allGraphNodes = [];  // full node list from server (for orphan toggle)
 
 function initNetwork(graphData) {
+  // Store full node list for orphan toggle
+  allGraphNodes = graphData.nodes;
+
   // Build edge set first to know which nodes have connections
   const edgeSet = new Set();
   const connectedNodes = new Set();
@@ -307,7 +356,9 @@ function initNetwork(graphData) {
   });
 
   // Only include nodes that have at least one connection
-  allNodeIds = graphData.nodes.filter(n => connectedNodes.has(n.id)).map(n => n.id);
+  const connectedSet = new Set(connectedNodes);
+  orphanNodeIds = graphData.nodes.filter(n => !connectedSet.has(n.id)).map(n => n.id);
+  allNodeIds = graphData.nodes.filter(n => connectedSet.has(n.id)).map(n => n.id);
   const visNodes = allNodeIds.map(id => {
     const n = graphData.nodes.find(x => x.id === id);
     return {
@@ -695,6 +746,40 @@ function switchTab(tabClass) {
   if (tabs[labels[tabClass]]) tabs[labels[tabClass]].classList.add('active');
   // Force vis.js to redraw when switching back to graph
   if (tabClass === 'graph-tab' && network) setTimeout(() => network.redraw(), 50);
+}
+
+// Orphan nodes toggle
+function toggleOrphans(show) {
+  if (!nodesDS || orphanNodeIds.length === 0) return;
+  if (show) {
+    // Add orphan nodes to the graph
+    orphanNodeIds.forEach(nid => {
+      if (!nodesDS.get(nid)) {
+        const n = allGraphNodes.find(x => x.id === nid);
+        if (n) {
+          nodesDS.add({
+            id: n.id,
+            label: n.title,
+            title: n.title + (n.tags ? '\\n[' + (Array.isArray(n.tags) ? n.tags.join(', ') : n.tags) + ']' : ''),
+            group: 'inactive',
+            opacity: 0.3,
+          });
+          allNodeIds.push(nid);
+        }
+      }
+    });
+  } else {
+    // Remove orphan nodes from the graph
+    orphanNodeIds.forEach(nid => {
+      if (nodesDS.get(nid)) {
+        nodesDS.remove(nid);
+      }
+    });
+    allNodeIds = allNodeIds.filter(id => !orphanNodeIds.includes(id));
+  }
+  // Update neuron count
+  const el = document.getElementById('stat-neurons');
+  if (el) el.textContent = show ? allGraphNodes.length : (allGraphNodes.length - orphanNodeIds.length);
 }
 
 // Enter key sends query
