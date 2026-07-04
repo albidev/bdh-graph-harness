@@ -377,16 +377,31 @@ let allGraphNodes = [];  // full node list from server (for orphan toggle)
 let tagColorMap = {};    // tag -> color for tag-based node coloring
 let showTagColors = false; // toggle for tag-based coloring
 let degreeMap = {};      // node_id -> degree (computed from edges)
+let neighborMap = {};    // node_id -> [connected node titles]
+let tooltipEl = null;    // custom HTML tooltip element
 
-// Build rich HTML tooltip for a node
-function buildTooltip(n) {
+// Create the tooltip element (once)
+function ensureTooltip() {
+  if (tooltipEl) return;
+  tooltipEl = document.createElement('div');
+  tooltipEl.id = 'custom-tooltip';
+  tooltipEl.style.cssText = 'display:none;position:fixed;z-index:9999;background:#161b22;border:1px solid #30363d;border-radius:8px;padding:10px 14px;pointer-events:none;max-width:300px;font-size:12px;line-height:1.5;color:#c9d1d9;box-shadow:0 4px 12px rgba(0,0,0,0.4)';
+  document.body.appendChild(tooltipEl);
+}
+
+// Show tooltip for a node
+function showTooltip(nodeId, evt) {
+  ensureTooltip();
+  const n = allGraphNodes.find(x => x.id === nodeId);
+  if (!n) { hideTooltip(); return; }
+
   const title = escapeHtml(n.title || n.id);
   const path = n.path || '';
-  // Shorten path: remove vault root prefix
   const shortPath = path.replace(/.*\/Documents\/Hermes\//, '').replace(/.*\/wiki\//, 'wiki/');
-  const text = (n.text || '').replace(/\n/g, ' ').substring(0, 120);
+  const text = (n.text || '').replace(/\n/g, ' ').substring(0, 150);
   const deg = degreeMap[n.id] || 0;
-  // Parse tags, strip brackets
+
+  // Tags
   const rawTags = n.tags || '';
   let tagList = [];
   if (Array.isArray(rawTags)) {
@@ -396,15 +411,40 @@ function buildTooltip(n) {
   }
   const tagHtml = tagList.map(t => {
     const c = tagColorMap[t] || '#6e7681';
-    return '<span style="display:inline-flex;align-items:center;gap:3px;margin:1px 4px 1px 0;font-size:11px"><span style="width:7px;height:7px;border-radius:50%;background:' + c + ';display:inline-block"></span>' + escapeHtml(t) + '</span>';
+    return '<span style="display:inline-flex;align-items:center;gap:3px;margin:1px 6px 1px 0;font-size:11px"><span style="width:7px;height:7px;border-radius:50%;background:' + c + ';display:inline-block"></span>' + escapeHtml(t) + '</span>';
   }).join('');
-  return '<div style="max-width:280px;font-size:12px;line-height:1.5;padding:2px">' +
-    '<div style="font-weight:600;color:#f0883e;margin-bottom:4px">' + title + '</div>' +
-    (tagHtml ? '<div style="margin-bottom:4px">' + tagHtml + '</div>' : '') +
-    (shortPath ? '<div style="color:#8b949e;font-size:11px;margin-bottom:4px">📄 ' + escapeHtml(shortPath) + '</div>' : '') +
-    '<div style="color:#8b949e;font-size:11px">🔗 ' + deg + ' connection' + (deg !== 1 ? 's' : '') + '</div>' +
-    (text ? '<div style="color:#6e7681;font-size:11px;margin-top:4px;border-top:1px solid #30363d;padding-top:4px">' + escapeHtml(text) + '…</div>' : '') +
-    '</div>';
+
+  // Connected nodes (first 6)
+  const neighbors = neighborMap[n.id] || [];
+  const neighborHtml = neighbors.slice(0, 6).map(nb => '<span style="color:#58a6ff">' + escapeHtml(nb) + '</span>').join(', ') + (neighbors.length > 6 ? ' <span style="color:#6e7681">+' + (neighbors.length - 6) + ' more</span>' : '');
+
+  let html = '<div style="font-weight:600;color:#f0883e;margin-bottom:4px;font-size:13px">' + title + '</div>';
+  if (tagHtml) html += '<div style="margin-bottom:6px">' + tagHtml + '</div>';
+  if (shortPath) html += '<div style="color:#8b949e;font-size:11px;margin-bottom:3px">📄 ' + escapeHtml(shortPath) + '</div>';
+  html += '<div style="color:#8b949e;font-size:11px;margin-bottom:3px">🔗 ' + deg + ' connection' + (deg !== 1 ? 's' : '') + '</div>';
+  if (neighborHtml) html += '<div style="color:#6e7681;font-size:11px;margin-bottom:4px;border-top:1px solid #30363d;padding-top:4px">→ ' + neighborHtml + '</div>';
+  if (text) html += '<div style="color:#6e7681;font-size:11px;border-top:1px solid #30363d;padding-top:4px">' + escapeHtml(text) + '…</div>';
+
+  tooltipEl.innerHTML = html;
+  tooltipEl.style.display = 'block';
+  positionTooltip(evt);
+}
+
+function positionTooltip(evt) {
+  if (!tooltipEl) return;
+  const pad = 16;
+  let x = evt.clientX + pad;
+  let y = evt.clientY + pad;
+  // Keep within viewport
+  const rect = tooltipEl.getBoundingClientRect();
+  if (x + rect.width > window.innerWidth) x = evt.clientX - rect.width - pad;
+  if (y + rect.height > window.innerHeight) y = evt.clientY - rect.height - pad;
+  tooltipEl.style.left = x + 'px';
+  tooltipEl.style.top = y + 'px';
+}
+
+function hideTooltip() {
+  if (tooltipEl) tooltipEl.style.display = 'none';
 }
 
 function initNetwork(graphData) {
@@ -439,6 +479,7 @@ function initNetwork(graphData) {
   const edgeSet = new Set();
   const connectedNodes = new Set();
   degreeMap = {};
+  neighborMap = {};
 
   graphData.edges.forEach(e => {
     const eid = e.source + '→' + e.target;
@@ -448,6 +489,13 @@ function initNetwork(graphData) {
     connectedNodes.add(e.target);
     degreeMap[e.source] = (degreeMap[e.source] || 0) + 1;
     degreeMap[e.target] = (degreeMap[e.target] || 0) + 1;
+    // Build neighbor map (id -> list of titles)
+    if (!neighborMap[e.source]) neighborMap[e.source] = [];
+    if (!neighborMap[e.target]) neighborMap[e.target] = [];
+    const srcNode = graphData.nodes.find(n => n.id === e.source);
+    const tgtNode = graphData.nodes.find(n => n.id === e.target);
+    if (tgtNode) neighborMap[e.source].push(tgtNode.title || e.target);
+    if (srcNode) neighborMap[e.target].push(srcNode.title || e.source);
   });
 
   // Add hebbian edges
@@ -561,6 +609,22 @@ function initNetwork(graphData) {
 
   if (network) network.destroy();
   network = new vis.Network(container, data, options);
+
+  // Custom HTML tooltip via hover events
+  network.on('hoverNode', function(params) {
+    showTooltip(params.node, params.event);
+  });
+  network.on('hoverEdge', function(params) {
+    hideTooltip();
+  });
+  network.on('blurNode', function(params) {
+    hideTooltip();
+  });
+  network.on('mousemove', function(params) {
+    if (params.node) {
+      positionTooltip(params.event);
+    }
+  });
 
   document.getElementById('stat-neurons').textContent = graphData.stats.neurons;
   document.getElementById('stat-synapses').textContent = graphData.stats.synapses;
