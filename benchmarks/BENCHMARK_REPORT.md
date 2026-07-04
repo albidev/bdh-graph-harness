@@ -1,6 +1,6 @@
 # 🧪 BDH Graph Harness — Benchmark Report
 
-**Date:** 2026-07-04T20:56:55  
+**Date:** 2026-07-04T22:57:24  
 **Vault:** 375 notes  
 **Dataset:** 15 queries across 5 categories
 
@@ -13,7 +13,7 @@
 | **f1@5** | 0.127 ± 0.188 | 0.194 ± 0.190 | 0.127 ± 0.188 |
 | **ndcg@5** | 0.303 ± 0.437 | 0.465 ± 0.460 | 0.303 ± 0.437 |
 | **mrr** | 0.323 ± 0.427 | 0.456 ± 0.462 | 0.323 ± 0.427 |
-| **latency_ms** | 161.9ms ± 147.3 | 120.5ms ± 3.5 | 121.1ms ± 3.7 |
+| **latency_ms** | 123.2ms ± 13.9 | 118.7ms ± 4.4 | 119.5ms ± 2.5 |
 
 ## Per-Category Results (Hybrid)
 
@@ -29,27 +29,27 @@
 
 | # | Query | Category | MRR | P@5 | R@5 | Hits | n_act | Latency |
 |---|-------|----------|-----|-----|-----|------|-------|---------|
-| 1 | Che cos'è l'Hebbian learning? | concept | 1.00 | 0.20 | 1.00 | #1 | 17 | 713ms |
-| 2 | Cos'è il modello Baby Dragon Hatchling? | concept | 0.50 | 0.20 | 1.00 | #2 | 17 | 127ms |
+| 1 | Che cos'è l'Hebbian learning? | concept | 1.00 | 0.20 | 1.00 | #1 | 17 | 173ms |
+| 2 | Cos'è il modello Baby Dragon Hatchling? | concept | 0.50 | 0.20 | 1.00 | #2 | 17 | 122ms |
 | 3 | Come funziona l'architettura Transformer? | concept | 0.17 | 0.00 | 0.00 | #6 | 22 | 118ms |
-| 4 | Cos'è il graph-based retrieval? | concept | 1.00 | 0.20 | 1.00 | #1 | 22 | 120ms |
-| 5 | Cos'è il neurogenesis nel contesto dei grafi? | concept | 0.00 | 0.00 | 0.00 | miss | 9 | 125ms |
-| 6 | Cosa abbiamo fatto sul BDH il 3 luglio 2026? | activity | 1.00 | 0.20 | 1.00 | #1 | 20 | 121ms |
-| 7 | Racconta la sessione di deploy su Azure dell'… | activity | 0.00 | 0.00 | 0.00 | miss | 19 | 127ms |
-| 8 | Cosa è successo con il gateway che girava com… | activity | 0.00 | 0.00 | 0.00 | miss | 20 | 121ms |
-| 9 | Quali notizie AI ci sono state il 1 luglio 20… | news | 0.00 | 0.00 | 0.00 | miss | 19 | 124ms |
-| 10 | Cosa trending su X il 2 luglio 2026? | news | 0.00 | 0.00 | 0.00 | miss | 19 | 116ms |
-| 11 | Qual è stata la notizia principale del 24 giu… | news | 0.00 | 0.00 | 0.00 | miss | 18 | 122ms |
-| 12 | Cos'è l'Hermes Avatar Widget? | entity | 0.05 | 0.00 | 0.00 | #19 | 23 | 126ms |
-| 13 | Che cos'è il Privacy Guard? | entity | 0.12 | 0.00 | 0.00 | #8 | 16 | 120ms |
-| 14 | Come si collega l'Hebbian learning ai Transfo… | crossref | 1.00 | 0.40 | 1.00 | #1 | 20 | 127ms |
-| 15 | Qual è la relazione tra BDH e il neurogenesis… | crossref | 0.00 | 0.00 | 0.00 | miss | 21 | 122ms |
+| 4 | Cos'è il graph-based retrieval? | concept | 1.00 | 0.20 | 1.00 | #1 | 22 | 121ms |
+| 5 | Cos'è il neurogenesis nel contesto dei grafi? | concept | 0.00 | 0.00 | 0.00 | miss | 10 | 124ms |
+| 6 | Cosa abbiamo fatto sul BDH il 3 luglio 2026? | activity | 1.00 | 0.20 | 1.00 | #1 | 20 | 118ms |
+| 7 | Racconta la sessione di deploy su Azure dell'… | activity | 0.00 | 0.00 | 0.00 | miss | 19 | 121ms |
+| 8 | Cosa è successo con il gateway che girava com… | activity | 0.00 | 0.00 | 0.00 | miss | 20 | 128ms |
+| 9 | Quali notizie AI ci sono state il 1 luglio 20… | news | 0.00 | 0.00 | 0.00 | miss | 19 | 119ms |
+| 10 | Cosa trending su X il 2 luglio 2026? | news | 0.00 | 0.00 | 0.00 | miss | 19 | 117ms |
+| 11 | Qual è stata la notizia principale del 24 giu… | news | 0.00 | 0.00 | 0.00 | miss | 17 | 116ms |
+| 12 | Cos'è l'Hermes Avatar Widget? | entity | 0.05 | 0.00 | 0.00 | #19 | 23 | 111ms |
+| 13 | Che cos'è il Privacy Guard? | entity | 0.12 | 0.00 | 0.00 | #8 | 16 | 121ms |
+| 14 | Come si collega l'Hebbian learning ai Transfo… | crossref | 1.00 | 0.40 | 1.00 | #1 | 20 | 121ms |
+| 15 | Qual è la relazione tra BDH e il neurogenesis… | crossref | 0.00 | 0.00 | 0.00 | miss | 21 | 119ms |
 
 ## Key Findings
 
 1. **Hybrid search outperforms single methods:** MRR 0.323 vs vector 0.456 vs BM25 0.323
 2. **Precision@5:** Hybrid 0.080 vs Vector 0.120
-3. **Latency:** Hybrid 161.9ms vs Vector 120.5ms (overhead: +34.4%)
+3. **Latency:** Hybrid 123.2ms vs Vector 118.7ms (overhead: +3.8%)
 4. **Misses:** 7/15 queries have no relevant note in activated set
 
 ---
