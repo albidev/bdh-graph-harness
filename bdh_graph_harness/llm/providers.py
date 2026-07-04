@@ -66,8 +66,18 @@ def llm_respond(query, active_notes, nodes):
 
     try:
         raw = retry_with_backoff(_llm_call)
-        # Sanitize: strip <pad> tokens and whitespace-only responses
+        # Sanitize: strip <pad> tokens, whitespace-only responses, and guardrail artefacts
         raw = re.sub(r'<pad>', '', raw).strip()
+        # Filter known guardrail/refusal artefacts from free models
+        guardrail_patterns = [
+            r'^User Safety:\s*\w+$',
+            r'^I cannot (help|assist) with',
+            r'^As an AI',
+        ]
+        for pattern in guardrail_patterns:
+            if re.match(pattern, raw, re.IGNORECASE):
+                raw = ''
+                break
         return raw if raw else '[no response from LLM]'
     except Exception as e:
         return f"[LLM error: {e}]"
