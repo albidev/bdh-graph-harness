@@ -66,6 +66,13 @@ CONFIG = {
     'threshold_floor': 0.15,
     # Online plasticity (Phase 3.2)
     'online_plasticity': True,
+    # Graph ignore: node IDs or glob patterns to exclude from the graph
+    # These nodes are never loaded as neurons and never become activation targets
+    'graph_ignore': [
+        'wiki/index',           # table of contents, not knowledge
+        'wiki/log',             # session log, not knowledge
+        'wiki/raw/*',           # raw/unprocessed notes
+    ],
     'stream_enabled': True,
 }
 
