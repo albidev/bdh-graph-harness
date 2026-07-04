@@ -175,6 +175,8 @@ async def run_attention_and_plasticity(
         'query': query,
         'activated_notes': activated_notes,
         'hebbian_updates': hebbian_updates,
+        'hebbian_synapses': len(app_state['state']['synapses']),
+        'queries_processed': app_state['state'].get('queries', 0),
         'timestamp': datetime.now().isoformat(),
     }
     await broadcast_activation(activation_event, ws_clients)
