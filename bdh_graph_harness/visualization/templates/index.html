@@ -192,6 +192,36 @@
     left: 16px;
     background: #fff;
   }
+  .tag-legend {
+    position: absolute;
+    top: 52px;
+    right: 0;
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 0 0 8px 8px;
+    padding: 10px 16px;
+    z-index: 100;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 16px;
+    max-width: 100%;
+    font-size: 12px;
+    transition: opacity 0.2s;
+  }
+  .tag-legend.hidden { display: none; }
+  .tag-legend .tag-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: #8b949e;
+    white-space: nowrap;
+  }
+  .tag-legend .tag-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
 
   /* ======== MOBILE RESPONSIVE ======== */
   @media (max-width: 768px) {
@@ -283,6 +313,7 @@
     <span class="toggle-text">Tags</span>
   </label>
 </div>
+<div id="tag-legend" class="tag-legend hidden"></div>
 <div id="mobile-tabs">
   <div class="tab active" onclick="switchTab('graph-tab')">🗺️ Graph</div>
   <div class="tab" onclick="switchTab('panel-tab')">📋 Panel</div>
@@ -858,6 +889,21 @@ function toggleOrphans(show) {
 // Tag-based node coloring toggle
 function toggleTagColors(enabled) {
   showTagColors = enabled;
+  const legend = document.getElementById('tag-legend');
+
+  // Show/hide legend
+  if (legend) {
+    if (enabled && Object.keys(tagColorMap).length > 0) {
+      legend.innerHTML = Object.entries(tagColorMap)
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .map(([tag, color]) => '<span class="tag-item"><span class="tag-dot" style="background:' + color + '"></span>' + escapeHtml(tag) + '</span>')
+        .join('');
+      legend.classList.remove('hidden');
+    } else {
+      legend.classList.add('hidden');
+    }
+  }
+
   if (!nodesDS || !allGraphNodes) return;
   // Rebuild all node colors
   allNodeIds.forEach(nid => {
