@@ -278,6 +278,10 @@
     <input type="checkbox" id="orphan-toggle" onchange="toggleOrphans(this.checked)">
     <span class="toggle-text">Orphans</span>
   </label>
+  <label class="toggle-label" title="Color nodes by Obsidian tag">
+    <input type="checkbox" id="tag-toggle" onchange="toggleTagColors(this.checked)">
+    <span class="toggle-text">Tags</span>
+  </label>
 </div>
 <div id="mobile-tabs">
   <div class="tab active" onclick="switchTab('graph-tab')">🗺️ Graph</div>
@@ -313,9 +317,24 @@ const COLORS = {
   seed: '#58a6ff',
   edgeWikilink: '#30363d',
   edgeHebbian: '#58a6ff',
-  edgeHebbianPulse: '#39d353',  // green pulse for strengthened synapses
+  edgeHebbianPulse: '#39d353',
   bg: '#0d1117',
 };
+// Tag-based color palette (distinct, readable on dark bg)
+const TAG_COLORS = [
+  '#f97583', // red (entities)
+  '#79c0ff', // blue (concepts)
+  '#7ee787', // green (lessons)
+  '#d2a8ff', // purple (comparisons)
+  '#ffa657', // orange (queries)
+  '#ff7b72', // coral
+  '#56d4dd', // cyan
+  '#e3b341', // yellow
+  '#db61a2', // pink
+  '#a5d6ff', // light blue
+  '#b392f0', // lavender
+  '#85e89d', // mint
+];
 let network = null;
 let nodesDS = null;
 let edgesDS = null;
@@ -324,10 +343,28 @@ let allNodeIds = [];
 let allEdgeIds = [];
 let orphanNodeIds = [];  // nodes with no connections (hidden by default)
 let allGraphNodes = [];  // full node list from server (for orphan toggle)
+let tagColorMap = {};    // tag -> color for tag-based node coloring
+let showTagColors = false; // toggle for tag-based coloring
 
 function initNetwork(graphData) {
   // Store full node list for orphan toggle
   allGraphNodes = graphData.nodes;
+
+  // Build tag color map from unique tags
+  const tagSet = new Set();
+  graphData.nodes.forEach(n => {
+    const tags = n.tags || '';
+    if (Array.isArray(tags)) {
+      tags.forEach(t => tagSet.add(t));
+    } else if (typeof tags === 'string' && tags.trim()) {
+      tags.split(',').forEach(t => tagSet.add(t.trim()));
+    }
+  });
+  tagColorMap = {};
+  let ci = 0;
+  tagSet.forEach(tag => {
+    if (tag) tagColorMap[tag] = TAG_COLORS[ci++ % TAG_COLORS.length];
+  });
 
   // Build edge set first to know which nodes have connections
   const edgeSet = new Set();
@@ -361,11 +398,27 @@ function initNetwork(graphData) {
   allNodeIds = graphData.nodes.filter(n => connectedSet.has(n.id)).map(n => n.id);
   const visNodes = allNodeIds.map(id => {
     const n = graphData.nodes.find(x => x.id === id);
+    // Determine node color from tags if tag coloring is enabled
+    let nodeGroup = 'inactive';
+    let nodeColor = undefined;
+    if (showTagColors && tagColorMap) {
+      const tags = n.tags || '';
+      let primaryTag = '';
+      if (Array.isArray(tags) && tags.length > 0) {
+        primaryTag = tags[0];
+      } else if (typeof tags === 'string' && tags.trim()) {
+        primaryTag = tags.split(',')[0].trim();
+      }
+      if (primaryTag && tagColorMap[primaryTag]) {
+        nodeColor = tagColorMap[primaryTag];
+      }
+    }
     return {
       id: n.id,
       label: n.title,
       title: n.title + (n.tags ? '\\n[' + (Array.isArray(n.tags) ? n.tags.join(', ') : n.tags) + ']' : ''),
-      group: 'inactive',
+      group: nodeGroup,
+      color: nodeColor ? { background: nodeColor, border: nodeColor, highlight: { background: nodeColor, border: nodeColor } } : undefined,
     };
   });
 
@@ -596,18 +649,38 @@ function handleActivation(event) {
     });
   }
 
-  // Add new concept nodes to the graph (neurogenesis)
+  // Add new concept nodes to the graph (neurogenesis) with live edges
   const newConcepts = event.new_concepts || [];
   newConcepts.forEach(nc => {
     if (nc.id && nodesDS && !nodesDS.get(nc.id)) {
       nodesDS.add({
         id: nc.id,
-        label: nc.title || nc.id,
-        title: nc.title || nc.id,
+        label: nc.title || nc.id.split('/').pop(),
+        title: (nc.title || nc.id) + '\\n[neurogenesis]',
         group: 'seed',
         opacity: 1.0,
       });
       allNodeIds.push(nc.id);
+      // Add edges to source notes (live wikilinks)
+      const sources = nc.source_notes || [];
+      sources.forEach(srcTitle => {
+        // Find the source note ID by title
+        const srcNode = allGraphNodes.find(n => n.title === srcTitle);
+        if (srcNode && nodesDS.get(srcNode.id)) {
+          const eid = nc.id + '→' + srcNode.id;
+          if (!edgesDS.get(eid)) {
+            edgesDS.add({
+              id: eid,
+              from: nc.id,
+              to: srcNode.id,
+              color: { color: COLORS.edgeHebbianPulse, highlight: COLORS.edgeHebbianPulse },
+              width: 2,
+              dashes: [5, 5],
+            });
+            allEdgeIds.push(eid);
+          }
+        }
+      });
       // Flash green to indicate new node
       setTimeout(() => {
         if (nodesDS.get(nc.id)) {
@@ -780,6 +853,33 @@ function toggleOrphans(show) {
   // Update neuron count
   const el = document.getElementById('stat-neurons');
   if (el) el.textContent = show ? allGraphNodes.length : (allGraphNodes.length - orphanNodeIds.length);
+}
+
+// Tag-based node coloring toggle
+function toggleTagColors(enabled) {
+  showTagColors = enabled;
+  if (!nodesDS || !allGraphNodes) return;
+  // Rebuild all node colors
+  allNodeIds.forEach(nid => {
+    const node = nodesDS.get(nid);
+    if (!node) return;
+    const n = allGraphNodes.find(x => x.id === nid);
+    if (!n) return;
+    let color = undefined;
+    if (enabled && tagColorMap) {
+      const tags = n.tags || '';
+      let primaryTag = '';
+      if (Array.isArray(tags) && tags.length > 0) {
+        primaryTag = tags[0];
+      } else if (typeof tags === 'string' && tags.trim()) {
+        primaryTag = tags.split(',')[0].trim();
+      }
+      if (primaryTag && tagColorMap[primaryTag]) {
+        color = { background: tagColorMap[primaryTag], border: tagColorMap[primaryTag], highlight: { background: tagColorMap[primaryTag], border: tagColorMap[primaryTag] } };
+      }
+    }
+    nodesDS.update({ id: nid, color: color });
+  });
 }
 
 // Enter key sends query
