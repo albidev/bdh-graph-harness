@@ -210,7 +210,11 @@ def run_neurogenesis(
             vault_root = config['vault_path']
             new_note_id = create_note(vault_root, title, definition, active_titles, query)
             if new_note_id:
-                new_concepts_list.append({'id': new_note_id, 'title': title})
+                new_concepts_list.append({
+                    'id': new_note_id,
+                    'title': title,
+                    'source_notes': active_titles[:3],
+                })
     return new_concepts_list
 
 
