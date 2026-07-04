@@ -30,6 +30,8 @@ __all__ = [
     "api_query",
     "api_stream",
     "api_refresh",
+    "run_attention_and_plasticity",
+    "run_neurogenesis",
     "setup_routes",
 ]
 
@@ -120,24 +122,21 @@ async def api_hebbian(request, app_state: dict) -> web.Response:
     })
 
 
-async def api_query(request, app_state: dict, ws_clients: set) -> web.Response:
-    """Accept {\"query\": \"...\"} and run the full BDH pipeline.
+async def run_attention_and_plasticity(
+    query: str, app_state: dict, ws_clients: set
+) -> tuple[dict, list, list]:
+    """Run the attention + Hebbian plasticity phase shared by all query routes.
 
-    Phase 3.2: Online plasticity — Hebbian update happens right after
-    attention (not after LLM), so synaptic state reflects what was
-    activated, not what the LLM happened to use.
+    Steps:
+      1. Attention (with optional BM25 hybrid search).
+      2. Build the ``activated_notes`` list (id, title, score).
+      3. Online plasticity: Hebbian update + persist state.
+      4. Build ``hebbian_updates`` from the current synaptic state.
+      5. Broadcast an activation event to WebSocket clients.
+
+    Returns ``(active, activated_notes, hebbian_updates)``.
     """
     config = app_state['config']
-
-    try:
-        data = await request.json()
-    except Exception:
-        return web.json_response({'error': 'Invalid JSON body'}, status=400)
-
-    query = data.get('query', '').strip()
-    if not query:
-        return web.json_response({'error': 'Missing "query" field'}, status=400)
-
     n = app_state['nodes']
     e = app_state['edges']
     coll = app_state['collection']
@@ -161,24 +160,6 @@ async def api_query(request, app_state: dict, ws_clients: set) -> web.Response:
         app_state['state'] = hebbian_update(active, app_state['state'])
         save_state(config['vault_path'], app_state['state'])
 
-    # LLM response
-    response_text = llm_respond(query, active, n)
-
-    # Neurogenesis
-    new_concepts_list = []
-    if CONFIG.get('neurogenesis_enabled', True):
-        active_titles = [n[nid]['title'] for nid in active if nid in n]
-        new_concepts = extract_new_concepts(response_text, query, active, n)
-        for concept in new_concepts:
-            title = concept.get('title', '').strip()
-            definition = concept.get('definition', '').strip()
-            if not title or not definition:
-                continue
-            vault_root = config['vault_path']
-            new_note_id = create_note(vault_root, title, definition, active_titles, query)
-            if new_note_id:
-                new_concepts_list.append({'id': new_note_id, 'title': title})
-
     # Collect hebbian synapses for broadcast
     hebbian_updates = []
     for key, syn in app_state['state']['synapses'].items():
@@ -194,10 +175,68 @@ async def api_query(request, app_state: dict, ws_clients: set) -> web.Response:
         'query': query,
         'activated_notes': activated_notes,
         'hebbian_updates': hebbian_updates,
-        'new_concepts': new_concepts_list,
         'timestamp': datetime.now().isoformat(),
     }
     await broadcast_activation(activation_event, ws_clients)
+
+    return active, activated_notes, hebbian_updates
+
+
+def run_neurogenesis(
+    response_text: str, query: str, active: dict, app_state: dict
+) -> list:
+    """Run neurogenesis on a completed LLM response.
+
+    If ``CONFIG['neurogenesis_enabled']`` is True, extracts new concepts
+    from the response and creates notes for each one in the vault.
+
+    Returns the ``new_concepts_list`` (list of ``{'id', 'title'}`` dicts).
+    """
+    new_concepts_list = []
+    if CONFIG.get('neurogenesis_enabled', True):
+        n = app_state['nodes']
+        config = app_state['config']
+        active_titles = [n[nid]['title'] for nid in active if nid in n]
+        new_concepts = extract_new_concepts(response_text, query, active, n)
+        for concept in new_concepts:
+            title = concept.get('title', '').strip()
+            definition = concept.get('definition', '').strip()
+            if not title or not definition:
+                continue
+            vault_root = config['vault_path']
+            new_note_id = create_note(vault_root, title, definition, active_titles, query)
+            if new_note_id:
+                new_concepts_list.append({'id': new_note_id, 'title': title})
+    return new_concepts_list
+
+
+async def api_query(request, app_state: dict, ws_clients: set) -> web.Response:
+    """Accept {\"query\": \"...\"} and run the full BDH pipeline.
+
+    Phase 3.2: Online plasticity — Hebbian update happens right after
+    attention (not after LLM), so synaptic state reflects what was
+    activated, not what the LLM happened to use.
+    """
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response({'error': 'Invalid JSON body'}, status=400)
+
+    query = data.get('query', '').strip()
+    if not query:
+        return web.json_response({'error': 'Missing "query" field'}, status=400)
+
+    # Shared attention + plasticity phase (broadcasts activation to WS)
+    active, activated_notes, hebbian_updates = await run_attention_and_plasticity(
+        query, app_state, ws_clients
+    )
+
+    # LLM response
+    n = app_state['nodes']
+    response_text = llm_respond(query, active, n)
+
+    # Neurogenesis on the full response
+    new_concepts_list = run_neurogenesis(response_text, query, active, app_state)
 
     return web.json_response({
         'response': response_text,
@@ -217,8 +256,6 @@ async def api_stream(request, app_state: dict, ws_clients: set) -> web.StreamRes
 
     SSE format: data: {json}\\n\\n
     """
-    config = app_state['config']
-
     try:
         data = await request.json()
     except Exception:
@@ -229,40 +266,11 @@ async def api_stream(request, app_state: dict, ws_clients: set) -> web.StreamRes
         return web.json_response({'error': 'Missing "query" field'}, status=400)
 
     n = app_state['nodes']
-    e = app_state['edges']
-    coll = app_state['collection']
-    bm25 = app_state.get('bm25_index')
 
-    # Attention with hybrid search
-    active = attention(query, n, e, coll, bm25_index=bm25)
-
-    activated_notes = []
-    if active:
-        for note_id, score in sorted(active.items(), key=lambda x: -x[1]):
-            node = n.get(note_id)
-            activated_notes.append({
-                'id': note_id,
-                'title': node['title'] if node else note_id,
-                'score': round(score, 4),
-            })
-
-    # Online plasticity: Hebbian update right after attention
-    if CONFIG.get('online_plasticity', True):
-        app_state['state'] = hebbian_update(active, app_state['state'])
-        save_state(config['vault_path'], app_state['state'])
-
-    # Broadcast activation to WebSocket clients
-    activation_event = {
-        'type': 'activation',
-        'query': query,
-        'activated_notes': activated_notes,
-        'hebbian_updates': [
-            {'pair': k, 'weight': s['weight'], 'frequency': s.get('frequency', 0)}
-            for k, s in app_state['state']['synapses'].items()
-        ],
-        'timestamp': datetime.now().isoformat(),
-    }
-    await broadcast_activation(activation_event, ws_clients)
+    # Shared attention + plasticity phase (broadcasts activation to WS)
+    active, activated_notes, hebbian_updates = await run_attention_and_plasticity(
+        query, app_state, ws_clients
+    )
 
     # Stream LLM response via SSE
     resp = web.StreamResponse(
@@ -294,20 +302,8 @@ async def api_stream(request, app_state: dict, ws_clients: set) -> web.StreamRes
         logger.warning(f"Stream interrupted: {exc}")
 
     # Neurogenesis on the full response
-    new_concepts_list = []
-    if CONFIG.get('neurogenesis_enabled', True):
-        response_text = ''.join(full_response)
-        active_titles = [n[nid]['title'] for nid in active if nid in n]
-        new_concepts = extract_new_concepts(response_text, query, active, n)
-        for concept in new_concepts:
-            title = concept.get('title', '').strip()
-            definition = concept.get('definition', '').strip()
-            if not title or not definition:
-                continue
-            vault_root = config['vault_path']
-            new_note_id = create_note(vault_root, title, definition, active_titles, query)
-            if new_note_id:
-                new_concepts_list.append({'id': new_note_id, 'title': title})
+    response_text = ''.join(full_response)
+    new_concepts_list = run_neurogenesis(response_text, query, active, app_state)
 
     # Send final event with new concepts
     done_data = json.dumps({

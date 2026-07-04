@@ -3,7 +3,7 @@
 # Expects OPENROUTER_API_KEY in env or in a .env file next to this script
 if [ -z "$OPENROUTER_API_KEY" ]; then
   # Try .env in the script directory, then common locations
-  for envfile in "$(dirname "$0")/.env" "$HOME/.env"; do
+  for envfile in "$(dirname "$0")/.env" "$HOME/.hermes/.env" "$HOME/.env"; do
     if [ -f "$envfile" ]; then
       export OPENROUTER_API_KEY=$(grep OPENROUTER_API_KEY "$envfile" 2>/dev/null | grep -v '^#' | cut -d'=' -f2-)
       [ -n "$OPENROUTER_API_KEY" ] && break
@@ -14,4 +14,7 @@ cd "$(dirname "$0")"
 # Use local config if it exists (not committed), otherwise the public one
 CONFIG="bdh-config.yaml"
 [ -f "bdh-config.local.yaml" ] && CONFIG="bdh-config.local.yaml"
-exec python3 -m bdh_graph_harness --config "$CONFIG" --serve
+# Prefer venv python if available, otherwise system python3
+PYTHON="python3"
+[ -x "$HOME/.hermes/hermes-agent/venv/bin/python" ] && PYTHON="$HOME/.hermes/hermes-agent/venv/bin/python"
+exec "$PYTHON" -m bdh_graph_harness --config "$CONFIG" --serve

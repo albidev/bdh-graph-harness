@@ -16,7 +16,7 @@ from bdh_graph_harness.retrieval.attention import attention
 from bdh_graph_harness.retrieval import get_embeddings
 
 # Memory / Hebbian
-from bdh_graph_harness.memory import hebbian_update, load_state, save_state
+from bdh_graph_harness.memory import hebbian_update, load_state, save_state, merge_states
 
 # LLM
 from bdh_graph_harness.llm import llm_respond, llm_stream
@@ -36,6 +36,7 @@ __all__ = [
     "hebbian_update",
     "load_state",
     "save_state",
+    "merge_states",
     "llm_respond",
     "llm_stream",
     "extract_new_concepts",
