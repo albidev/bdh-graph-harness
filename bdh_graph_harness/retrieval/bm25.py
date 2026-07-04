@@ -2,15 +2,48 @@
 BDH Graph Harness — BM25 index for hybrid search.
 
 Self-contained in-memory BM25 index. Only depends on `re` and `math`.
+Includes Italian stop word filtering for better ranking.
 """
-
 import re
 import math
 from collections import defaultdict
 
 import logging
-
 _logger = logging.getLogger('bdh')
+
+# Italian stop words — high-frequency words that match everywhere
+# and pollute BM25 scores for Italian queries
+_IT_STOP_WORDS = {
+    # Articles
+    'il', 'lo', 'la', 'i', 'gli', 'le', 'l', 'un', 'uno', 'una',
+    # Prepositions
+    'di', 'a', 'da', 'in', 'con', 'su', 'per', 'tra', 'fra',
+    # Contracted prepositions
+    'del', 'dello', 'della', 'dei', 'degli', 'delle', 'al', 'allo',
+    'alla', 'ai', 'agli', 'alle', 'dal', 'dallo', 'dalla', 'dai',
+    'dagli', 'dalle', 'nel', 'nello', 'nella', 'nei', 'negli',
+    'nelle', 'sul', 'sullo', 'sulla', 'sui', 'sugli', 'sulle',
+    # Conjunctions
+    'e', 'ed', 'o', 'ma', 'che', 'se', 'come', 'anche', 'perché',
+    'quando', 'dove', 'mentre', 'però', 'anzi', 'oppure',
+    # Pronouns
+    'io', 'tu', 'lui', 'lei', 'noi', 'voi', 'loro', 'mi', 'ti',
+    'ci', 'vi', 'si', 'me', 'te', 'ce', 've',
+    # Demonstratives
+    'questo', 'questa', 'questi', 'queste', 'quello', 'quella',
+    'quelli', 'quelle',
+    # Verbs (common auxiliary/linking)
+    'è', 'e', 'essere', 'ha', 'ho', 'hanno', 'avere', 'sono',
+    'era', 'può', 'fare', 'fatto',
+    # Adverbs
+    'non', 'più', 'già', 'ancora', 'sempre', 'molto', 'poco',
+    'troppo', 'solo', 'anche', 'qui', 'là', 'ora', 'poi',
+    # Misc
+    'cosa', 'cos', 'qual', 'quale', 'quali',
+    'dopo', 'prima', 'senza', 'sotto', 'sopra',
+    # Common short tokens
+    'the', 'and', 'or', 'is', 'of', 'to', 'in', 'for',
+}
 
 
 class BM25Index:
@@ -18,8 +51,8 @@ class BM25Index:
 
     Built once from the graph nodes, supports keyword scoring
     for hybrid search (vector + keyword combination).
+    Filters Italian stop words for better ranking.
     """
-
     def __init__(self, nodes, k1=1.5, b=0.75):
         self.k1 = k1
         self.b = b
@@ -34,8 +67,9 @@ class BM25Index:
 
     @staticmethod
     def _tokenize(text):
-        """Simple tokenizer: lowercase, split on non-alphanumeric."""
-        return re.findall(r'[a-z0-9]+', text.lower())
+        """Tokenize: lowercase, split on non-alphanumeric, filter stop words."""
+        tokens = re.findall(r'[a-z0-9]+', text.lower())
+        return [t for t in tokens if t not in _IT_STOP_WORDS and len(t) > 1]
 
     def _build(self, nodes):
         """Build the BM25 index from graph nodes."""
