@@ -228,15 +228,30 @@
   }
 
   /* ======== MOBILE RESPONSIVE ======== */
+  #titlebar .title-row { display: contents; }
+  #titlebar .toggles-row { display: contents; }
+  .tag-legend { display: none !important; }
   @media (max-width: 768px) {
     #titlebar {
-      padding: 8px 12px;
-      height: 44px;
-      flex-direction: row;
-      flex-wrap: wrap;
+      padding: 6px 12px;
+      height: auto;
+      min-height: 44px;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 4px;
+    }
+    #titlebar .title-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      width: 100%;
     }
     #titlebar h1 { font-size: 15px; }
     #titlebar .stats { font-size: 11px; }
+    #titlebar .toggles-row {
+      display: flex;
+      gap: 12px;
+    }
     #main {
       flex-direction: column;
       height: calc(100vh - 44px - 36px);  /* minus tabbar */
@@ -293,6 +308,7 @@
     #query-btn { padding: 14px; font-size: 15px; }
     #activated-list li { padding: 12px 10px; font-size: 14px; }
   }
+  /* Desktop: titlebar row layout */
   /* Hide mobile tabs on desktop */
   @media (min-width: 769px) {
     #mobile-tabs { display: none; }
@@ -301,21 +317,25 @@
 </head>
 <body class="graph-tab">
 <div id="titlebar">
-  <h1>🐉 BDH Graph Harness</h1>
-  <div class="stats">
-    Neurons: <span id="stat-neurons">{neuron_count}</span>
-    | Synapses: <span id="stat-synapses">{synapse_count}</span>
-    | Hebbian: <span id="stat-hebbian">{hebbian_count}</span>
-    <span id="status-indicator"></span>
+  <div class="title-row">
+    <h1>🐉 BDH Graph Harness</h1>
+    <div class="stats">
+      Neurons: <span id="stat-neurons">{neuron_count}</span>
+      | Synapses: <span id="stat-synapses">{synapse_count}</span>
+      | Hebbian: <span id="stat-hebbian">{hebbian_count}</span>
+      <span id="status-indicator"></span>
+    </div>
   </div>
-  <label class="toggle-label" title="Show orphan nodes (no connections)">
-    <input type="checkbox" id="orphan-toggle" onchange="toggleOrphans(this.checked)">
-    <span class="toggle-text">Orphans</span>
-  </label>
-  <label class="toggle-label" title="Color nodes by Obsidian tag">
-    <input type="checkbox" id="tag-toggle" onchange="toggleTagColors(this.checked)">
-    <span class="toggle-text">Tags</span>
-  </label>
+  <div class="toggles-row">
+    <label class="toggle-label" title="Show orphan nodes (no connections)">
+      <input type="checkbox" id="orphan-toggle" onchange="toggleOrphans(this.checked)">
+      <span class="toggle-text">Orphans</span>
+    </label>
+    <label class="toggle-label" title="Color nodes by Obsidian tag">
+      <input type="checkbox" id="tag-toggle" onchange="toggleTagColors(this.checked)">
+      <span class="toggle-text">Tags</span>
+    </label>
+  </div>
 </div>
 <div id="mobile-tabs">
   <div class="tab active" onclick="switchTab('graph-tab')">🗺️ Graph</div>
