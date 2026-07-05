@@ -359,10 +359,62 @@
     flex-shrink: 0;
   }
 
+  /* ======== PANEL RESIZE HANDLE ======== */
+  #panel-resize {
+    width: 5px;
+    cursor: col-resize;
+    background: transparent;
+    position: relative;
+    z-index: 10;
+    flex-shrink: 0;
+    transition: background 0.15s;
+  }
+  #panel-resize::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 3px;
+    height: 32px;
+    background: #30363d;
+    border-radius: 2px;
+    transition: all 0.15s;
+  }
+  #panel-resize:hover { background: rgba(88, 166, 255, 0.08); }
+  #panel-resize:hover::after { background: #58a6ff; height: 48px; }
+  #panel-resize.dragging { background: rgba(88, 166, 255, 0.15); }
+  #panel-resize.dragging::after { background: #58a6ff; height: 64px; }
+
+  /* ======== COLLAPSE BUTTON ======== */
+  .collapse-btn {
+    background: none;
+    border: 1px solid #30363d;
+    border-radius: 4px;
+    color: #8b949e;
+    font-size: 13px;
+    width: 26px;
+    height: 26px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s;
+    padding: 0;
+    line-height: 1;
+    flex-shrink: 0;
+  }
+  .collapse-btn:hover { background: #30363d; color: #58a6ff; border-color: #58a6ff; }
+  body.panel-collapsed #side-panel { display: none !important; }
+  body.panel-collapsed #panel-resize { display: none !important; }
+  body.panel-collapsed #graph-area { flex: 1 !important; }
+
   /* ======== MOBILE RESPONSIVE ======== */
   @media (max-width: 768px) {
     #zoom-controls { display: none !important; }
     .tag-legend { display: none !important; }
+    #panel-resize { display: none !important; }
+    .collapse-btn { display: none !important; }
     #titlebar {
       padding: 6px 12px;
       height: auto;
@@ -455,10 +507,11 @@
     </label>
     <div class="stats">
       Neurons: <span id="stat-neurons">{neuron_count}</span>
-      · Synapses: <span id="stat-synapses">{synapse_count}</span>
+      · Synapses: <span id="stat-synapses">{syncount}</span>
       · Hebbian: <span id="stat-hebbian">{hebbian_count}</span>
       <span id="status-indicator"></span>
     </div>
+    <button class="collapse-btn" onclick="togglePanel()" title="Toggle side panel" id="collapse-btn">▸</button>
   </div>
 </div>
 <div id="mobile-tabs">
@@ -1227,7 +1280,7 @@ function connectWS() {
       } else if (event.type === 'activation') {
         handleActivation(event);
       } else if (event.type === 'graph_refresh') {
-        // Server rebuilt the graph — reload data
+        // Server rebuilt the graph — reload data + animate new notes
         console.log('Graph refresh:', event.message);
         fetch('/api/graph').then(r => r.json()).then(data => {
           initNetwork(data);
@@ -1235,6 +1288,17 @@ function connectWS() {
           // Update stats
           document.getElementById('stat-neurons').textContent = event.neurons;
           document.getElementById('stat-synapses').textContent = event.synapses;
+          // Animate new notes with neurogenesis birth animation
+          const newConcepts = event.new_concepts || [];
+          if (newConcepts.length > 0) {
+            handleActivation({
+              type: 'activation',
+              query: 'graph_refresh',
+              activated_notes: [],
+              hebbian_updates: [],
+              new_concepts: newConcepts,
+            });
+          }
         });
       }
     } catch (e) { console.error('Parse error:', e); }
