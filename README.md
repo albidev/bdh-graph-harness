@@ -15,6 +15,7 @@ Turns an Obsidian vault into a living knowledge graph where:
 - **Vector retrieval** — semantic search via embeddings (default). Optional BM25 hybrid mode for multilingual vaults (disabled by default — see `benchmarks/BM25_ANALYSIS.md`)
 - **Adaptive thresholding** — `max(Q75, mean+1std, 0.15)` to filter noise dynamically
 - **Neurogenesis** — LLM extracts new concepts from queries and creates notes in the vault
+- **Node quality scoring** — composite score (strong edges + mean weight + frequency) auto-prunes dormant nodes from visualization; re-activates on strong re-encounter
 - **LLM responses** — OpenRouter (`openrouter/free`) or local Ollama, with citations back to source notes
 - **Real-time visualization** — vis.js network showing nodes activating, edges pulsing as Hebbian weights update during queries
 
@@ -51,6 +52,7 @@ bdh_graph_harness/
 │   └── attention.py         # Seed selection + k-hop spread + adaptive threshold
 ├── memory/
 │   ├── hebbian.py           # Synaptic weight update + decay
+│   ├── quality.py           # Node quality scoring + dormant pruning
 │   └── state_store.py       # Persistent state (file-locked)
 ├── llm/
 │   ├── providers.py         # LLM factory + payload builder
@@ -131,6 +133,9 @@ See `bdh-config.yaml` for all parameters. Key ones:
 | `llm_provider` | `openrouter` | `openrouter` or `ollama` |
 | `llm_model` | `openrouter/free` | Auto-selects available free models |
 | `api_port` | 8643 | Server port |
+| `quality_threshold` | 0.25 | Quality score below this → node marked dormant |
+| `quality_reactivation_score` | 0.50 | Activation score to re-awaken a dormant node |
+| `quality_prune_interval` | 50 | Re-evaluate node quality every N queries |
 | `graph_ignore` | `[]` | fnmatch patterns to exclude nodes from the graph (e.g. `[".bdh-*"]`) |
 
 ## Tests
@@ -139,7 +144,7 @@ See `bdh-config.yaml` for all parameters. Key ones:
 pytest tests/ -v
 ```
 
-108 tests covering graph building, attention spread, adaptive threshold, BM25, hybrid search (optional), Hebbian updates, LLM providers (Ollama + OpenRouter), neurogenesis, and API endpoints.
+155 tests covering graph building, attention spread, adaptive threshold, BM25, hybrid search (optional), Hebbian updates, LLM providers (Ollama + OpenRouter), neurogenesis, and API endpoints.
 
 ## Visualization
 
@@ -148,6 +153,7 @@ The web UI at `:8643` shows a real-time vis.js graph with:
 - **Wikilink edges** + **Hebbian synapses** with hover tooltips (weight, type, connected notes)
 - **Live neurogenesis** — new edges appear in real-time as concepts are created
 - **Orphan nodes toggle**, **tag legend overlay**, **dark theme**, **mobile responsive** (iPhone safe area, touch dismiss)
+- **Node quality** — dormant nodes dimmed (gray, 30% opacity) with 💤 tooltip; stats bar shows dormant count
 
 See [`docs/visualization.md`](docs/visualization.md) for full details on controls, tooltips, and mobile support.
 
