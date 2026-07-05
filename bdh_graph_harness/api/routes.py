@@ -80,11 +80,12 @@ async def api_stats(request, app_state: dict) -> web.Response:
 
 
 async def api_graph(request, app_state: dict) -> web.Response:
-    """Return nodes and edges as JSON for visualization."""
+    """Return nodes, edges, hebbian synapses, and stats as JSON for visualization."""
     n = app_state['nodes']
     e = app_state['edges']
-    dormant = app_state['state'].get('dormant_nodes', set())
-    nq = app_state['state'].get('node_quality', {})
+    s = app_state['state']
+    dormant = s.get('dormant_nodes', set())
+    nq = s.get('node_quality', {})
 
     node_list = []
     for note_id, node in n.items():
@@ -110,7 +111,27 @@ async def api_graph(request, app_state: dict) -> web.Response:
                     'display': link['display'],
                 })
 
-    return web.json_response({'nodes': node_list, 'edges': edge_list})
+    hebbian_list = []
+    for key, syn in s['synapses'].items():
+        a, b = key.split('|')
+        hebbian_list.append({
+            'note_a': a,
+            'note_b': b,
+            'weight': syn['weight'],
+            'frequency': syn.get('frequency', 0),
+        })
+
+    return web.json_response({
+        'nodes': node_list,
+        'edges': edge_list,
+        'hebbian': hebbian_list,
+        'stats': {
+            'neurons': len(n),
+            'synapses': sum(len(links) for links in e.values()),
+            'hebbian_synapses': len(s['synapses']),
+            'dormant_neurons': len(s.get('dormant_nodes', [])),
+        },
+    })
 
 
 async def api_hebbian(request, app_state: dict) -> web.Response:
