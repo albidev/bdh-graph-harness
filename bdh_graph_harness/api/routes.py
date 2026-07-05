@@ -343,6 +343,53 @@ async def api_refresh(request, app_state: dict) -> web.Response:
     return web.json_response({'status': 'ok', 'embeddings': coll.count()})
 
 
+async def api_refresh_graph(request, app_state: dict, ws_clients: set) -> web.Response:
+    """Full graph rebuild: re-read vault, rebuild graph, re-embed, notify WS clients."""
+    import asyncio
+    config = app_state['config']
+    vault_root = config['vault_path']
+
+    # 1. Rebuild graph from vault (no cache — force fresh read)
+    from bdh_graph_harness.graph.builder import build_graph
+    nodes, edges = build_graph(vault_root, use_cache=False)
+
+    old_count = len(app_state['nodes'])
+    app_state['nodes'] = nodes
+    app_state['edges'] = edges
+
+    # 2. Re-embed all notes
+    from bdh_graph_harness.retrieval import compute_all_embeddings
+    coll = compute_all_embeddings(nodes, vault_root, force_refresh=True)
+    app_state['collection'] = coll
+
+    # 3. Rebuild BM25 index if hybrid search is enabled
+    if config.get('hybrid_search', False):
+        from bdh_graph_harness.retrieval.bm25 import BM25Index
+        app_state['bm25'] = BM25Index(nodes)
+
+    new_count = len(nodes)
+    delta = new_count - old_count
+
+    # 4. Notify all WebSocket clients about the graph update
+    from bdh_graph_harness.api.ws import broadcast_activation
+    event = {
+        'type': 'graph_refresh',
+        'neurons': new_count,
+        'synapses': len(edges),
+        'delta': delta,
+        'message': f'Graph refreshed: {new_count} neurons ({delta:+d})',
+    }
+    await broadcast_activation(event, ws_clients)
+
+    return web.json_response({
+        'status': 'ok',
+        'neurons': new_count,
+        'synapses': len(edges),
+        'embeddings': coll.count(),
+        'delta': delta,
+    })
+
+
 # ---------------------------------------------------------------------------
 # Route registration
 # ---------------------------------------------------------------------------
@@ -376,6 +423,9 @@ def setup_routes(app: web.Application, app_state: dict, ws_clients: set) -> None
     async def _refresh(request):
         return await api_refresh(request, app_state)
 
+    async def _refresh_graph(request):
+        return await api_refresh_graph(request, app_state, ws_clients)
+
     app.router.add_get('/', _index)
     app.router.add_get('/ws', _ws)
     app.router.add_get('/api/stats', _stats)
@@ -384,3 +434,4 @@ def setup_routes(app: web.Application, app_state: dict, ws_clients: set) -> None
     app.router.add_post('/api/query', _query)
     app.router.add_post('/api/stream', _stream)
     app.router.add_post('/api/refresh', _refresh)
+    app.router.add_post('/api/refresh-graph', _refresh_graph)

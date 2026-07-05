@@ -33,3 +33,4 @@ harness_original.py
 wiki/.bdh-chroma/
 .bdh-chroma/
 chroma_db/
+.bdh-graph-cache.json
