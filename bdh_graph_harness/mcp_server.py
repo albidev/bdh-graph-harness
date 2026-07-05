@@ -167,7 +167,7 @@ def _fallback_query(question: str) -> str:
         }, ensure_ascii=False, indent=2)
 
     if cfg.get("online_plasticity", True):
-        state = hebbian_update(active, state)
+        state, _ = hebbian_update(active, state)
         save_state(vault_root, state)
         _fallback["hebbian_state"] = state
 

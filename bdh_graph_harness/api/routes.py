@@ -158,18 +158,21 @@ async def run_attention_and_plasticity(
             })
 
     # Online plasticity: Hebbian update immediately after attention
+    updated_keys = set()
     if CONFIG.get('online_plasticity', True):
-        app_state['state'] = hebbian_update(active, app_state['state'])
+        app_state['state'], updated_keys = hebbian_update(active, app_state['state'])
         save_state(config['vault_path'], app_state['state'])
 
-    # Collect hebbian synapses for broadcast
+    # Collect ONLY hebbian synapses updated in this query (for pulse animation)
     hebbian_updates = []
-    for key, syn in app_state['state']['synapses'].items():
-        hebbian_updates.append({
-            'pair': key,
-            'weight': syn['weight'],
-            'frequency': syn.get('frequency', 0),
-        })
+    for key in updated_keys:
+        syn = app_state['state']['synapses'].get(key)
+        if syn:
+            hebbian_updates.append({
+                'pair': key,
+                'weight': syn['weight'],
+                'frequency': syn.get('frequency', 0),
+            })
 
     # Broadcast activation event to WebSocket clients
     activation_event = {

@@ -87,7 +87,7 @@ def test_save_state_lock_file_created(temp_vault, fresh_state):
 def test_hebbian_update_creates_synapses(temp_vault, fresh_state):
     """Test that hebbian_update with 3 active notes creates all pairs."""
     active = {'a': 0.8, 'b': 0.6, 'c': 0.4}
-    state = harness.hebbian_update(active, fresh_state)
+    state, _ = harness.hebbian_update(active, fresh_state)
 
     # 3 notes → C(3,2) = 3 pairs
     assert len(state['synapses']) == 3
@@ -102,7 +102,7 @@ def test_hebbian_update_weight_formula(temp_vault, fresh_state):
     beta = harness.CONFIG['beta']
 
     active = {'a': 0.8, 'b': 0.6}
-    state = harness.hebbian_update(active, fresh_state)
+    state, _ = harness.hebbian_update(active, fresh_state)
 
     syn = state['synapses']['a|b']
     assert syn['frequency'] == 1
@@ -113,13 +113,13 @@ def test_hebbian_update_weight_formula(temp_vault, fresh_state):
 def test_hebbian_update_frequency_increment(fresh_state):
     """Test that repeated co-activation increments frequency."""
     active = {'a': 0.8, 'b': 0.6}
-    state = harness.hebbian_update(active, fresh_state)
+    state, _ = harness.hebbian_update(active, fresh_state)
     assert state['synapses']['a|b']['frequency'] == 1
 
-    state = harness.hebbian_update(active, state)
+    state, _ = harness.hebbian_update(active, state)
     assert state['synapses']['a|b']['frequency'] == 2
 
-    state = harness.hebbian_update(active, state)
+    state, _ = harness.hebbian_update(active, state)
     assert state['synapses']['a|b']['frequency'] == 3
 
     # Weight should have increased
@@ -133,14 +133,14 @@ def test_hebbian_update_decay(fresh_state):
     """Test that synapses between non-active notes decay."""
     # First: activate A, B, C → creates synapses a|b, a|c, b|c
     active1 = {'a': 0.8, 'b': 0.6, 'c': 0.4}
-    state = harness.hebbian_update(active1, fresh_state)
+    state, _ = harness.hebbian_update(active1, fresh_state)
     assert len(state['synapses']) == 3
 
     original_weight = state['synapses']['a|b']['weight']
 
     # Now: activate D, E — a|b, a|c, b|c should decay
     active2 = {'d': 0.7, 'e': 0.5}
-    state = harness.hebbian_update(active2, state)
+    state, _ = harness.hebbian_update(active2, state)
 
     # a|b should have decayed
     if 'a|b' in state['synapses']:
@@ -153,12 +153,12 @@ def test_hebbian_update_decay(fresh_state):
 def test_hebbian_update_prune_low_weight(fresh_state):
     """Test that synapses below 0.01 are pruned after decay."""
     active1 = {'a': 0.8, 'b': 0.6}
-    state = harness.hebbian_update(active1, fresh_state)
+    state, _ = harness.hebbian_update(active1, fresh_state)
 
     # Repeatedly activate different notes to decay a|b below threshold
     # 0.37 * 0.95^n < 0.01 requires n > ~69 iterations
     for _ in range(80):
-        state = harness.hebbian_update({'c': 0.5, 'd': 0.4}, state)
+        state, _ = harness.hebbian_update({'c': 0.5, 'd': 0.4}, state)
 
     # a|b should have been pruned (weight decays as 0.37 * 0.95^80 ≈ 0.0006)
     assert 'a|b' not in state['synapses']
@@ -167,16 +167,16 @@ def test_hebbian_update_prune_low_weight(fresh_state):
 def test_hebbian_update_queries_increment(fresh_state):
     """Test that queries counter increments."""
     active = {'a': 0.8, 'b': 0.6}
-    state = harness.hebbian_update(active, fresh_state)
+    state, _ = harness.hebbian_update(active, fresh_state)
     assert state['queries'] == 1
-    state = harness.hebbian_update(active, state)
+    state, _ = harness.hebbian_update(active, state)
     assert state['queries'] == 2
 
 
 def test_hebbian_update_single_note(fresh_state):
     """Test that single active note creates no synapses."""
     active = {'a': 0.8}
-    state = harness.hebbian_update(active, fresh_state)
+    state, _ = harness.hebbian_update(active, fresh_state)
     assert len(state['synapses']) == 0
     assert state['queries'] == 1
 
@@ -184,6 +184,6 @@ def test_hebbian_update_single_note(fresh_state):
 def test_hebbian_update_sets_last_coactivated(fresh_state):
     """Test that last_coactivated is set on new synapses."""
     active = {'a': 0.8, 'b': 0.6}
-    state = harness.hebbian_update(active, fresh_state)
+    state, _ = harness.hebbian_update(active, fresh_state)
     assert state['synapses']['a|b']['last_coactivated'] is not None
     assert state['synapses']['a|b']['created'] is not None
