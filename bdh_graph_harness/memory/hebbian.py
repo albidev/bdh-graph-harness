@@ -9,8 +9,17 @@ def hebbian_update(active_notes, state):
     """
     Hebbian update: reinforce links between co-activated notes.
     'Neurons that fire together, wire together.'
+
+    Only creates synapses between notes that BOTH score above
+    hebbian_min_score (default 0.15). Prevents spurious connections
+    between weakly-activated peripheral nodes.
     """
-    note_ids = sorted(active_notes.keys())
+    min_score = CONFIG.get('hebbian_min_score', 0.15)
+
+    # Filter to only notes above threshold
+    strong = {nid: s for nid, s in active_notes.items() if s >= min_score}
+
+    note_ids = sorted(strong.keys())
     now = datetime.now().isoformat()
 
     for i, a in enumerate(note_ids):
@@ -32,7 +41,7 @@ def hebbian_update(active_notes, state):
             # Recency: 1.0 if just activated, decays over time
             syn['weight'] = CONFIG['alpha'] * min(syn['frequency'] / 10.0, 1.0) + CONFIG['beta'] * 1.0
 
-    # Decay unused synapses
+    # Decay unused synapses (check against ALL active, not just strong)
     for key, syn in list(state['synapses'].items()):
         if key.split('|')[0] not in active_notes and key.split('|')[1] not in active_notes:
             syn['weight'] *= CONFIG['decay']

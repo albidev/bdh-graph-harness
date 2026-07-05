@@ -35,6 +35,7 @@ experimental_integrate_fire: false
 alpha: 0.7    # frequency weight
 beta: 0.3     # recency weight
 decay: 0.95   # decay factor per session for unused links
+hebbian_min_score: 0.15  # min activation score to create a synapse (prevents spurious connections)
 
 # Neurogenesis
 neurogenesis_dir: concepts
