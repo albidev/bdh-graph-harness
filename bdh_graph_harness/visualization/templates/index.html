@@ -1381,23 +1381,21 @@ function connectWS() {
               changedNodes.forEach((n, i) => {
                 setTimeout(() => {
                   if (nodesDS && nodesDS.get(n.id)) {
-                    // Flash orange
-                    nodesDS.update({ id: n.id, color: { background: '#f0883e', border: '#f0883e', highlight: { background: '#f0883e', border: '#f0883e' }, font: { color: '#fff' } } });
+                    // Select node (vis.js shows highlight border)
+                    network.selectNodes([n.id]);
                     // Zoom to first changed node
                     if (i === 0) {
-                      network.focus(n.id, { scale: 1.2, animation: { duration: 500, easingFunction: 'easeInOutQuad' } });
-                      network.selectNodes([n.id]);
+                      network.focus(n.id, { scale: 1.5, animation: { duration: 800, easingFunction: 'easeInOutQuad' } });
                     }
+                    // Flash node with thick orange border + bigger size
+                    const origNode = nodesDS.get(n.id);
+                    const origSize = origNode ? origNode.size : undefined;
+                    nodesDS.update({ id: n.id, size: 30, borderWidth: 6, color: { background: '#f0883e', border: '#f0883e', highlight: { background: '#f0883e', border: '#f0883e' } }, font: { color: '#ffffff', size: 14 } });
                     setTimeout(() => {
-                      // Restore original color
-                      const node = data.nodes.find(x => x.id === n.id);
-                      if (node) {
-                        const restoreColor = node.dormant
-                          ? { background: COLORS.dormant, border: '#21262d', highlight: { background: COLORS.dormant, border: '#21262d' } }
-                          : undefined;
-                        nodesDS.update({ id: n.id, color: restoreColor });
-                      }
-                    }, 2000);
+                      // Restore original appearance
+                      network.unselectAll();
+                      nodesDS.update({ id: n.id, size: origSize, borderWidth: undefined, color: undefined, font: { color: undefined, size: undefined } });
+                    }, 2500);
                   }
                 }, i * 300);
               });
