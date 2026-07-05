@@ -101,7 +101,7 @@ def run_benchmark():
     print()
 
     # --- Benchmark 1: Single-pass k-hop (old) ---
-    CONFIG['integrate_and_fire'] = False
+    CONFIG['experimental_integrate_fire'] = False
     times_old = []
     results_old = []
     for _ in range(100):
@@ -115,7 +115,7 @@ def run_benchmark():
     last_old = results_old[-1]
 
     # --- Benchmark 2: Integrate-and-Fire (new) ---
-    CONFIG['integrate_and_fire'] = True
+    CONFIG['experimental_integrate_fire'] = True
     times_iaf = []
     results_iaf = []
     for _ in range(100):
@@ -131,7 +131,7 @@ def run_benchmark():
     # Restore
     attn.get_embeddings = original_get_emb
     CONFIG['adaptive_threshold'] = orig_at
-    CONFIG['integrate_and_fire'] = False
+    CONFIG['experimental_integrate_fire'] = False
 
     # --- Report ---
     print(f"{'Metric':<30} {'k-hop (old)':<15} {'IaF (new)':<15}")
