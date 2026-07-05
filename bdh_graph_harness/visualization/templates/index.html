@@ -235,6 +235,113 @@
     pointer-events: auto;
   }
   .tag-legend.hidden { display: none; }
+  /* ======== ZOOM CONTROLS ======== */
+  #zoom-controls {
+    position: absolute;
+    bottom: 16px;
+    right: 16px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    z-index: 100;
+    pointer-events: auto;
+  }
+  #zoom-controls .zoom-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(22, 27, 34, 0.92);
+    border: 1px solid #30363d;
+    border-radius: 8px;
+    padding: 6px 10px;
+  }
+  #zoom-controls .zoom-label {
+    font-size: 11px;
+    color: #8b949e;
+    min-width: 32px;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+    user-select: none;
+  }
+  #zoom-controls .zoom-btn {
+    background: none;
+    border: 1px solid #30363d;
+    border-radius: 4px;
+    color: #c9d1d9;
+    font-size: 14px;
+    width: 26px;
+    height: 26px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s;
+    padding: 0;
+    line-height: 1;
+  }
+  #zoom-controls .zoom-btn:hover {
+    background: #30363d;
+    border-color: #58a6ff;
+    color: #58a6ff;
+  }
+  #zoom-controls #zoom-slider {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 120px;
+    height: 4px;
+    background: #30363d;
+    border-radius: 2px;
+    outline: none;
+    cursor: pointer;
+  }
+  #zoom-controls #zoom-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 14px;
+    height: 14px;
+    background: #58a6ff;
+    border-radius: 50%;
+    cursor: pointer;
+    border: 2px solid #161b22;
+    transition: transform 0.1s;
+  }
+  #zoom-controls #zoom-slider::-webkit-slider-thumb:hover {
+    transform: scale(1.2);
+  }
+  #zoom-controls #zoom-slider::-moz-range-thumb {
+    width: 14px;
+    height: 14px;
+    background: #58a6ff;
+    border-radius: 50%;
+    cursor: pointer;
+    border: 2px solid #161b22;
+  }
+  #zoom-controls .fit-btn {
+    background: rgba(22, 27, 34, 0.92);
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    color: #8b949e;
+    font-size: 11px;
+    padding: 5px 10px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+  #zoom-controls .fit-btn:hover {
+    background: #30363d;
+    color: #58a6ff;
+    border-color: #58a6ff;
+  }
+  @media (max-width: 768px) {
+    #zoom-controls { bottom: 8px; right: 8px; }
+    #zoom-controls #zoom-slider { width: 80px; }
+    #zoom-controls .zoom-row { padding: 4px 8px; }
+    #zoom-controls .fit-btn { font-size: 10px; padding: 4px 8px; }
+  }
   .tag-legend .tag-item {
     display: flex;
     align-items: center;
@@ -374,6 +481,15 @@
 <div id="main">
   <div id="graph-container"></div>
   <div id="tag-legend" class="tag-legend hidden"></div>
+  <div id="zoom-controls">
+    <div class="zoom-row">
+      <button class="zoom-btn" onclick="zoomStep(-0.15)" title="Zoom out">−</button>
+      <input type="range" id="zoom-slider" min="0.1" max="4" step="0.05" value="1" oninput="zoomTo(this.value)">
+      <button class="zoom-btn" onclick="zoomStep(0.15)" title="Zoom in">+</button>
+      <span class="zoom-label" id="zoom-value">100%</span>
+    </div>
+    <button class="fit-btn" onclick="fitToScreen()" title="Fit graph to screen">⊞ Fit</button>
+  </div>
   <div id="side-panel">
     <div id="query-section">
       <div class="query-wrap">
@@ -759,6 +875,10 @@ function initNetwork(graphData) {
       positionTooltip(params.event);
     }
   });
+
+  // Sync zoom slider with scroll/pinch gestures
+  watchZoom();
+  syncZoomUI();
 
   document.getElementById('stat-neurons').textContent = graphData.stats.neurons;
   document.getElementById('stat-synapses').textContent = graphData.stats.synapses;
@@ -1202,6 +1322,45 @@ const qClear = document.getElementById('query-clear');
 function updateClearBtn() { qClear.classList.toggle('visible', qInput.value.length > 0); }
 qInput.addEventListener('input', updateClearBtn);
 function clearQuery() { qInput.value = ''; updateClearBtn(); qInput.focus(); }
+
+// ======== ZOOM CONTROLS ========
+const ZOOM_MIN = 0.1;
+const ZOOM_MAX = 4;
+const zoomSlider = document.getElementById('zoom-slider');
+const zoomLabel = document.getElementById('zoom-value');
+
+function syncZoomUI() {
+  if (!network) return;
+  const s = network.getScale();
+  zoomSlider.value = s;
+  zoomLabel.textContent = Math.round(s * 100) + '%';
+}
+
+function zoomTo(val) {
+  if (!network) return;
+  const s = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, parseFloat(val)));
+  network.moveTo({ scale: s });
+  syncZoomUI();
+}
+
+function zoomStep(delta) {
+  if (!network) return;
+  const cur = network.getScale();
+  zoomTo(cur + delta);
+}
+
+function fitToScreen() {
+  if (!network) return;
+  network.fit({ animation: { duration: 300, easingFunction: 'easeInOutQuad' } });
+  setTimeout(syncZoomUI, 350);
+}
+
+// Keep slider in sync when user zooms via scroll wheel or pinch
+function watchZoom() {
+  if (!network) return;
+  network.on('zoom', syncZoomUI);
+  network.on('animationFinished', syncZoomUI);
+}
 
 // Init
 connectWS();
