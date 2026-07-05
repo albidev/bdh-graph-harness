@@ -3,7 +3,6 @@ BDH Graph Harness — Hybrid scoring module.
 
 Encapsulates the α*vector + β*BM25 combination logic used by attention().
 """
-
 from bdh_graph_harness.config import CONFIG
 
 
@@ -12,6 +11,8 @@ def hybrid_score(note_id, raw_vector_scores, bm25_index, query, alpha=None, beta
 
     Both components are in [0, 1]. Falls back to pure vector score
     if bm25_index is None or the note isn't in the BM25 index.
+
+    Uses batch BM25 normalization to avoid clamping artifacts.
 
     Args:
         note_id: the note being scored
@@ -32,7 +33,9 @@ def hybrid_score(note_id, raw_vector_scores, bm25_index, query, alpha=None, beta
     vec_s = raw_vector_scores.get(note_id, 0.0)
 
     if bm25_index is not None:
-        bm_s = bm25_index.score(query, note_id)
+        # Use batch normalization for proper [0,1] BM25 scores
+        bm25_scores = bm25_index.score_batch(query, list(raw_vector_scores.keys()))
+        bm_s = bm25_scores.get(note_id, 0.0)
         return alpha * vec_s + beta * bm_s
     else:
         return vec_s

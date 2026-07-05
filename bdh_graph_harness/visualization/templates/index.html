@@ -36,6 +36,7 @@
   #main {
     display: flex;
     height: calc(100vh - 52px);
+    position: relative;
   }
   #graph-container {
     width: 70%;
@@ -56,9 +57,29 @@
     padding: 16px;
     border-bottom: 1px solid #30363d;
   }
+  .query-wrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+  }
+  .query-clear {
+    position: absolute;
+    right: 8px;
+    background: none;
+    border: none;
+    color: #6e7681;
+    font-size: 18px;
+    cursor: pointer;
+    padding: 0 4px;
+    line-height: 1;
+    display: none;
+    transition: color 0.15s;
+  }
+  .query-clear:hover { color: #f0883e; }
+  .query-clear.visible { display: block; }
   #query-input {
     width: 100%;
-    padding: 10px 12px;
+    padding: 10px 32px 10px 12px;
     background: #0d1117;
     border: 1px solid #30363d;
     border-radius: 6px;
@@ -231,8 +252,8 @@
   /* ======== MOBILE RESPONSIVE ======== */
   #titlebar .title-row { display: contents; }
   #titlebar .toggles-row { display: contents; }
-  .tag-legend { display: none !important; }
   @media (max-width: 768px) {
+    .tag-legend { display: none !important; }
     #titlebar {
       padding: 6px 12px;
       height: auto;
@@ -305,7 +326,7 @@
     body.panel-tab #side-panel #activated-section { flex: 0 1 auto; max-height: 250px; }
     body.panel-tab #side-panel #response-section { max-height: none; flex: 0 1 auto; }
     /* Larger touch targets */
-    #query-input { font-size: 16px; padding: 12px 14px; }
+    #query-input { font-size: 16px; padding: 12px 32px 12px 14px; }
     #query-btn { padding: 14px; font-size: 15px; }
     #activated-list li { padding: 12px 10px; font-size: 14px; }
   }
@@ -341,7 +362,7 @@
       <span class="toggle-text">Orphans</span>
     </label>
     <label class="toggle-label" title="Color nodes by Obsidian tag">
-      <input type="checkbox" id="tag-toggle" onchange="toggleTagColors(this.checked)">
+      <input type="checkbox" id="tag-toggle" checked onchange="toggleTagColors(this.checked)">
       <span class="toggle-text">Tags</span>
     </label>
   </div>
@@ -351,11 +372,14 @@
   <div class="tab" onclick="switchTab('panel-tab')">📋 Panel</div>
 </div>
 <div id="main">
-  <div id="graph-container">
-  <div id="tag-legend" class="tag-legend hidden"></div></div>
+  <div id="graph-container"></div>
+  <div id="tag-legend" class="tag-legend hidden"></div>
   <div id="side-panel">
     <div id="query-section">
-      <input type="text" id="query-input" placeholder="Enter a query..." autocomplete="off">
+      <div class="query-wrap">
+        <input type="text" id="query-input" placeholder="Enter a query..." autocomplete="off">
+        <button class="query-clear" id="query-clear" onclick="clearQuery()" title="Clear">&times;</button>
+      </div>
       <button id="query-btn" onclick="sendQuery()">Query</button>
     </div>
     <div id="response-section">
@@ -370,6 +394,7 @@
       <h3>Stats</h3>
       <div class="stat-row"><span>Queries processed</span><span class="val" id="stat-queries">0</span></div>
       <div class="stat-row"><span>Last query</span><span class="val" id="stat-last">—</span></div>
+      <div class="stat-row"><span>New concepts</span><span class="val" id="stat-concepts">0</span></div>
     </div>
   </div>
 </div>
@@ -379,11 +404,21 @@ const COLORS = {
   inactive: '#6e7681',
   activated: '#f0883e',
   seed: '#58a6ff',
-  edgeWikilink: '#30363d',
-  edgeHebbian: '#58a6ff',
-  edgeHebbianPulse: '#39d353',
+  edgeWikilink: '#484f58',
+  edgeHebbianLow: '#3b2066',
+  edgeHebbianMid: '#8957e5',
+  edgeHebbianHigh: '#d2a8ff',
+  edgeHebbianPulse: '#d2a8ff',
+  edgeNeurogenesis: '#f0883e',
   bg: '#0d1117',
 };
+// Hebbian edge color by weight (dim → bright green)
+function weightColor(weight) {
+  if (weight < 0.3) return COLORS.edgeHebbianLow;
+  if (weight < 0.6) return COLORS.edgeHebbianMid;
+  return COLORS.edgeHebbianHigh;
+}
+
 // Tag-based color palette (distinct, readable on dark bg)
 const TAG_COLORS = [
   '#f97583', // red (entities)
@@ -408,11 +443,12 @@ let allEdgeIds = [];
 let orphanNodeIds = [];  // nodes with no connections (hidden by default)
 let allGraphNodes = [];  // full node list from server (for orphan toggle)
 let tagColorMap = {};    // tag -> color for tag-based node coloring
-let showTagColors = false; // toggle for tag-based coloring
+let showTagColors = true; // toggle for tag-based coloring (on by default)
 let degreeMap = {};      // node_id -> degree (computed from edges)
 let neighborMap = {};    // node_id -> [connected node titles]
 let tooltipEl = null;    // custom HTML tooltip element
 let edgeInfoMap = {};    // edge_id -> {source_title, target_title, type, weight?, frequency?}
+let totalConcepts = 0;   // cumulative neurogenesis counter
 
 // Create the tooltip element (once)
 function ensureTooltip() {
@@ -513,7 +549,7 @@ function showEdgeTooltip(edgeId, evt) {
   let html = '<div style="max-width:280px">';
   html += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">';
   html += '<span style="font-size:14px">' + icon + '</span>';
-  html += '<span style="font-weight:600;color:' + (isHebbian ? '#39d353' : '#8b949e') + '">' + typeLabel + '</span>';
+  html += '<span style="font-weight:600;color:' + (isHebbian ? weightColor(info.weight || 0) : '#8b949e') + '">' + typeLabel + '</span>';
   html += '</div>';
   html += '<div style="margin-bottom:4px">';
   html += '<span style="color:#58a6ff">' + escapeHtml(info.source_title) + '</span>';
@@ -523,7 +559,7 @@ function showEdgeTooltip(edgeId, evt) {
 
   if (isHebbian) {
     html += '<div style="display:flex;gap:16px;font-size:11px;color:#8b949e">';
-    html += '<span>Weight: <b style="color:#39d353">' + info.weight.toFixed(3) + '</b></span>';
+    html += '<span>Weight: <b style="color:' + weightColor(info.weight) + '">' + info.weight.toFixed(3) + '</b></span>';
     html += '<span>Freq: <b>' + info.frequency + '</b></span>';
     html += '</div>';
   }
@@ -664,7 +700,7 @@ function initNetwork(graphData) {
       id: eid,
       from: h.note_a,
       to: h.note_b,
-      color: { color: COLORS.edgeHebbian, highlight: COLORS.edgeHebbian },
+      color: { color: weightColor(h.weight), highlight: weightColor(h.weight) },
       width: w,
       dashes: false,
     });
@@ -791,8 +827,8 @@ function handleActivation(event) {
       const pulseSteps = [
         { w: newWidth + 5, c: COLORS.edgeHebbianPulse, t: 0 },
         { w: newWidth + 3, c: COLORS.edgeHebbianPulse, t: 600 },
-        { w: newWidth + 1.5, c: COLORS.edgeHebbian,    t: 1400 },
-        { w: newWidth,      c: COLORS.edgeHebbian,    t: 2500 },
+        { w: newWidth + 1.5, c: weightColor(h.weight), t: 1400 },
+        { w: newWidth,      c: weightColor(h.weight), t: 2500 },
       ];
       pulseSteps.forEach(s => {
         setTimeout(() => {
@@ -827,8 +863,8 @@ function handleActivation(event) {
           const pulseStepsNew = [
             { w: newWidth + 5,   c: COLORS.edgeHebbianPulse, t: 0 },
             { w: newWidth + 3,   c: COLORS.edgeHebbianPulse, t: 600 },
-            { w: newWidth + 1.5, c: COLORS.edgeHebbian,    t: 1400 },
-            { w: newWidth,       c: COLORS.edgeHebbian,    t: 2500 },
+            { w: newWidth + 1.5, c: weightColor(h.weight), t: 1400 },
+            { w: newWidth,       c: weightColor(h.weight), t: 2500 },
           ];
           pulseStepsNew.forEach(s => {
             setTimeout(() => {
@@ -897,6 +933,9 @@ function handleActivation(event) {
         opacity: 1.0,
       });
       allNodeIds.push(nc.id);
+      totalConcepts++;
+      const cEl = document.getElementById('stat-concepts');
+      if (cEl) { cEl.textContent = totalConcepts; cEl.style.color = '#f0883e'; setTimeout(() => { cEl.style.color = ''; }, 1000); }
       // Add edges to source notes (live wikilinks)
       const sources = nc.source_notes || [];
       sources.forEach(srcTitle => {
@@ -909,7 +948,7 @@ function handleActivation(event) {
               id: eid,
               from: nc.id,
               to: srcNode.id,
-              color: { color: COLORS.edgeHebbianPulse, highlight: COLORS.edgeHebbianPulse },
+              color: { color: COLORS.edgeNeurogenesis, highlight: COLORS.edgeNeurogenesis },
               width: 2,
               dashes: [5, 5],
             });
@@ -1032,8 +1071,19 @@ function connectWS() {
       const event = JSON.parse(msg.data);
       if (event.type === 'graph') {
         initNetwork(event);
+        if (showTagColors) toggleTagColors(true);
       } else if (event.type === 'activation') {
         handleActivation(event);
+      } else if (event.type === 'graph_refresh') {
+        // Server rebuilt the graph — reload data
+        console.log('Graph refresh:', event.message);
+        fetch('/api/graph').then(r => r.json()).then(data => {
+          initNetwork(data);
+          if (showTagColors) toggleTagColors(true);
+          // Update stats
+          document.getElementById('stat-neurons').textContent = event.neurons;
+          document.getElementById('stat-synapses').textContent = event.synapses;
+        });
       }
     } catch (e) { console.error('Parse error:', e); }
   };
@@ -1145,6 +1195,13 @@ function toggleTagColors(enabled) {
 document.getElementById('query-input').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') sendQuery();
 });
+
+// Clear button visibility + clearQuery
+const qInput = document.getElementById('query-input');
+const qClear = document.getElementById('query-clear');
+function updateClearBtn() { qClear.classList.toggle('visible', qInput.value.length > 0); }
+qInput.addEventListener('input', updateClearBtn);
+function clearQuery() { qInput.value = ''; updateClearBtn(); qInput.focus(); }
 
 // Init
 connectWS();

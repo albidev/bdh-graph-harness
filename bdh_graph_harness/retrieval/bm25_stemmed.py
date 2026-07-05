@@ -1,8 +1,9 @@
 """
-BDH Graph Harness — BM25 index for hybrid search.
+BDH Graph Harness — BM25 index with Italian Snowball stemming.
 
-Self-contained in-memory BM25 index. Only depends on `re` and `math`.
-Includes Italian stop word filtering for better ranking.
+Enhanced variant that uses Snowball stemming for Italian morphology.
+Words like 'architettura' and 'architetture' share the same stem,
+improving recall for morphologically rich languages.
 """
 import re
 import math
@@ -10,6 +11,16 @@ from collections import defaultdict
 
 import logging
 _logger = logging.getLogger('bdh')
+
+# Try to load Snowball stemmer — graceful fallback if not installed
+try:
+    import Stemmer as _Stemmer
+    _ITALIAN_STEMMER = _Stemmer.Stemmer('italian')
+    _HAS_STEMMER = True
+except ImportError:
+    _ITALIAN_STEMMER = None
+    _HAS_STEMMER = False
+    _logger.warning("PyStemmer not installed — BM25 stemming disabled")
 
 # Italian stop words — high-frequency words that match everywhere
 # and pollute BM25 scores for Italian queries
@@ -46,30 +57,46 @@ _IT_STOP_WORDS = {
 }
 
 
-class BM25Index:
-    """In-memory BM25 index over note texts.
+class BM25StemmedIndex:
+    """In-memory BM25 index with Italian Snowball stemming.
 
     Built once from the graph nodes, supports keyword scoring
     for hybrid search (vector + keyword combination).
-    Filters Italian stop words for better ranking.
+    Uses Snowball stemming for Italian morphological normalization.
     """
     def __init__(self, nodes, k1=1.5, b=0.75):
         self.k1 = k1
         self.b = b
-        self.docs = {}       # note_id -> token list
+        self.docs = {}       # note_id -> token list (stemmed)
         self.doc_len = {}    # note_id -> int
         self.avg_dl = 0.0
         self.tf = {}         # note_id -> {term: freq}
         self.df = defaultdict(int)  # term -> doc count
         self.idf = {}        # term -> idf value
         self.N = 0
+        self._stem_cache = {}  # original -> stemmed cache
         self._build(nodes)
+
+    def _stem(self, word):
+        """Stem a word using Italian Snowball stemmer."""
+        if word in self._stem_cache:
+            return self._stem_cache[word]
+        if _HAS_STEMMER:
+            stemmed = _ITALIAN_STEMMER.stemWord(word)
+        else:
+            stemmed = word
+        self._stem_cache[word] = stemmed
+        return stemmed
 
     @staticmethod
     def _tokenize(text):
-        """Tokenize: lowercase, split on non-alphanumeric, filter stop words."""
-        tokens = re.findall(r'[a-z0-9]+', text.lower())
-        return [t for t in tokens if t not in _IT_STOP_WORDS and len(t) > 1]
+        """Tokenize: lowercase, split on non-alphanumeric."""
+        return re.findall(r'[a-z0-9]+', text.lower())
+
+    def _tokenize_and_stem(self, text):
+        """Tokenize, filter stop words, and apply Italian stemming."""
+        tokens = self._tokenize(text)
+        return [self._stem(t) for t in tokens if t not in _IT_STOP_WORDS and len(t) > 1]
 
     def _build(self, nodes):
         """Build the BM25 index from graph nodes."""
@@ -80,7 +107,7 @@ class BM25Index:
         total_len = 0
         for note_id, node in nodes.items():
             text = node.get('text', '')
-            tokens = self._tokenize(text)
+            tokens = self._tokenize_and_stem(text)
             self.docs[note_id] = tokens
             self.doc_len[note_id] = len(tokens)
             total_len += len(tokens)
@@ -97,21 +124,18 @@ class BM25Index:
 
         self.avg_dl = total_len / self.N if self.N > 0 else 0.0
 
-        # Compute IDF (BM25+ variant: idf = ln(1 + (N - df + 0.5) / (df + 0.5)))
+        # Compute IDF (BM25+ variant)
         for term, df in self.df.items():
             self.idf[term] = float(math.log(1.0 + (self.N - df + 0.5) / (df + 0.5)))
 
-        _logger.info(f"BM25 index built: {self.N} docs, {len(self.df)} unique terms, avg_dl={self.avg_dl:.1f}")
+        _logger.info(f"BM25 stemmed index built: {self.N} docs, {len(self.df)} unique stems, avg_dl={self.avg_dl:.1f}")
 
     def score(self, query, note_id):
-        """Compute BM25 score for a single note against a query.
-
-        Returns raw unnormalized score. Use score_batch() for normalized [0,1] scores.
-        """
+        """Compute BM25 score for a single note against a query."""
         if note_id not in self.docs or self.N == 0:
             return 0.0
 
-        query_terms = self._tokenize(query)
+        query_terms = self._tokenize_and_stem(query)
         if not query_terms:
             return 0.0
 
@@ -131,24 +155,8 @@ class BM25Index:
 
         return score
 
-    def score_normalized(self, query, note_id, max_score=None):
-        """Compute normalized BM25 score [0, 1] for a note.
-
-        If max_score is provided, normalizes by it. Otherwise uses log-scaling.
-        """
-        raw = self.score(query, note_id)
-        if raw == 0:
-            return 0.0
-        if max_score and max_score > 0:
-            return min(raw / max_score, 1.0)
-        # Log-normalize as fallback
-        return min(math.log1p(raw) / math.log1p(10.0), 1.0)
-
     def score_batch(self, query, note_ids=None):
-        """Score all notes and return normalized scores [0, 1].
-
-        Returns dict {note_id: normalized_score} with proper max-based normalization.
-        """
+        """Score all notes and return normalized scores [0, 1]."""
         ids = note_ids if note_ids is not None else list(self.docs.keys())
         raw_scores = {}
         for nid in ids:
@@ -163,12 +171,9 @@ class BM25Index:
         return {nid: s / max_score for nid, s in raw_scores.items()}
 
     def search(self, query, note_ids=None, top_k=None):
-        """Score all (or subset of) notes against query.
-
-        Returns list of (note_id, score) sorted descending.
-        """
+        """Score all notes against query, returns sorted list."""
         results = []
-        ids = note_ids if note_ids is not None else self.docs.keys()
+        ids = note_ids if note_ids is not None else list(self.docs.keys())
         for nid in ids:
             s = self.score(query, nid)
             if s > 0:

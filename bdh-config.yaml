@@ -26,6 +26,11 @@ hub_dampening: true    # dampen high-degree hub nodes
 hub_degree_threshold: 15
 max_neighbors_per_hop: 10
 
+# Integrate-and-Fire attention (Phase 4) — EXPERIMENTAL
+# When true, uses iterative accumulation + per-neuron threshold firing
+# instead of single-pass k-hop traversal. Requires more compute.
+experimental_integrate_fire: false
+
 # Hebbian learning
 alpha: 0.7    # frequency weight
 beta: 0.3     # recency weight
@@ -40,15 +45,19 @@ api_host: 0.0.0.0  # bind su tutte le interfacce (localhost + tailscale)
 api_port: 8643
 
 # Hybrid search (Phase 3.1)
-hybrid_search: true
-hybrid_alpha: 0.7   # weight for vector similarity
-hybrid_beta: 0.3    # weight for BM25 keyword score
+# DISABLED by default — BM25 does not improve retrieval for Italian vaults.
+# See benchmarks/BM25_ANALYSIS.md for full benchmark results and rationale.
+# Enable only if your vault contains multilingual or English-heavy content
+# where exact keyword matching adds value.
+hybrid_search: false
+hybrid_alpha: 0.7   # weight for vector similarity (only used if hybrid_search: true)
+hybrid_beta: 0.3    # weight for BM25 keyword score (only used if hybrid_search: true)
 bm25_k1: 1.5
 bm25_b: 0.75
 
 # Adaptive threshold (Phase 3.3)
 adaptive_threshold: true
-threshold_floor: 0.15
+threshold_floor: 0.05
 
 # Online plasticity (Phase 3.2)
 online_plasticity: true
