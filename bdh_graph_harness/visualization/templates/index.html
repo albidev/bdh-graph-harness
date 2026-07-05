@@ -1402,6 +1402,43 @@ function connectWS() {
             }, 1500);
           }
         });
+      } else if (event.type === 'node_update') {
+        // Lightweight update — patch changed nodes in existing DataSet, no rebuild
+        console.log('Node update:', event.message);
+        const changedNodes = event.changed_nodes || [];
+        const deletedNodes = event.deleted_nodes || [];
+
+        // Delete removed nodes
+        deletedNodes.forEach(nid => {
+          if (nodesDS && nodesDS.get(nid)) {
+            nodesDS.remove(nid);
+          }
+        });
+
+        // Update changed nodes with pulse
+        changedNodes.forEach((n, i) => {
+          setTimeout(() => {
+            if (nodesDS && nodesDS.get(n.id)) {
+              // Update label
+              nodesDS.update({ id: n.id, label: n.title, title: n.title });
+              // Select + zoom + flash
+              network.selectNodes([n.id]);
+              if (i === 0) {
+                network.focus(n.id, { scale: 1.5, animation: { duration: 800, easingFunction: 'easeInOutQuad' } });
+              }
+              // Flash: thick orange border + bigger
+              const origNode = nodesDS.get(n.id);
+              const origSize = origNode ? origNode.size : undefined;
+              const origBorder = origNode ? origNode.borderWidth : undefined;
+              nodesDS.update({ id: n.id, size: 30, borderWidth: 6, color: { background: '#f0883e', border: '#f0883e', highlight: { background: '#f0883e', border: '#f0883e' } }, font: { color: '#ffffff', size: 14 } });
+              // Restore after 2.5s
+              setTimeout(() => {
+                network.unselectAll();
+                nodesDS.update({ id: n.id, size: origSize || undefined, borderWidth: origBorder || undefined, color: undefined, font: { color: undefined, size: undefined } });
+              }, 2500);
+            }
+          }, i * 300);
+        });
       }
     } catch (e) { console.error('Parse error:', e); }
   };

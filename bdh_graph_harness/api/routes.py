@@ -405,6 +405,93 @@ async def api_refresh(request, app_state: dict) -> web.Response:
     return web.json_response({'status': 'ok', 'embeddings': coll.count()})
 
 
+async def api_node_update(request, app_state: dict, ws_clients: set) -> web.Response:
+    """Lightweight vault diff: detect new/changed/deleted notes without full rebuild.
+
+    Sends targeted WebSocket events instead of rebuilding the entire graph.
+    Much faster than /api/refresh-graph for single-note updates.
+    """
+    config = app_state['config']
+    vault_root = config['vault_path']
+    old_nodes = app_state['nodes'] or {}
+    old_edges = app_state['edges'] or {}
+
+    # Rebuild graph from vault (fresh read)
+    from bdh_graph_harness.graph.builder import build_graph
+    new_nodes, new_edges = build_graph(vault_root, use_cache=False)
+
+    old_ids = set(old_nodes.keys())
+    new_ids = set(new_nodes.keys())
+
+    added = sorted(new_ids - old_ids)
+    deleted = sorted(old_ids - new_ids)
+    changed = []
+    for nid in sorted(old_ids & new_ids):
+        old_title = old_nodes[nid].get('title', '')
+        new_title = new_nodes[nid].get('title', '')
+        old_text = old_nodes[nid].get('text', '')[:500]
+        new_text = new_nodes[nid].get('text', '')[:500]
+        if old_title != new_title or old_text != new_text:
+            changed.append({
+                'id': nid,
+                'title': new_title,
+                'old_title': old_title,
+            })
+
+    # Update app state
+    app_state['nodes'] = new_nodes
+    app_state['edges'] = new_edges
+
+    # Re-embed if needed
+    if added or changed:
+        from bdh_graph_harness.retrieval import compute_all_embeddings
+        app_state['collection'] = compute_all_embeddings(new_nodes, vault_root, force_refresh=True)
+
+    # Send targeted WS events
+    from bdh_graph_harness.api.ws import broadcast_activation
+
+    if added:
+        new_concepts = []
+        for nid in added:
+            node = new_nodes[nid]
+            source_notes = []
+            for link in new_edges.get(nid, []):
+                target_id = link['target'] if isinstance(link, dict) else link
+                if target_id in old_ids:
+                    source_notes.append(old_nodes.get(target_id, {}).get('title', target_id))
+            new_concepts.append({
+                'id': nid,
+                'title': node.get('title', nid.split('/')[-1]),
+                'source_notes': source_notes[:5],
+            })
+        await broadcast_activation({
+            'type': 'graph_refresh',
+            'neurons': len(new_nodes),
+            'synapses': sum(len(links) for links in new_edges.values()),
+            'delta': len(added) - len(deleted),
+            'new_concepts': new_concepts,
+            'changed_nodes': changed,
+            'deleted_nodes': deleted,
+            'message': f'{len(added)} new, {len(changed)} changed, {len(deleted)} deleted',
+        }, ws_clients)
+    elif changed or deleted:
+        await broadcast_activation({
+            'type': 'node_update',
+            'changed_nodes': changed,
+            'deleted_nodes': deleted,
+            'message': f'{len(changed)} changed, {len(deleted)} deleted',
+        }, ws_clients)
+
+    return web.json_response({
+        'status': 'ok',
+        'added': len(added),
+        'changed': len(changed),
+        'deleted': len(deleted),
+        'changed_nodes': changed,
+        'added_nodes': [{'id': nid, 'title': new_nodes[nid].get('title', '')} for nid in added],
+    })
+
+
 async def api_refresh_graph(request, app_state: dict, ws_clients: set) -> web.Response:
     """Full graph rebuild: re-read vault, rebuild graph, re-embed, notify WS clients.
     Detects new notes and returns them as new_concepts for neurogenesis animation."""
@@ -524,6 +611,9 @@ def setup_routes(app: web.Application, app_state: dict, ws_clients: set) -> None
     async def _refresh_graph(request):
         return await api_refresh_graph(request, app_state, ws_clients)
 
+    async def _node_update(request):
+        return await api_node_update(request, app_state, ws_clients)
+
     async def _quality(request):
         return await api_quality(request, app_state)
 
@@ -537,3 +627,4 @@ def setup_routes(app: web.Application, app_state: dict, ws_clients: set) -> None
     app.router.add_post('/api/stream', _stream)
     app.router.add_post('/api/refresh', _refresh)
     app.router.add_post('/api/refresh-graph', _refresh_graph)
+    app.router.add_post('/api/node-update', _node_update)
