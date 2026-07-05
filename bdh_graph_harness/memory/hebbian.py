@@ -73,9 +73,9 @@ def hebbian_update(active_notes, state, nodes=None):
     state['queries'] += 1
     prune_interval = CONFIG.get('quality_prune_interval', 50)
     if nodes and state['queries'] % prune_interval == 0:
-        old_dormant = state.get('dormant_nodes', set()).copy()
+        old_dormant = set(state.get('dormant_nodes', []))
         state = prune_dormant(state, nodes)
-        new_dormant = state.get('dormant_nodes', set())
+        new_dormant = set(state.get('dormant_nodes', []))
         pruned_count = len(new_dormant - old_dormant)
 
     return state, updated_keys, pruned_count
