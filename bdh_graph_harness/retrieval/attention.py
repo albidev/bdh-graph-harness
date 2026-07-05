@@ -56,7 +56,7 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
     BDH-style attention: find relevant notes via ChromaDB KNN search (seed)
     + graph traversal (k-hop expansion). Returns active note set with scores.
 
-    When integrate_and_fire=True (default), uses the IaF model for iterative
+    When experimental_integrate_fire=True, uses the IaF model for iterative
     accumulation + threshold firing. Otherwise falls back to single-pass k-hop.
 
     Uses ChromaDB for vector similarity (HNSW index, cosine space).
@@ -65,7 +65,8 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
     Phase 4: Integrate-and-Fire — iterative accumulation with per-neuron τ.
     """
     # Dispatch to IaF if enabled
-    if CONFIG.get('integrate_and_fire', False):
+    if CONFIG.get('experimental_integrate_fire', False):
+        logger.warning("⚠️  Integrate-and-Fire attention ENABLED (experimental)")
         return integrate_and_fire_attention(query, nodes, edges, collection, k, max_hop, bm25_index)
 
     if k is None:

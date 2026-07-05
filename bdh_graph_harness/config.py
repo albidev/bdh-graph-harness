@@ -67,7 +67,7 @@ CONFIG = {
     # Online plasticity (Phase 3.2)
     'online_plasticity': True,
     # Integrate-and-Fire attention model
-    'integrate_and_fire': True,
+    'experimental_integrate_fire': False,  # IaF attention — enable via bdh-config.yaml
     'iaf_tau_base': 0.15,       # base firing threshold
     'iaf_tau_k': 0.075,         # degree scaling factor: τ_j = base + k * log(1 + deg)
     'iaf_max_steps': 5,         # max integration steps

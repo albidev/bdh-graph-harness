@@ -26,6 +26,11 @@ hub_dampening: true    # dampen high-degree hub nodes
 hub_degree_threshold: 15
 max_neighbors_per_hop: 10
 
+# Integrate-and-Fire attention (Phase 4) — EXPERIMENTAL
+# When true, uses iterative accumulation + per-neuron threshold firing
+# instead of single-pass k-hop traversal. Requires more compute.
+experimental_integrate_fire: false
+
 # Hebbian learning
 alpha: 0.7    # frequency weight
 beta: 0.3     # recency weight
