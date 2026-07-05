@@ -391,8 +391,9 @@ async def api_refresh_graph(request, app_state: dict, ws_clients: set) -> web.Re
     config = app_state['config']
     vault_root = config['vault_path']
 
-    # 1. Snapshot old node IDs before rebuild
+    # 1. Snapshot old node data before rebuild
     old_node_ids = set(app_state['nodes'].keys()) if app_state['nodes'] else set()
+    old_node_titles = {nid: n.get('title', '') for nid, n in (app_state['nodes'] or {}).items()}
 
     # 2. Rebuild graph from vault (no cache — force fresh read)
     from bdh_graph_harness.graph.builder import build_graph
@@ -401,8 +402,14 @@ async def api_refresh_graph(request, app_state: dict, ws_clients: set) -> web.Re
     app_state['nodes'] = nodes
     app_state['edges'] = edges
 
-    # 3. Detect new notes (neurogenesis)
+    # 3. Detect new notes AND changed notes
     new_node_ids = set(nodes.keys()) - old_node_ids
+    changed_nodes = []
+    for nid in sorted(old_node_ids & set(nodes.keys())):
+        old_title = old_node_titles.get(nid, '')
+        new_title = nodes[nid].get('title', '')
+        if old_title != new_title:
+            changed_nodes.append({'id': nid, 'title': new_title})
     new_concepts = []
     for nid in sorted(new_node_ids):
         node = nodes[nid]
@@ -444,7 +451,8 @@ async def api_refresh_graph(request, app_state: dict, ws_clients: set) -> web.Re
         'synapses': len(edges),
         'delta': delta,
         'new_concepts': new_concepts,
-        'message': f'Graph refreshed: {new_count} neurons ({delta:+d}), {len(new_concepts)} new',
+        'changed_nodes': changed_nodes,
+        'message': f'Graph refreshed: {new_count} neurons ({delta:+d}), {len(new_concepts)} new, {len(changed_nodes)} updated',
     }
     await broadcast_activation(event, ws_clients)
 
@@ -455,6 +463,7 @@ async def api_refresh_graph(request, app_state: dict, ws_clients: set) -> web.Re
         'embeddings': coll.count(),
         'delta': delta,
         'new_concepts': new_concepts,
+        'changed_nodes': changed_nodes,
     })
 
 

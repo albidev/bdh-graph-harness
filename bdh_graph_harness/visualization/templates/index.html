@@ -1355,7 +1355,7 @@ function connectWS() {
       } else if (event.type === 'activation') {
         handleActivation(event);
       } else if (event.type === 'graph_refresh') {
-        // Server rebuilt the graph — reload data + animate new notes
+        // Server rebuilt the graph — reload data + animate new/changed notes
         console.log('Graph refresh:', event.message);
         fetch('/api/graph').then(r => r.json()).then(data => {
           initNetwork(data);
@@ -1374,6 +1374,25 @@ function connectWS() {
               new_concepts: newConcepts,
             });
           }
+          // Pulse changed nodes (vault updates)
+          const changedNodes = event.changed_nodes || [];
+          changedNodes.forEach((n, i) => {
+            setTimeout(() => {
+              if (nodesDS && nodesDS.get(n.id)) {
+                nodesDS.update({ id: n.id, color: { background: '#f0883e', border: '#f0883e', highlight: { background: '#f0883e', border: '#f0883e' } } });
+                setTimeout(() => {
+                  // Restore original color after pulse
+                  const node = data.nodes.find(x => x.id === n.id);
+                  if (node) {
+                    const restoreColor = node.dormant
+                      ? { background: COLORS.dormant, border: '#21262d', highlight: { background: COLORS.dormant, border: '#21262d' } }
+                      : undefined;
+                    nodesDS.update({ id: n.id, color: restoreColor });
+                  }
+                }, 1500);
+              }
+            }, i * 200);
+          });
         });
       }
     } catch (e) { console.error('Parse error:', e); }
