@@ -27,6 +27,7 @@ __all__ = [
     "api_stats",
     "api_graph",
     "api_hebbian",
+    "api_quality",
     "api_query",
     "api_stream",
     "api_refresh",
@@ -58,12 +59,15 @@ async def api_stats(request, app_state: dict) -> web.Response:
     s = app_state['state']
     n = app_state['nodes']
     e = app_state['edges']
+    dormant = s.get('dormant_nodes', set())
     stats = {
         'neurons': len(n),
         'synapses': sum(len(links) for links in e.values()),
         'avg_degree': sum(len(links) for links in e.values()) / max(len(e), 1),
         'hebbian_synapses': len(s['synapses']),
         'queries_processed': s.get('queries', 0),
+        'dormant_neurons': len(dormant),
+        'active_neurons': len(n) - len(dormant),
         'top_hebbian': [],
     }
     if s['synapses']:
@@ -79,15 +83,20 @@ async def api_graph(request, app_state: dict) -> web.Response:
     """Return nodes and edges as JSON for visualization."""
     n = app_state['nodes']
     e = app_state['edges']
+    dormant = app_state['state'].get('dormant_nodes', set())
+    nq = app_state['state'].get('node_quality', {})
 
     node_list = []
     for note_id, node in n.items():
+        quality = nq.get(note_id, {})
         node_list.append({
             'id': note_id,
             'title': node['title'],
             'tags': node['tags'],
             'path': node.get('path', ''),
             'text': node.get('text', '')[:200],
+            'dormant': note_id in dormant,
+            'quality_score': quality.get('score', 0.0),
         })
 
     edge_list = []
@@ -159,8 +168,11 @@ async def run_attention_and_plasticity(
 
     # Online plasticity: Hebbian update immediately after attention
     updated_keys = set()
+    pruned_count = 0
     if CONFIG.get('online_plasticity', True):
-        app_state['state'], updated_keys = hebbian_update(active, app_state['state'])
+        app_state['state'], updated_keys, pruned_count = hebbian_update(
+            active, app_state['state'], nodes=n
+        )
         save_state(config['vault_path'], app_state['state'])
 
     # Collect ONLY hebbian synapses updated in this query (for pulse animation)
@@ -184,6 +196,8 @@ async def run_attention_and_plasticity(
         'queries_processed': app_state['state'].get('queries', 0),
         'neuron_count': len(app_state['nodes']),
         'synapse_count': sum(len(links) for links in app_state['edges'].values()),
+        'dormant_count': len(app_state['state'].get('dormant_nodes', set())),
+        'pruned_count': pruned_count,
         'timestamp': datetime.now().isoformat(),
     }
     await broadcast_activation(activation_event, ws_clients)
@@ -333,6 +347,30 @@ async def api_stream(request, app_state: dict, ws_clients: set) -> web.StreamRes
     return resp
 
 
+async def api_quality(request, app_state: dict) -> web.Response:
+    """Return node quality statistics and dormant node list."""
+    from bdh_graph_harness.memory.quality import quality_stats
+
+    state = app_state['state']
+    stats = quality_stats(state)
+
+    # Include per-node quality details for dormant nodes
+    nq = state.get('node_quality', {})
+    dormant_details = []
+    for nid, q in sorted(nq.items(), key=lambda x: x[1]['score']):
+        if q.get('dormant', False):
+            dormant_details.append({
+                'id': nid,
+                'score': q['score'],
+                'strong_ratio': q['strong_ratio'],
+                'mean_weight': q['mean_weight'],
+                'frequency': q['frequency'],
+            })
+
+    stats['dormant_nodes'] = dormant_details
+    return web.json_response(stats)
+
+
 async def api_refresh(request, app_state: dict) -> web.Response:
     """Force refresh all embeddings."""
     config = app_state['config']
@@ -456,11 +494,15 @@ def setup_routes(app: web.Application, app_state: dict, ws_clients: set) -> None
     async def _refresh_graph(request):
         return await api_refresh_graph(request, app_state, ws_clients)
 
+    async def _quality(request):
+        return await api_quality(request, app_state)
+
     app.router.add_get('/', _index)
     app.router.add_get('/ws', _ws)
     app.router.add_get('/api/stats', _stats)
     app.router.add_get('/api/graph', _graph)
     app.router.add_get('/api/hebbian', _hebbian)
+    app.router.add_get('/api/quality', _quality)
     app.router.add_post('/api/query', _query)
     app.router.add_post('/api/stream', _stream)
     app.router.add_post('/api/refresh', _refresh)

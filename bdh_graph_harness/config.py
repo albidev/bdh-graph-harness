@@ -67,6 +67,10 @@ CONFIG = {
     'threshold_floor': 0.15,
     # Online plasticity (Phase 3.2)
     'online_plasticity': True,
+    # Node quality (Phase 3.5)
+    'quality_threshold': 0.25,           # below this → dormant
+    'quality_reactivation_score': 0.50,  # activation to re-awaken
+    'quality_prune_interval': 50,        # re-evaluate every N queries
     # Integrate-and-Fire attention model
     'experimental_integrate_fire': False,  # IaF attention — enable via bdh-config.yaml
     'iaf_tau_base': 0.15,       # base firing threshold
