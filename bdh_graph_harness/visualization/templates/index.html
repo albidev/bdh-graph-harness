@@ -246,10 +246,49 @@
     max-height: 180px;
     overflow-y: auto;
     font-size: 11px;
-    transition: opacity 0.2s;
+    transition: transform 0.25s ease, opacity 0.2s;
     pointer-events: auto;
   }
   .tag-legend.hidden { display: none; }
+  .tag-legend .legend-collapse {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    background: none;
+    border: none;
+    color: #6e7681;
+    font-size: 14px;
+    cursor: pointer;
+    padding: 2px 4px;
+    line-height: 1;
+    border-radius: 3px;
+    transition: color 0.15s;
+  }
+  .tag-legend .legend-collapse:hover { color: #f0883e; }
+  .tag-legend.collapsed {
+    transform: translateX(calc(-100% + 22px));
+    overflow: hidden;
+    max-width: 420px;
+    padding: 0;
+    border-radius: 0 6px 6px 0;
+    cursor: pointer;
+  }
+  .tag-legend.collapsed:hover {
+    transform: translateX(calc(-100% + 26px));
+  }
+  .tag-legend.collapsed .legend-collapse { display: none; }
+  .tag-legend.collapsed .tag-item { display: none; }
+  .tag-legend.collapsed::after {
+    content: '🏷';
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 100%;
+    min-height: 28px;
+    font-size: 12px;
+    padding: 4px 0;
+  }
   /* ======== ZOOM CONTROLS ======== */
   #zoom-controls {
     position: absolute;
@@ -533,7 +572,9 @@
     </div>
   </div>
   </div>
-  <div id="tag-legend" class="tag-legend hidden"></div>
+  <div id="tag-legend" class="tag-legend hidden">
+    <button class="legend-collapse" onclick="toggleLegendCollapse()" title="Collapse legend">◀</button>
+  </div>
   <div id="panel-resize"></div>
   <div id="side-panel">
     <div id="query-section">
@@ -1379,8 +1420,14 @@ function toggleTagColors(enabled) {
             items.push('<span class="tag-item"><span class="tag-dot" style="background:' + color + '"></span>' + escapeHtml(tag) + '</span>');
           }
         });
-      legend.innerHTML = items.join('');
+      // Preserve the collapse button
+      const collapseBtn = '<button class="legend-collapse" onclick="toggleLegendCollapse()" title="Collapse legend">◀</button>';
+      legend.innerHTML = collapseBtn + items.join('');
       legend.classList.remove('hidden');
+      // Restore collapsed state
+      if (localStorage.getItem('bdh-legend-collapsed') === 'true') {
+        legend.classList.add('collapsed');
+      }
     } else {
       legend.classList.add('hidden');
     }
@@ -1409,6 +1456,21 @@ function toggleTagColors(enabled) {
     nodesDS.update({ id: nid, color: color });
   });
 }
+
+// Legend collapse toggle (slide to left edge)
+function toggleLegendCollapse() {
+  const legend = document.getElementById('tag-legend');
+  if (!legend) return;
+  legend.classList.toggle('collapsed');
+  localStorage.setItem('bdh-legend-collapsed', legend.classList.contains('collapsed'));
+}
+
+// Click on collapsed legend tab to expand
+document.getElementById('tag-legend').addEventListener('click', function(e) {
+  if (this.classList.contains('collapsed') && e.target === this) {
+    toggleLegendCollapse();
+  }
+});
 
 // Enter key sends query
 document.getElementById('query-input').addEventListener('keydown', (e) => {

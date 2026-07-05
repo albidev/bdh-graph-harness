@@ -129,7 +129,7 @@ async def websocket_handler(request, app_state: dict, ws_clients: set = None) ->
     that set (matching the original closure-based design where ``ws_clients``
     was captured from the enclosing ``start_api_server`` scope).
     """
-    ws = web.WebSocketResponse()
+    ws = web.WebSocketResponse(heartbeat=30.0)  # ping every 30s to keep alive
     await ws.prepare(request)
 
     if ws_clients is not None:
