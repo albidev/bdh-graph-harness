@@ -39,10 +39,16 @@
     position: relative;
   }
   #graph-container {
-    width: 70%;
+    width: 100%;
     height: 100%;
     background: #0d1117;
     position: relative;
+  }
+  #graph-area {
+    position: relative;
+    flex: 0 0 70%;
+    height: 100%;
+    overflow: hidden;
   }
   #side-panel {
     width: 30%;
@@ -240,10 +246,6 @@
     position: absolute;
     bottom: 16px;
     right: 16px;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 6px;
     z-index: 100;
     pointer-events: auto;
   }
@@ -380,11 +382,10 @@
       flex-direction: column;
       height: calc(100vh - 44px - 36px);  /* minus tabbar */
     }
-    #graph-container {
+    #graph-area {
       width: 100%;
       height: 100%;
       flex: 1;
-      display: block;
     }
     #side-panel {
       width: 100%;
@@ -420,10 +421,10 @@
       border-bottom-color: #f0883e;
     }
     /* When graph tab active on mobile */
-    body.graph-tab #graph-container { display: block; flex: 1; }
+    body.graph-tab #graph-area { display: block; flex: 1; }
     body.graph-tab #side-panel { display: none; }
     /* When panel tab active on mobile */
-    body.panel-tab #graph-container { display: none; }
+    body.panel-tab #graph-area { display: none; }
     body.panel-tab #side-panel { display: flex; flex-direction: column; flex: 1; overflow-y: auto; }
     body.panel-tab #side-panel #activated-section { flex: 0 1 auto; max-height: 250px; }
     body.panel-tab #side-panel #response-section { max-height: none; flex: 0 1 auto; }
@@ -440,7 +441,7 @@
 
   @media (max-width: 768px) {
     #main { flex-direction: column; }
-    #graph-container { width: 100%; height: 65vh; }
+    #graph-area { width: 100%; height: 65vh; flex: none; }
     #side-panel { width: 100%; height: 35vh; border-left: none; border-top: 1px solid #30363d; }
     #titlebar h1 { font-size: 15px; }
     #titlebar .stats { font-size: 11px; }
@@ -474,15 +475,17 @@
   <div class="tab" onclick="switchTab('panel-tab')">📋 Panel</div>
 </div>
 <div id="main">
-  <div id="graph-container"></div>
-  <div id="zoom-controls">
+  <div id="graph-area">
+    <div id="graph-container"></div>
+    <div id="zoom-controls">
     <div class="zoom-row">
       <button class="zoom-btn" onclick="zoomStep(-0.15)" title="Zoom out">−</button>
       <input type="range" id="zoom-slider" min="0.1" max="4" step="0.05" value="1" oninput="zoomTo(this.value)">
       <button class="zoom-btn" onclick="zoomStep(0.15)" title="Zoom in">+</button>
       <span class="zoom-label" id="zoom-value">100%</span>
+      <button class="fit-btn" onclick="fitToScreen()" title="Fit graph to screen">⊞ Fit</button>
     </div>
-    <button class="fit-btn" onclick="fitToScreen()" title="Fit graph to screen">⊞ Fit</button>
+  </div>
   </div>
   <div id="tag-legend" class="tag-legend hidden"></div>
   <div id="side-panel">
