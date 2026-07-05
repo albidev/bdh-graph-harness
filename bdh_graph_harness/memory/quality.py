@@ -137,7 +137,7 @@ def prune_dormant(state: dict, nodes: dict) -> dict:
     """Re-evaluate all node qualities and mark low-scoring nodes dormant.
 
     Modifies ``state['node_quality']`` in place and returns the updated state.
-    Also injects a ``dormant_nodes`` set into the state for quick lookup.
+    Also injects a ``dormant_nodes`` list into the state for quick lookup.
 
     Returns
     -------
@@ -149,10 +149,10 @@ def prune_dormant(state: dict, nodes: dict) -> dict:
     qualities = compute_all_qualities(synapses, nodes)
     state['node_quality'] = qualities
 
-    # Build quick-lookup set
-    state['dormant_nodes'] = {
+    # Build quick-lookup list (stored as sorted list for JSON serialisation)
+    state['dormant_nodes'] = sorted(
         nid for nid, q in qualities.items() if q['dormant']
-    }
+    )
 
     return state
 
@@ -183,8 +183,10 @@ def try_reactivate(node_id: str, activation_score: float, state: dict) -> bool:
         entry['dormant'] = False
         entry['score'] = max(entry['score'], activation_score)
         entry['evaluated_at'] = datetime.now().isoformat()
-        # Update lookup set
-        state.get('dormant_nodes', set()).discard(node_id)
+        # Update lookup list
+        dormant = state.get('dormant_nodes', [])
+        if node_id in dormant:
+            state['dormant_nodes'] = [n for n in dormant if n != node_id]
         return True
 
     return False

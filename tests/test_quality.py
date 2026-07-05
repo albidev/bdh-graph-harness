@@ -44,7 +44,7 @@ def fresh_state():
         'synapses': {},
         'queries': 0,
         'node_quality': {},
-        'dormant_nodes': set(),
+        "dormant_nodes": [],
     }
 
 
@@ -138,7 +138,7 @@ class TestPruneDormant:
         nodes = {'a': {'title': 'A'}, 'b': {'title': 'B'}, 'z': {'title': 'Z'}}
         state = prune_dormant(fresh_state, nodes)
         assert 'dormant_nodes' in state
-        assert isinstance(state['dormant_nodes'], set)
+        assert isinstance(state['dormant_nodes'], list)
         assert 'z' in state['dormant_nodes']  # weak node
 
     def test_updates_node_quality(self, simple_synapses, simple_nodes, fresh_state):
@@ -149,7 +149,7 @@ class TestPruneDormant:
 
     def test_empty_graph(self, fresh_state):
         state = prune_dormant(fresh_state, {})
-        assert state['dormant_nodes'] == set()
+        assert state['dormant_nodes'] == []
         assert state['node_quality'] == {}
 
 
@@ -161,7 +161,7 @@ class TestTryReactivate:
         fresh_state['node_quality'] = {
             'x': {'score': 0.1, 'dormant': True, 'evaluated_at': '2026-01-01'},
         }
-        fresh_state['dormant_nodes'] = {'x'}
+        fresh_state['dormant_nodes'] = ['x']
         result = try_reactivate('x', 0.6, fresh_state)
         assert result is True
         assert fresh_state['node_quality']['x']['dormant'] is False
@@ -171,7 +171,7 @@ class TestTryReactivate:
         fresh_state['node_quality'] = {
             'x': {'score': 0.1, 'dormant': True, 'evaluated_at': '2026-01-01'},
         }
-        fresh_state['dormant_nodes'] = {'x'}
+        fresh_state['dormant_nodes'] = ['x']
         result = try_reactivate('x', 0.3, fresh_state)
         assert result is False
         assert fresh_state['node_quality']['x']['dormant'] is True
@@ -181,7 +181,7 @@ class TestTryReactivate:
         fresh_state['node_quality'] = {
             'x': {'score': 0.5, 'dormant': False, 'evaluated_at': '2026-01-01'},
         }
-        fresh_state['dormant_nodes'] = set()
+        fresh_state['dormant_nodes'] = []
         result = try_reactivate('x', 0.9, fresh_state)
         assert result is False
 
