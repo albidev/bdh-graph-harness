@@ -1357,6 +1357,8 @@ function connectWS() {
       } else if (event.type === 'graph_refresh') {
         // Server rebuilt the graph — reload data + animate new/changed notes
         console.log('Graph refresh:', event.message);
+        const changedNodes = event.changed_nodes || [];
+        const newConcepts = event.new_concepts || [];
         fetch('/api/graph').then(r => r.json()).then(data => {
           initNetwork(data);
           if (showTagColors) toggleTagColors(true);
@@ -1364,7 +1366,6 @@ function connectWS() {
           document.getElementById('stat-neurons').textContent = event.neurons;
           document.getElementById('stat-synapses').textContent = event.synapses;
           // Animate new notes with neurogenesis birth animation
-          const newConcepts = event.new_concepts || [];
           if (newConcepts.length > 0) {
             handleActivation({
               type: 'activation',
@@ -1374,25 +1375,34 @@ function connectWS() {
               new_concepts: newConcepts,
             });
           }
-          // Pulse changed nodes (vault updates)
-          const changedNodes = event.changed_nodes || [];
-          changedNodes.forEach((n, i) => {
+          // Pulse changed nodes AFTER network has rendered (1.5s delay)
+          if (changedNodes.length > 0 && network) {
             setTimeout(() => {
-              if (nodesDS && nodesDS.get(n.id)) {
-                nodesDS.update({ id: n.id, color: { background: '#f0883e', border: '#f0883e', highlight: { background: '#f0883e', border: '#f0883e' } } });
+              changedNodes.forEach((n, i) => {
                 setTimeout(() => {
-                  // Restore original color after pulse
-                  const node = data.nodes.find(x => x.id === n.id);
-                  if (node) {
-                    const restoreColor = node.dormant
-                      ? { background: COLORS.dormant, border: '#21262d', highlight: { background: COLORS.dormant, border: '#21262d' } }
-                      : undefined;
-                    nodesDS.update({ id: n.id, color: restoreColor });
+                  if (nodesDS && nodesDS.get(n.id)) {
+                    // Flash orange
+                    nodesDS.update({ id: n.id, color: { background: '#f0883e', border: '#f0883e', highlight: { background: '#f0883e', border: '#f0883e' }, font: { color: '#fff' } } });
+                    // Zoom to first changed node
+                    if (i === 0) {
+                      network.focus(n.id, { scale: 1.2, animation: { duration: 500, easingFunction: 'easeInOutQuad' } });
+                      network.selectNodes([n.id]);
+                    }
+                    setTimeout(() => {
+                      // Restore original color
+                      const node = data.nodes.find(x => x.id === n.id);
+                      if (node) {
+                        const restoreColor = node.dormant
+                          ? { background: COLORS.dormant, border: '#21262d', highlight: { background: COLORS.dormant, border: '#21262d' } }
+                          : undefined;
+                        nodesDS.update({ id: n.id, color: restoreColor });
+                      }
+                    }, 2000);
                   }
-                }, 1500);
-              }
-            }, i * 200);
-          });
+                }, i * 300);
+              });
+            }, 1500);
+          }
         });
       }
     } catch (e) { console.error('Parse error:', e); }
