@@ -347,40 +347,66 @@ async def api_refresh(request, app_state: dict) -> web.Response:
 
 
 async def api_refresh_graph(request, app_state: dict, ws_clients: set) -> web.Response:
-    """Full graph rebuild: re-read vault, rebuild graph, re-embed, notify WS clients."""
+    """Full graph rebuild: re-read vault, rebuild graph, re-embed, notify WS clients.
+    Detects new notes and returns them as new_concepts for neurogenesis animation."""
     import asyncio
     config = app_state['config']
     vault_root = config['vault_path']
 
-    # 1. Rebuild graph from vault (no cache — force fresh read)
+    # 1. Snapshot old node IDs before rebuild
+    old_node_ids = set(app_state['nodes'].keys()) if app_state['nodes'] else set()
+
+    # 2. Rebuild graph from vault (no cache — force fresh read)
     from bdh_graph_harness.graph.builder import build_graph
     nodes, edges = build_graph(vault_root, use_cache=False)
 
-    old_count = len(app_state['nodes'])
     app_state['nodes'] = nodes
     app_state['edges'] = edges
 
-    # 2. Re-embed all notes
+    # 3. Detect new notes (neurogenesis)
+    new_node_ids = set(nodes.keys()) - old_node_ids
+    new_concepts = []
+    for nid in sorted(new_node_ids):
+        node = nodes[nid]
+        title = node.get('title', nid.split('/')[-1])
+        # Find source notes: existing nodes this new note links TO (outgoing wikilinks)
+        source_notes = []
+        node_links = edges.get(nid, [])
+        for t in node_links:
+            target_id = t['target'] if isinstance(t, dict) else t
+            # Targets may lack wiki/ prefix — try both formats
+            resolved = target_id if target_id in old_node_ids else ('wiki/' + target_id if ('wiki/' + target_id) in old_node_ids else None)
+            if resolved:
+                src_node = nodes.get(resolved, {})
+                source_notes.append(src_node.get('title', resolved.split('/')[-1]))
+        new_concepts.append({
+            'id': nid,
+            'title': title,
+            'source_notes': source_notes[:5],  # cap at 5
+        })
+
+    # 4. Re-embed all notes
     from bdh_graph_harness.retrieval import compute_all_embeddings
     coll = compute_all_embeddings(nodes, vault_root, force_refresh=True)
     app_state['collection'] = coll
 
-    # 3. Rebuild BM25 index if hybrid search is enabled
+    # 5. Rebuild BM25 index if hybrid search is enabled
     if config.get('hybrid_search', False):
         from bdh_graph_harness.retrieval.bm25 import BM25Index
         app_state['bm25'] = BM25Index(nodes)
 
     new_count = len(nodes)
-    delta = new_count - old_count
+    delta = new_count - len(old_node_ids)
 
-    # 4. Notify all WebSocket clients about the graph update
+    # 6. Notify all WebSocket clients with new_concepts for neurogenesis animation
     from bdh_graph_harness.api.ws import broadcast_activation
     event = {
         'type': 'graph_refresh',
         'neurons': new_count,
         'synapses': len(edges),
         'delta': delta,
-        'message': f'Graph refreshed: {new_count} neurons ({delta:+d})',
+        'new_concepts': new_concepts,
+        'message': f'Graph refreshed: {new_count} neurons ({delta:+d}), {len(new_concepts)} new',
     }
     await broadcast_activation(event, ws_clients)
 
@@ -390,6 +416,7 @@ async def api_refresh_graph(request, app_state: dict, ws_clients: set) -> web.Re
         'synapses': len(edges),
         'embeddings': coll.count(),
         'delta': delta,
+        'new_concepts': new_concepts,
     })
 
 
