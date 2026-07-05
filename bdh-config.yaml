@@ -64,6 +64,13 @@ threshold_floor: 0.05
 online_plasticity: true
 stream_enabled: true
 
+# Node quality (Phase 3.5)
+# Nodes with quality score below threshold are marked dormant and
+# visually dimmed. Reactivated when a future query activates them strongly.
+quality_threshold: 0.25           # below this → dormant
+quality_reactivation_score: 0.50  # activation score to re-awaken
+quality_prune_interval: 50        # re-evaluate every N queries
+
 # Python executable (for ChromaDB dependency) — auto-detected if omitted
 # python_exec: /path/to/venv/bin/python
 

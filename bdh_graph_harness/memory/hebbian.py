@@ -3,9 +3,10 @@
 from datetime import datetime
 
 from bdh_graph_harness.config import CONFIG
+from bdh_graph_harness.memory.quality import prune_dormant, try_reactivate
 
 
-def hebbian_update(active_notes, state):
+def hebbian_update(active_notes, state, nodes=None):
     """
     Hebbian update: reinforce links between co-activated notes.
     'Neurons that fire together, wire together.'
@@ -14,8 +15,16 @@ def hebbian_update(active_notes, state):
     hebbian_min_score (default 0.15). Prevents spurious connections
     between weakly-activated peripheral nodes.
 
-    Returns (state, updated_keys) — updated_keys is the set of synapse
-    keys that were created or reinforced in this call.
+    Every ``quality_prune_interval`` queries (default 50), runs
+    ``prune_dormant`` to re-evaluate node quality and mark weak nodes
+    as dormant.
+
+    Dormant nodes with a strong re-activation are automatically woken up.
+
+    Returns (state, updated_keys, pruned_count) — updated_keys is the
+    set of synapse keys that were created or reinforced in this call;
+    pruned_count is the number of newly dormant nodes (0 if no prune
+    happened).
     """
     min_score = CONFIG.get('hebbian_min_score', 0.15)
 
@@ -53,5 +62,20 @@ def hebbian_update(active_notes, state):
             if syn['weight'] < 0.01:
                 del state['synapses'][key]
 
+    # Try to re-activate dormant nodes with strong activation
+    reactivated = 0
+    for nid, score in active_notes.items():
+        if score >= min_score and try_reactivate(nid, score, state):
+            reactivated += 1
+
+    # Periodic quality pruning
+    pruned_count = 0
     state['queries'] += 1
-    return state, updated_keys
+    prune_interval = CONFIG.get('quality_prune_interval', 50)
+    if nodes and state['queries'] % prune_interval == 0:
+        old_dormant = state.get('dormant_nodes', set()).copy()
+        state = prune_dormant(state, nodes)
+        new_dormant = state.get('dormant_nodes', set())
+        pruned_count = len(new_dormant - old_dormant)
+
+    return state, updated_keys, pruned_count

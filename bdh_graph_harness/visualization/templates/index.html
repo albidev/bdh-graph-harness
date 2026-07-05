@@ -550,6 +550,7 @@
       Neurons: <span id="stat-neurons">{neuron_count}</span>
       · Synapses: <span id="stat-synapses">{syncount}</span>
       · Hebbian: <span id="stat-hebbian">{hebbian_count}</span>
+      · <span id="stat-dormant" style="display:none">💤 <span id="stat-dormant-count">0</span></span>
       <span id="status-indicator"></span>
     </div>
     <button class="collapse-btn" onclick="togglePanel()" title="Toggle side panel" id="collapse-btn">▸</button>
@@ -607,6 +608,7 @@ const COLORS = {
   activated: '#f0883e',
   seed: '#58a6ff',
   neurogenesis: '#3fb950',  // green — new born nodes
+  dormant: '#30363d',       // dark gray — dormant/low-quality nodes
   edgeWikilink: '#484f58',
   edgeHebbianLow: '#3b2066',
   edgeHebbianMid: '#8957e5',
@@ -848,7 +850,12 @@ function initNetwork(graphData) {
     // Determine node color from tags if tag coloring is enabled
     let nodeGroup = 'inactive';
     let nodeColor = undefined;
-    if (showTagColors && tagColorMap) {
+    // Handle dormant nodes — dark gray, reduced opacity
+    const isDormant = n.dormant === true;
+    const qualityScore = n.quality_score || 0;
+    if (isDormant) {
+      nodeColor = { background: COLORS.dormant, border: '#21262d', highlight: { background: COLORS.dormant, border: '#21262d' } };
+    } else if (showTagColors && tagColorMap) {
       const tags = n.tags || '';
       let primaryTag = '';
       if (Array.isArray(tags) && tags.length > 0) {
@@ -860,12 +867,16 @@ function initNetwork(graphData) {
         nodeColor = tagColorMap[primaryTag];
       }
     }
+    const tooltip = isDormant
+      ? `${n.title}\n💤 Dormant (Q: ${qualityScore.toFixed(2)})`
+      : (qualityScore > 0 ? `${n.title}\n(Q: ${qualityScore.toFixed(2)})` : n.title);
     return {
       id: n.id,
       label: n.title,
-      title: n.title,
+      title: tooltip,
       group: nodeGroup,
-      color: nodeColor ? { background: nodeColor, border: nodeColor, highlight: { background: nodeColor, border: nodeColor } } : undefined,
+      color: nodeColor ? (typeof nodeColor === 'string' ? { background: nodeColor, border: nodeColor, highlight: { background: nodeColor, border: nodeColor } } : nodeColor) : undefined,
+      opacity: isDormant ? 0.3 : 1.0,
     };
   });
 
@@ -976,7 +987,16 @@ function initNetwork(graphData) {
   document.getElementById('stat-neurons').textContent = graphData.stats.neurons;
   document.getElementById('stat-synapses').textContent = graphData.stats.synapses;
   document.getElementById('stat-hebbian').textContent = graphData.stats.hebbian_synapses;
-}
+  // Show dormant count if > 0
+  const dormantEl = document.getElementById('stat-dormant');
+  const dormantCountEl = document.getElementById('stat-dormant-count');
+  const dormantCount = graphData.stats.dormant_neurons || 0;
+  if (dormantCount > 0) {
+    dormantEl.style.display = '';
+    dormantCountEl.textContent = dormantCount;
+  } else {
+    dormantEl.style.display = 'none';
+  }
 
 function animateNodeColor(nodeId, newGroup) {
   if (!nodesDS) return;
@@ -1235,6 +1255,16 @@ function handleActivation(event) {
         hebbEl.style.color = COLORS.edgeHebbianPulse;
         setTimeout(() => { hebbEl.style.color = ''; }, 1000);
       }
+    }
+  }
+
+  // Update dormant count
+  if (event.dormant_count != null) {
+    const dormantEl = document.getElementById('stat-dormant');
+    const dormantCountEl = document.getElementById('stat-dormant-count');
+    if (dormantEl && dormantCountEl) {
+      dormantCountEl.textContent = event.dormant_count;
+      dormantEl.style.display = event.dormant_count > 0 ? '' : 'none';
     }
   }
 
