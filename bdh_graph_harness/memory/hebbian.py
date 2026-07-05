@@ -13,6 +13,9 @@ def hebbian_update(active_notes, state):
     Only creates synapses between notes that BOTH score above
     hebbian_min_score (default 0.15). Prevents spurious connections
     between weakly-activated peripheral nodes.
+
+    Returns (state, updated_keys) — updated_keys is the set of synapse
+    keys that were created or reinforced in this call.
     """
     min_score = CONFIG.get('hebbian_min_score', 0.15)
 
@@ -21,10 +24,12 @@ def hebbian_update(active_notes, state):
 
     note_ids = sorted(strong.keys())
     now = datetime.now().isoformat()
+    updated_keys = set()
 
     for i, a in enumerate(note_ids):
         for b in note_ids[i + 1:]:
             key = f"{a}|{b}"
+            updated_keys.add(key)
             if key not in state['synapses']:
                 state['synapses'][key] = {
                     'weight': 0.0,
@@ -49,4 +54,4 @@ def hebbian_update(active_notes, state):
                 del state['synapses'][key]
 
     state['queries'] += 1
-    return state
+    return state, updated_keys

@@ -336,12 +336,6 @@
     color: #58a6ff;
     border-color: #58a6ff;
   }
-  @media (max-width: 768px) {
-    #zoom-controls { bottom: 8px; right: 8px; }
-    #zoom-controls #zoom-slider { width: 80px; }
-    #zoom-controls .zoom-row { padding: 4px 8px; }
-    #zoom-controls .fit-btn { font-size: 10px; padding: 4px 8px; }
-  }
   .tag-legend .tag-item {
     display: flex;
     align-items: center;
@@ -360,6 +354,7 @@
   #titlebar .title-row { display: contents; }
   #titlebar .toggles-row { display: contents; }
   @media (max-width: 768px) {
+    #zoom-controls { display: none !important; }
     .tag-legend { display: none !important; }
     #titlebar {
       padding: 6px 12px;
@@ -480,7 +475,6 @@
 </div>
 <div id="main">
   <div id="graph-container"></div>
-  <div id="tag-legend" class="tag-legend hidden"></div>
   <div id="zoom-controls">
     <div class="zoom-row">
       <button class="zoom-btn" onclick="zoomStep(-0.15)" title="Zoom out">−</button>
@@ -490,6 +484,7 @@
     </div>
     <button class="fit-btn" onclick="fitToScreen()" title="Fit graph to screen">⊞ Fit</button>
   </div>
+  <div id="tag-legend" class="tag-legend hidden"></div>
   <div id="side-panel">
     <div id="query-section">
       <div class="query-wrap">
