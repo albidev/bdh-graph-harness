@@ -12,7 +12,7 @@ Turns an Obsidian vault into a living knowledge graph where:
 - **Notes → neurons** — each note embedded with `nomic-embed-text-v2-moe` (Ollama, local)
 - **Wikilinks → synapses** — graph edges from `[[wikilinks]]`
 - **Hebbian learning** — co-activated notes strengthen their synaptic weight over time (frequency + recency + activation correlation)
-- **Hybrid retrieval** — vector similarity (α=0.7) + BM25 lexical search (β=0.3)
+- **Vector retrieval** — semantic search via embeddings (default). Optional BM25 hybrid mode for multilingual vaults (disabled by default — see `benchmarks/BM25_ANALYSIS.md`)
 - **Adaptive thresholding** — `max(Q75, mean+1std, 0.15)` to filter noise dynamically
 - **Neurogenesis** — LLM extracts new concepts from queries and creates notes in the vault
 - **LLM responses** — OpenRouter (`openrouter/free`) or local Ollama, with citations back to source notes
@@ -25,7 +25,7 @@ For the theory behind these choices — why Hebbian plasticity, why Obsidian, wh
 ```
 Obsidian Vault → Embed (Ollama) → ChromaDB + Graph
                                     ↓
-Query → Hybrid Search (vector + BM25) → Attention Spread (max_hop=2)
+Query → Vector Search → Attention Spread (max_hop=2)
                                     ↓
 Hebbian Update (co-activation strengthening) → LLM Response (OpenRouter)
                                     ↓
@@ -46,8 +46,8 @@ bdh_graph_harness/
 ├── retrieval/
 │   ├── embeddings.py        # Ollama embedding client
 │   ├── chroma_store.py      # ChromaDB vector store
-│   ├── bm25.py              # BM25 lexical index
-│   ├── hybrid.py            # Vector + BM25 fusion
+│   ├── bm25.py              # BM25 lexical index (optional, disabled by default)
+│   ├── hybrid.py            # Vector + BM25 fusion (optional, disabled by default)
 │   └── attention.py         # Seed selection + k-hop spread + adaptive threshold
 ├── memory/
 │   ├── hebbian.py           # Synaptic weight update + decay
@@ -125,8 +125,9 @@ See `bdh-config.yaml` for all parameters. Key ones:
 | `alpha` | 0.7 | Frequency weight in Hebbian |
 | `beta` | 0.3 | Recency weight in Hebbian |
 | `decay` | 0.95 | Per-session decay for unused synapses |
-| `hybrid_alpha` | 0.7 | Vector search weight |
-| `hybrid_beta` | 0.3 | BM25 search weight |
+| `hybrid_search` | `false` | Enable BM25 hybrid mode (disabled by default for Italian vaults) |
+| `hybrid_alpha` | 0.7 | Vector search weight (only when `hybrid_search: true`) |
+| `hybrid_beta` | 0.3 | BM25 search weight (only when `hybrid_search: true`) |
 | `llm_provider` | `openrouter` | `openrouter` or `ollama` |
 | `llm_model` | `openrouter/free` | Auto-selects available free models |
 | `api_port` | 8643 | Server port |
@@ -138,7 +139,7 @@ See `bdh-config.yaml` for all parameters. Key ones:
 pytest tests/ -v
 ```
 
-108 tests covering graph building, attention spread, adaptive threshold, BM25, hybrid search, Hebbian updates, LLM providers (Ollama + OpenRouter), neurogenesis, and API endpoints.
+108 tests covering graph building, attention spread, adaptive threshold, BM25, hybrid search (optional), Hebbian updates, LLM providers (Ollama + OpenRouter), neurogenesis, and API endpoints.
 
 ## Visualization
 

@@ -14,7 +14,7 @@ pytest tests/ -v
 The codebase is a Python package (`bdh_graph_harness/`) with 8 subpackages:
 
 - `graph/` — vault parsing and graph construction (with incremental cache)
-- `retrieval/` — embeddings, ChromaDB, BM25, hybrid search, attention spread
+- `retrieval/` — embeddings, ChromaDB, BM25 (optional), attention spread
 - `memory/` — Hebbian synaptic plasticity and persistent state
 - `llm/` — provider abstraction (Ollama, OpenRouter), prompt building
 - `neurogenesis/` — concept extraction and note creation in the vault
@@ -31,7 +31,7 @@ The codebase is a Python package (`bdh_graph_harness/`) with 8 subpackages:
 pytest tests/ -v
 ```
 
-108 tests covering graph building, attention, adaptive threshold, BM25, hybrid search, Hebbian updates, LLM providers, neurogenesis, and API endpoints.
+108 tests covering graph building, attention, adaptive threshold, BM25 (optional), Hebbian updates, LLM providers, neurogenesis, and API endpoints.
 
 ## Adding a new LLM provider
 
