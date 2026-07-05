@@ -1074,6 +1074,16 @@ function connectWS() {
         if (showTagColors) toggleTagColors(true);
       } else if (event.type === 'activation') {
         handleActivation(event);
+      } else if (event.type === 'graph_refresh') {
+        // Server rebuilt the graph — reload data
+        console.log('Graph refresh:', event.message);
+        fetch('/api/graph').then(r => r.json()).then(data => {
+          initNetwork(data);
+          if (showTagColors) toggleTagColors(true);
+          // Update stats
+          document.getElementById('stat-neurons').textContent = event.neurons;
+          document.getElementById('stat-synapses').textContent = event.synapses;
+        });
       }
     } catch (e) { console.error('Parse error:', e); }
   };
