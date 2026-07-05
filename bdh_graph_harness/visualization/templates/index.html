@@ -548,7 +548,7 @@
     </label>
     <div class="stats">
       Neurons: <span id="stat-neurons">{neuron_count}</span>
-      · Synapses: <span id="stat-synapses">{syncount}</span>
+      · Synapses: <span id="stat-synapses">{synapse_count}</span>
       · Hebbian: <span id="stat-hebbian">{hebbian_count}</span>
       · <span id="stat-dormant" style="display:none">💤 <span id="stat-dormant-count">0</span></span>
       <span id="status-indicator"></span>
@@ -997,6 +997,7 @@ function initNetwork(graphData) {
   } else {
     dormantEl.style.display = 'none';
   }
+}
 
 function animateNodeColor(nodeId, newGroup) {
   if (!nodesDS) return;
