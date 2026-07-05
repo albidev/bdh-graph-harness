@@ -1141,11 +1141,21 @@ function sendQuery() {
   if (!query) return;
   btn.disabled = true;
   btn.textContent = 'Processing...';
+  document.getElementById('response-text').textContent = 'Thinking...';
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 120000);  // 2 min timeout
+
   fetch('/api/query', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ query }),
-  }).then(r => r.json()).then(data => {
+    signal: controller.signal,
+  }).then(r => {
+    clearTimeout(timeoutId);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return r.json();
+  }).then(data => {
     if (data.error) {
       document.getElementById('response-text').textContent = 'Error: ' + data.error;
     } else {
@@ -1170,9 +1180,14 @@ function sendQuery() {
     btn.disabled = false;
     btn.textContent = 'Query';
   }).catch(err => {
+    clearTimeout(timeoutId);
     btn.disabled = false;
     btn.textContent = 'Query';
-    document.getElementById('response-text').textContent = 'Request failed: ' + err;
+    if (err.name === 'AbortError') {
+      document.getElementById('response-text').textContent = 'Request timed out (2 min). The LLM might be slow — try again.';
+    } else {
+      document.getElementById('response-text').textContent = 'Request failed: ' + err.message;
+    }
   });
 }
 
