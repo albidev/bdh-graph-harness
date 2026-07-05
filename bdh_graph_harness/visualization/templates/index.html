@@ -53,12 +53,14 @@
   }
   #graph-area {
     position: relative;
-    flex: 0 0 70%;
+    flex: 1;
     height: 100%;
     overflow: hidden;
+    min-width: 0;
   }
   #side-panel {
     width: 30%;
+    flex-shrink: 0;
     height: 100%;
     background: #161b22;
     border-left: 1px solid #30363d;
@@ -532,6 +534,7 @@
   </div>
   </div>
   <div id="tag-legend" class="tag-legend hidden"></div>
+  <div id="panel-resize"></div>
   <div id="side-panel">
     <div id="query-section">
       <div class="query-wrap">
@@ -1458,7 +1461,76 @@ function watchZoom() {
   network.on('animationFinished', syncZoomUI);
 }
 
+// ======== PANEL RESIZE & COLLAPSE ========
+const PANEL_WIDTH_KEY = 'bdh-panel-width';
+const PANEL_COLLAPSED_KEY = 'bdh-panel-collapsed';
+const sidePanel = document.getElementById('side-panel');
+const panelResize = document.getElementById('panel-resize');
+const collapseBtn = document.getElementById('collapse-btn');
+let isResizing = false;
+
+function savePanelWidth() {
+  if (sidePanel.style.width) localStorage.setItem(PANEL_WIDTH_KEY, sidePanel.style.width);
+}
+
+function restorePanelWidth() {
+  const saved = localStorage.getItem(PANEL_WIDTH_KEY);
+  if (saved) {
+    const pct = Math.max(15, Math.min(60, parseFloat(saved)));
+    sidePanel.style.width = pct + '%';
+  }
+}
+
+function restorePanelState() {
+  if (localStorage.getItem(PANEL_COLLAPSED_KEY) === 'true') {
+    document.body.classList.add('panel-collapsed');
+    if (collapseBtn) collapseBtn.textContent = '▸';
+  }
+}
+
+// Drag to resize
+panelResize.addEventListener('mousedown', (e) => {
+  e.preventDefault();
+  isResizing = true;
+  panelResize.classList.add('dragging');
+  document.body.style.cursor = 'col-resize';
+  document.body.style.userSelect = 'none';
+  document.getElementById('graph-container').style.pointerEvents = 'none';
+});
+
+document.addEventListener('mousemove', (e) => {
+  if (!isResizing) return;
+  const mainRect = document.getElementById('main').getBoundingClientRect();
+  const handleX = e.clientX - mainRect.left;
+  const totalW = mainRect.width;
+  // sidePanel width = total - handleX
+  let panelPct = ((totalW - handleX) / totalW) * 100;
+  panelPct = Math.max(15, Math.min(60, panelPct));
+  sidePanel.style.width = panelPct + '%';
+});
+
+document.addEventListener('mouseup', () => {
+  if (!isResizing) return;
+  isResizing = false;
+  panelResize.classList.remove('dragging');
+  document.body.style.cursor = '';
+  document.body.style.userSelect = '';
+  document.getElementById('graph-container').style.pointerEvents = '';
+  savePanelWidth();
+  if (network) setTimeout(() => network.redraw(), 10);
+});
+
+function togglePanel() {
+  document.body.classList.toggle('panel-collapsed');
+  const collapsed = document.body.classList.contains('panel-collapsed');
+  if (collapseBtn) collapseBtn.textContent = collapsed ? '◂' : '▸';
+  localStorage.setItem(PANEL_COLLAPSED_KEY, collapsed);
+  if (network) setTimeout(() => network.redraw(), 10);
+}
+
 // Init
+restorePanelWidth();
+restorePanelState();
 connectWS();
 </script>
 </body>
