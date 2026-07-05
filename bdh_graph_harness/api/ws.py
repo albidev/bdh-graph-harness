@@ -1,5 +1,6 @@
 """WebSocket connection management and broadcast for the BDH API server."""
 
+import asyncio
 import json
 
 from aiohttp import web
@@ -185,11 +186,24 @@ async def websocket_handler(request, app_state: dict, ws_clients: set = None) ->
     }
     await ws.send_str(json.dumps(init_msg))
 
+    # Keepalive: send heartbeat every 30s to prevent idle disconnect
+    async def keepalive():
+        try:
+            while not ws.closed:
+                await asyncio.sleep(30)
+                if not ws.closed:
+                    await ws.send_str(json.dumps({'type': 'ping'}))
+        except (asyncio.CancelledError, ConnectionError):
+            pass
+
+    keepalive_task = asyncio.create_task(keepalive())
+
     try:
         async for msg in ws:
             if msg.type == web.WSMsgType.ERROR:
                 break
     finally:
+        keepalive_task.cancel()
         if ws_clients is not None:
             ws_clients.discard(ws)
         else:
