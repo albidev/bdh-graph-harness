@@ -27,10 +27,17 @@
     font-size: 18px;
     font-weight: 600;
     color: #f0883e;
+    white-space: nowrap;
+  }
+  #titlebar .controls {
+    display: flex;
+    align-items: center;
+    gap: 16px;
   }
   #titlebar .stats {
     font-size: 13px;
     color: #8b949e;
+    white-space: nowrap;
   }
   #titlebar .stats span { color: #58a6ff; font-weight: 600; }
   #main {
@@ -353,8 +360,6 @@
   }
 
   /* ======== MOBILE RESPONSIVE ======== */
-  #titlebar .title-row { display: contents; }
-  #titlebar .toggles-row { display: contents; }
   @media (max-width: 768px) {
     #zoom-controls { display: none !important; }
     .tag-legend { display: none !important; }
@@ -362,22 +367,12 @@
       padding: 6px 12px;
       height: auto;
       min-height: 44px;
-      flex-direction: column;
-      align-items: flex-start;
-      gap: 4px;
+      flex-wrap: wrap;
+      gap: 6px;
     }
-    #titlebar .title-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      width: 100%;
-    }
-    #titlebar h1 { font-size: 15px; }
+    #titlebar h1 { font-size: 15px; width: 100%; }
+    #titlebar .controls { gap: 10px; flex-wrap: wrap; }
     #titlebar .stats { font-size: 11px; }
-    #titlebar .toggles-row {
-      display: flex;
-      gap: 12px;
-    }
     #main {
       flex-direction: column;
       height: calc(100vh - 44px - 36px);  /* minus tabbar */
@@ -443,23 +438,13 @@
     #main { flex-direction: column; }
     #graph-area { width: 100%; height: 65vh; flex: none; }
     #side-panel { width: 100%; height: 35vh; border-left: none; border-top: 1px solid #30363d; }
-    #titlebar h1 { font-size: 15px; }
-    #titlebar .stats { font-size: 11px; }
   }
 </style>
 </head>
 <body class="graph-tab">
 <div id="titlebar">
-  <div class="title-row">
-    <h1>🐉 BDH Graph Harness</h1>
-    <div class="stats">
-      Neurons: <span id="stat-neurons">{neuron_count}</span>
-      | Synapses: <span id="stat-synapses">{synapse_count}</span>
-      | Hebbian: <span id="stat-hebbian">{hebbian_count}</span>
-      <span id="status-indicator"></span>
-    </div>
-  </div>
-  <div class="toggles-row">
+  <h1>🐉 BDH Graph Harness</h1>
+  <div class="controls">
     <label class="toggle-label" title="Show orphan nodes (no connections)">
       <input type="checkbox" id="orphan-toggle" onchange="toggleOrphans(this.checked)">
       <span class="toggle-text">Orphans</span>
@@ -468,6 +453,12 @@
       <input type="checkbox" id="tag-toggle" checked onchange="toggleTagColors(this.checked)">
       <span class="toggle-text">Tags</span>
     </label>
+    <div class="stats">
+      Neurons: <span id="stat-neurons">{neuron_count}</span>
+      · Synapses: <span id="stat-synapses">{synapse_count}</span>
+      · Hebbian: <span id="stat-hebbian">{hebbian_count}</span>
+      <span id="status-indicator"></span>
+    </div>
   </div>
 </div>
 <div id="mobile-tabs">
