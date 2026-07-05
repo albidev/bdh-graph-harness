@@ -60,11 +60,14 @@ def test_bm25_score_no_match(mock_nodes):
 
 
 def test_bm25_score_normalized(mock_nodes):
-    """BM25 scores are normalized to [0, 1] range."""
+    """BM25 score_batch returns normalized [0, 1] scores."""
     idx = harness.BM25Index(mock_nodes)
-    for nid in mock_nodes:
-        score = idx.score('fruit apple banana', nid)
-        assert 0.0 <= score <= 1.0
+    batch = idx.score_batch('fruit apple banana')
+    for nid, score in batch.items():
+        assert 0.0 <= score <= 1.0, f"score {score} out of range for {nid}"
+    # Top result should be one of the fruit-related notes
+    top = max(batch, key=batch.get)
+    assert batch[top] > 0.5  # should have decent score for matching terms
 
 
 def test_bm25_search_returns_sorted(mock_nodes):

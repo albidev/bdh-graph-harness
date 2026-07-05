@@ -113,10 +113,16 @@ def test_attention_seed_selection(monkeypatch, mock_graph, mock_collection):
     # Query embedding similar to apple/banana/cherry
     monkeypatch.setattr(bdh_attention_mod, 'get_embeddings', lambda texts: [[1.0, 0.0, 0.0, 0.0]])
 
-    active = bdh_attention_mod.attention('fruit', nodes, edges, mock_collection, k=3, max_hop=0)
-    # With max_hop=0, only seeds — apple/banana/cherry should be top
-    assert 'apple' in active
-    assert active['apple'] > 0.25  # above threshold
+    # Disable adaptive threshold so seeds aren't filtered out (only 6 candidates)
+    orig_at = bdh_config.CONFIG.get('adaptive_threshold', True)
+    bdh_config.CONFIG['adaptive_threshold'] = False
+    try:
+        active = bdh_attention_mod.attention('fruit', nodes, edges, mock_collection, k=3, max_hop=0)
+        # With max_hop=0, only seeds — apple/banana/cherry should be top
+        assert 'apple' in active
+        assert active['apple'] > 0.25  # above threshold
+    finally:
+        bdh_config.CONFIG['adaptive_threshold'] = orig_at
 
 
 def test_attention_khop_expansion(monkeypatch, mock_graph, mock_collection):
@@ -190,8 +196,13 @@ def test_attention_returns_scores(monkeypatch, mock_graph, mock_collection):
     nodes, edges = mock_graph
     monkeypatch.setattr(bdh_attention_mod, 'get_embeddings', lambda texts: [[1.0, 0.0, 0.0, 0.0]])
 
-    active = bdh_attention_mod.attention('fruit', nodes, edges, mock_collection, k=3, max_hop=1)
-    assert isinstance(active, dict)
-    for nid, score in active.items():
-        assert isinstance(score, float)
-        assert 0.0 <= score <= 1.0
+    orig_at = bdh_config.CONFIG.get('adaptive_threshold', True)
+    bdh_config.CONFIG['adaptive_threshold'] = False
+    try:
+        active = bdh_attention_mod.attention('fruit', nodes, edges, mock_collection, k=3, max_hop=1)
+        assert isinstance(active, dict)
+        for nid, score in active.items():
+            assert isinstance(score, float)
+            assert 0.0 <= score <= 1.0
+    finally:
+        bdh_config.CONFIG['adaptive_threshold'] = orig_at

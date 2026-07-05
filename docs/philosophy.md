@@ -33,7 +33,7 @@ This is the fundamental difference: RAG is a lookup table. The harness is a nerv
 Hebbian learning is the oldest principle in computational neuroscience: *neurons that fire together wire together*. In the harness, this translates to a concrete algorithm:
 
 1. A query arrives
-2. Hybrid search (vector similarity + BM25 keyword matching) finds seed notes
+2. Vector search (embeddings) finds seed notes — optional BM25 hybrid mode available for multilingual vaults
 3. k-hop graph traversal spreads activation from seeds through wikilink connections
 4. An adaptive threshold filters noise — only nodes scoring above `max(Q75, mean+1σ, 0.15)` remain active
 5. **All pairs of co-activated notes strengthen their synaptic weight**
@@ -59,7 +59,7 @@ The system maps loosely to cortical organization:
 
 | Brain region | Harness component | Function |
 |---|---|---|
-| Sensory cortex | ChromaDB + BM25 | Raw perception — embedding similarity and keyword matching |
+| Sensory cortex | ChromaDB (+ optional BM25) | Raw perception — embedding similarity (keyword matching optional) |
 | Association cortex | k-hop traversal + attention spread | Connecting related concepts across the graph |
 | Synaptic plasticity | Hebbian update + decay | Strengthening used connections, pruning unused ones |
 | Hippocampal neurogenesis | Concept extraction + note creation | Forming new representations from experience |

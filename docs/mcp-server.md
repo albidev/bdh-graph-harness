@@ -140,7 +140,7 @@ This means the Hebbian architecture is fully preserved — the MCP server is jus
 
 When you call the `query` tool:
 
-1. **Attention** — hybrid search (vector + BM25) finds seed notes, k-hop graph traversal spreads activation, adaptive threshold filters noise
+1. **Attention** — vector search finds seed notes, k-hop graph traversal spreads activation, adaptive threshold filters noise
 2. **Hebbian update** — co-activated notes strengthen their synaptic weight (online plasticity, before LLM)
 3. **LLM response** — grounded in activated notes only, with citations as `[from: Note Title]`
 4. **Neurogenesis** — LLM extracts new concepts not in the vault, creates notes in `concepts/`

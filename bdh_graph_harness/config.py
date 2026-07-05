@@ -66,6 +66,12 @@ CONFIG = {
     'threshold_floor': 0.15,
     # Online plasticity (Phase 3.2)
     'online_plasticity': True,
+    # Integrate-and-Fire attention model
+    'experimental_integrate_fire': False,  # IaF attention — enable via bdh-config.yaml
+    'iaf_tau_base': 0.15,       # base firing threshold
+    'iaf_tau_k': 0.075,         # degree scaling factor: τ_j = base + k * log(1 + deg)
+    'iaf_max_steps': 5,         # max integration steps
+    'iaf_convergence_threshold': 1e-4,  # stop if activation change below this
     # Graph ignore: node IDs or glob patterns to exclude from the graph
     # These nodes are never loaded as neurons and never become activation targets
     'graph_ignore': [

@@ -2,9 +2,9 @@
 BDH Graph Harness — Attention module.
 
 BDH-style attention: embedding seed (ChromaDB KNN) + graph traversal (k-hop expansion).
-Includes adaptive threshold and hybrid search support.
+Includes adaptive threshold, hybrid search support, and Integrate-and-Fire model.
 """
-
+import math
 import os
 import statistics
 from collections import defaultdict, deque
@@ -20,39 +20,30 @@ from bdh_graph_harness.graph.builder import _resolve_target
 # Adaptive Threshold (Phase 3.3)
 # ---------------------------------------------------------------------------
 
-def compute_adaptive_threshold(scores, floor=0.15):
+def compute_adaptive_threshold(scores, floor=0.05, min_activations=3):
     """Compute a dynamic threshold from score distribution.
 
-    Uses max(percentile_75, median + 0.5*std, floor) to adaptively
-    select only genuinely relevant notes per query.
-
-    The 0.5*std multiplier (instead of 1*std) prevents clustered
-    scores from pushing the threshold too high and filtering out
-    relevant notes that are close to the median.
+    Uses median + 0.3*std with a low floor, but guarantees at least
+    min_activations notes are always kept (regardless of threshold).
 
     Args:
         scores: list of float scores from attention
         floor: minimum threshold (never go below this)
+        min_activations: guaranteed minimum number of notes to activate
     Returns:
         float threshold value
     """
     if not scores or len(scores) < 3:
         return floor
 
-    sorted_scores = sorted(scores)
-    n = len(sorted_scores)
+    sorted_scores = sorted(scores, reverse=True)
 
-    # Percentile 75 (Q3)
-    q75_idx = int(n * 0.75)
-    q75 = sorted_scores[min(q75_idx, n - 1)]
-
-    # Median + 0.5 std — less aggressive than mean + 1 std
+    # Statistical threshold
     median = statistics.median(scores)
     stdev = statistics.stdev(scores) if len(scores) > 1 else 0.0
-    median_half_std = median + 0.5 * stdev
+    threshold = max(median + 0.3 * stdev, floor)
 
-    threshold = max(q75, median_half_std, floor)
-    logger.info(f"Adaptive threshold: Q75={q75:.3f}, median+0.5std={median_half_std:.3f}, floor={floor} → {threshold:.3f}")
+    logger.info(f"Adaptive threshold: median+0.3std={median + 0.3 * stdev:.3f}, floor={floor} → {threshold:.3f}")
     return threshold
 
 
@@ -65,16 +56,19 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
     BDH-style attention: find relevant notes via ChromaDB KNN search (seed)
     + graph traversal (k-hop expansion). Returns active note set with scores.
 
+    When experimental_integrate_fire=True, uses the IaF model for iterative
+    accumulation + threshold firing. Otherwise falls back to single-pass k-hop.
+
     Uses ChromaDB for vector similarity (HNSW index, cosine space).
     Phase 3.1: Hybrid search — combines vector similarity with BM25 keyword score.
     Phase 3.3: Adaptive threshold — dynamic threshold from score distribution.
-
-    Improvements over v1:
-    - Hub dampening: high-degree nodes get activation scaled by 1/log(degree)
-    - Neighbor cap: only top-k neighbors per hop (by embedding similarity to query)
-    - Hybrid: α * vector_sim + β * BM25_score (if bm25_index provided)
-    - Adaptive threshold: max(Q75, mean+1std, floor) instead of fixed 0.25
+    Phase 4: Integrate-and-Fire — iterative accumulation with per-neuron τ.
     """
+    # Dispatch to IaF if enabled
+    if CONFIG.get('experimental_integrate_fire', False):
+        logger.warning("⚠️  Integrate-and-Fire attention ENABLED (experimental)")
+        return integrate_and_fire_attention(query, nodes, edges, collection, k, max_hop, bm25_index)
+
     if k is None:
         k = CONFIG['seed_count']
     if max_hop is None:
@@ -110,39 +104,42 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
             sim = max(0.0, 1.0 - dist)
             raw_vector_scores[note_id] = sim
 
-    # Hybrid search: combine vector + BM25
+    # Hybrid search: combine vector + BM25 (with proper batch normalization)
     hybrid_enabled = CONFIG.get('hybrid_search', False) and bm25_index is not None
 
     if hybrid_enabled:
-        # Get BM25 scores via hybrid_score for the same candidate set
         candidate_ids = list(raw_vector_scores.keys())
+        # Compute BM25 scores ONCE for all candidates, normalized [0,1]
+        bm25_scores = bm25_index.score_batch(query, candidate_ids)
+        alpha = CONFIG.get('hybrid_alpha', 0.7)
+        beta = CONFIG.get('hybrid_beta', 0.3)
         scores = {}
         for nid in candidate_ids:
-            combined = hybrid_score(nid, raw_vector_scores, bm25_index, query)
-            if combined > CONFIG['active_threshold']:
-                # Hub dampening
-                if CONFIG['hub_dampening'] and degree.get(nid, 0) > CONFIG['hub_degree_threshold']:
-                    dampen = 1.0 / (1.0 + 0.15 * (degree[nid] - CONFIG['hub_degree_threshold']))
-                    combined *= dampen
-                scores[nid] = combined
+            vec_s = raw_vector_scores.get(nid, 0.0)
+            bm_s = bm25_scores.get(nid, 0.0)
+            combined = alpha * vec_s + beta * bm_s
+            # Hub dampening
+            if CONFIG['hub_dampening'] and degree.get(nid, 0) > CONFIG['hub_degree_threshold']:
+                dampen = 1.0 / (1.0 + 0.15 * (degree[nid] - CONFIG['hub_degree_threshold']))
+                combined *= dampen
+            scores[nid] = combined
     else:
         scores = {}
         for note_id, sim in raw_vector_scores.items():
-            if sim > CONFIG['active_threshold']:
-                if CONFIG['hub_dampening'] and degree.get(note_id, 0) > CONFIG['hub_degree_threshold']:
-                    dampen = 1.0 / (1.0 + 0.15 * (degree[note_id] - CONFIG['hub_degree_threshold']))
-                    sim *= dampen
-                scores[note_id] = sim
+            if CONFIG['hub_dampening'] and degree.get(note_id, 0) > CONFIG['hub_degree_threshold']:
+                dampen = 1.0 / (1.0 + 0.15 * (degree[note_id] - CONFIG['hub_degree_threshold']))
+                sim *= dampen
+            scores[note_id] = sim
 
     # Adaptive threshold (Phase 3.3)
     if CONFIG.get('adaptive_threshold', False) and len(scores) >= 5:
         threshold = compute_adaptive_threshold(
             list(scores.values()),
-            floor=CONFIG.get('threshold_floor', 0.15),
+            floor=CONFIG.get('threshold_floor', 0.05),
         )
         scores = {nid: s for nid, s in scores.items() if s >= threshold}
 
-    # Top-k seeds
+    # Top-k seeds — always keep at least k regardless of threshold
     seeds = sorted(scores.items(), key=lambda x: -x[1])[:k]
 
     # Step 2: Graph traversal — expand from seeds via wikilinks
@@ -187,6 +184,181 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
                 queue.append((target_id, new_score, hop + 1))
 
     return active
+
+
+# ---------------------------------------------------------------------------
+# Integrate-and-Fire attention model
+# ---------------------------------------------------------------------------
+
+def compute_tau(node_id, degree_map):
+    """Compute per-neuron firing threshold: τ_j = base + k * log(1 + deg(j)).
+
+    Hub nodes naturally require more accumulated input to fire, replacing
+    the post-hoc hub_dampening factor with a structural mechanism.
+    """
+    base = CONFIG.get('iaf_tau_base', 0.15)
+    k = CONFIG.get('iaf_tau_k', 0.075)
+    deg = degree_map.get(node_id, 0)
+    return base + k * math.log1p(deg)
+
+
+def _build_reverse_edges(edges, nodes):
+    """Build reverse edge index: for each node, list of (source_id, weight=1.0).
+
+    This lets us efficiently compute which nodes can send input to a target.
+    """
+    reverse = defaultdict(list)
+    for src_id, out_edges in edges.items():
+        for edge in out_edges:
+            target_id = _resolve_target(edge['target'], nodes)
+            if target_id:
+                reverse[target_id].append(src_id)
+    return reverse
+
+
+def _compute_degree(edges, nodes):
+    """Compute degree (outgoing + incoming) for each node."""
+    degree = defaultdict(int)
+    for src, links in edges.items():
+        degree[src] += len(links)
+        for link in links:
+            target = _resolve_target(link['target'], nodes)
+            if target:
+                degree[target] += 1
+    return degree
+
+
+def integrate_and_fire_attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=None):
+    """Integrate-and-Fire attention: iterative accumulation + threshold firing.
+
+    Implements the simplified LIF model:
+        A_j^{(t+1)} = max(0, Σ A_i^{(t)} · W_ij - τ_j)
+
+    where τ_j = τ_base + τ_k * log(1 + degree(j)).
+
+    Unlike the single-pass k-hop traversal, nodes accumulate input from
+    multiple fired neighbors across timesteps. Firing is all-or-nothing:
+    once a node crosses its threshold, it sends its full activation to
+    downstream neighbors.
+
+    Args:
+        query: search query string
+        nodes: dict of node_id → node dict
+        edges: dict of node_id → list of edge dicts
+        collection: ChromaDB collection
+        k: seed count (default from config)
+        max_hop: max integration steps (default from config)
+        bm25_index: optional BM25Index for hybrid search
+    Returns:
+        dict of node_id → float (accumulated activation of fired nodes)
+    """
+    if k is None:
+        k = CONFIG['seed_count']
+    if max_hop is None:
+        max_hop = CONFIG.get('iaf_max_steps', 5)
+
+    tau_base = CONFIG.get('iaf_tau_base', 0.15)
+    tau_k = CONFIG.get('iaf_tau_k', 0.075)
+    max_steps = CONFIG.get('iaf_max_steps', 5)
+    conv_threshold = CONFIG.get('iaf_convergence_threshold', 1e-4)
+
+    degree = _compute_degree(edges, nodes)
+    reverse = _build_reverse_edges(edges, nodes)
+
+    # Step 1: Embedding seed — hybrid search scores (same as single-pass)
+    query_emb = get_embeddings([query])[0]
+    if not query_emb:
+        return {}
+
+    overfetch = min(k * 10, collection.count()) if collection.count() > 0 else k * 5
+    results = collection.query(
+        query_embeddings=[query_emb],
+        n_results=overfetch,
+        include=['metadatas', 'distances'],
+    )
+
+    raw_vector_scores = {}
+    if results['ids'] and results['ids'][0]:
+        for i, note_id in enumerate(results['ids'][0]):
+            dist = results['distances'][0][i]
+            sim = max(0.0, 1.0 - dist)
+            raw_vector_scores[note_id] = sim
+
+    hybrid_enabled = CONFIG.get('hybrid_search', False) and bm25_index is not None
+
+    if hybrid_enabled:
+        candidate_ids = list(raw_vector_scores.keys())
+        # Compute BM25 scores ONCE for all candidates, normalized [0,1]
+        bm25_scores = bm25_index.score_batch(query, candidate_ids)
+        alpha = CONFIG.get('hybrid_alpha', 0.7)
+        beta = CONFIG.get('hybrid_beta', 0.3)
+        seed_scores = {}
+        for nid in candidate_ids:
+            vec_s = raw_vector_scores.get(nid, 0.0)
+            bm_s = bm25_scores.get(nid, 0.0)
+            seed_scores[nid] = alpha * vec_s + beta * bm_s
+    else:
+        seed_scores = dict(raw_vector_scores)
+
+    # Adaptive threshold on seed scores
+    if CONFIG.get('adaptive_threshold', False) and len(seed_scores) >= 5:
+        threshold = compute_adaptive_threshold(
+            list(seed_scores.values()),
+            floor=CONFIG.get('threshold_floor', 0.05),
+        )
+        seed_scores = {nid: s for nid, s in seed_scores.items() if s >= threshold}
+
+    # Step 2: Integrate-and-Fire propagation
+    # Seeds are initialized as "pre-fired" with their seed scores
+    fired = {}  # node_id → accumulated activation (fired nodes)
+    for nid, score in sorted(seed_scores.items(), key=lambda x: -x[1])[:k]:
+        fired[nid] = score
+
+    # Track all activation for convergence
+    activation = dict(fired)
+
+    for step in range(max_steps):
+        # Collect input from fired neighbors
+        incoming = defaultdict(float)
+        for node_id in nodes:
+            if node_id in fired:
+                continue  # already fired, skip
+            for src_id in reverse.get(node_id, []):
+                if src_id in fired:
+                    # Weight from hybrid/embedding scores or default 0.3
+                    w_ij = seed_scores.get(src_id, 0.3)
+                    incoming[node_id] += fired[src_id] * w_ij
+
+        if not incoming:
+            break
+
+        # Apply threshold: potential = accumulated - τ_j
+        newly_fired = {}
+        for node_id, total_input in incoming.items():
+            tau_j = compute_tau(node_id, degree)
+            potential = total_input - tau_j
+
+            if potential > 0:
+                # Cap activation to prevent runaway
+                activation[node_id] = min(potential, 1.0)
+                newly_fired[node_id] = activation[node_id]
+
+        if not newly_fired:
+            break
+
+        # Check convergence: did total activation change meaningfully?
+        prev_total = sum(fired.values())
+        fired.update(newly_fired)
+        new_total = sum(fired.values())
+        if abs(new_total - prev_total) < conv_threshold:
+            break
+
+        logger.info(
+            f"IaF step {step + 1}: {len(newly_fired)} new fired, "
+            f"total={len(fired)}/{len(nodes)}, activation={new_total:.3f}"
+        )
+
+    return fired
 
 
 # ---------------------------------------------------------------------------
