@@ -17,6 +17,7 @@ from bdh_graph_harness.config import CONFIG, logger
 from bdh_graph_harness.visualization import render_viz_html
 from bdh_graph_harness.retrieval.attention import attention
 from bdh_graph_harness.memory import hebbian_update, save_state
+from bdh_graph_harness.memory.consolidation import consolidate, consolidation_stats
 from bdh_graph_harness.llm import llm_respond, llm_stream
 from bdh_graph_harness.neurogenesis import extract_new_concepts, create_note
 from bdh_graph_harness.graph import _resolve_target
@@ -31,6 +32,8 @@ __all__ = [
     "api_query",
     "api_stream",
     "api_refresh",
+    "api_consolidate",
+    "api_consolidation_stats",
     "run_attention_and_plasticity",
     "run_neurogenesis",
     "setup_routes",
@@ -575,6 +578,65 @@ async def api_refresh_graph(request, app_state: dict, ws_clients: set) -> web.Re
     })
 
 
+async def api_consolidate(request, app_state: dict, ws_clients: set) -> web.Response:
+    """Run a memory consolidation cycle (sleep phase).
+
+    POST /api/consolidate
+
+    Triggers a full consolidation pass:
+      1. Synaptic downscaling (global weight reduction).
+      2. Structural pruning (delete weak synapses).
+      3. Quality re-evaluation.
+      4. Stale dormant node removal.
+
+    State is persisted after consolidation. A WebSocket event is broadcast
+    to all connected clients with the results.
+
+    Optional JSON body:
+      {
+        "dry_run": false  -- if true, compute results without mutating state
+      }
+    """
+    import asyncio
+
+    dry_run = False
+    try:
+        data = await request.json()
+        dry_run = data.get('dry_run', False)
+    except Exception:
+        pass  # no body or invalid JSON — just run normally
+
+    n = app_state['nodes']
+    config = app_state['config']
+
+    if dry_run:
+        from copy import deepcopy
+        state_copy = deepcopy(app_state['state'])
+        results = consolidate(state_copy, n)
+        results['dry_run'] = True
+        return web.json_response(results)
+
+    # Real consolidation — mutate state in place
+    results = consolidate(app_state['state'], n)
+    save_state(config['vault_path'], app_state['state'])
+
+    # Broadcast consolidation event to WebSocket clients
+    from bdh_graph_harness.api.ws import broadcast_activation
+    event = {
+        'type': 'consolidation',
+        **results,
+    }
+    await broadcast_activation(event, ws_clients)
+
+    return web.json_response(results)
+
+
+async def api_consolidation_stats(request, app_state: dict) -> web.Response:
+    """Return consolidation configuration and cycle count."""
+    stats = consolidation_stats(app_state['state'])
+    return web.json_response(stats)
+
+
 # ---------------------------------------------------------------------------
 # Route registration
 # ---------------------------------------------------------------------------
@@ -617,14 +679,22 @@ def setup_routes(app: web.Application, app_state: dict, ws_clients: set) -> None
     async def _quality(request):
         return await api_quality(request, app_state)
 
+    async def _consolidate(request):
+        return await api_consolidate(request, app_state, ws_clients)
+
+    async def _consolidation_stats(request):
+        return await api_consolidation_stats(request, app_state)
+
     app.router.add_get('/', _index)
     app.router.add_get('/ws', _ws)
     app.router.add_get('/api/stats', _stats)
     app.router.add_get('/api/graph', _graph)
     app.router.add_get('/api/hebbian', _hebbian)
     app.router.add_get('/api/quality', _quality)
+    app.router.add_get('/api/consolidation-stats', _consolidation_stats)
     app.router.add_post('/api/query', _query)
     app.router.add_post('/api/stream', _stream)
     app.router.add_post('/api/refresh', _refresh)
     app.router.add_post('/api/refresh-graph', _refresh_graph)
     app.router.add_post('/api/node-update', _node_update)
+    app.router.add_post('/api/consolidate', _consolidate)

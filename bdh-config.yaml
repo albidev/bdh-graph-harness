@@ -71,6 +71,14 @@ quality_threshold: 0.25           # below this → dormant
 quality_reactivation_score: 0.50  # activation score to re-awaken
 quality_prune_interval: 50        # re-evaluate every N queries
 
+# Memory consolidation (Phase 4) — sleep-cycle graph maintenance
+# Triggered via POST /api/consolidate or cron. NOT called during query cycle.
+# Mirrors biological sleep consolidation: downscaling + pruning + re-evaluation.
+consolidation_downscale_factor: 0.90    # global weight multiplier per cycle
+consolidation_prune_weight_floor: 0.02  # delete synapses below this weight after downscaling
+consolidation_dormant_persist_cycles: 3 # remove nodes dormant for N+ consolidation cycles
+consolidation_prune_dormant_nodes: true # actually delete stale dormant nodes (not just hide)
+
 # Python executable (for ChromaDB dependency) — auto-detected if omitted
 # python_exec: /path/to/venv/bin/python
 
