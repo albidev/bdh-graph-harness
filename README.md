@@ -185,6 +185,28 @@ Once installed, your Hermes agent can:
 - Start/stop the API server
 - Present answers with source citations
 
+## Obsidian Sync Plugin
+
+Auto-sync vault changes to the BDH server via an Obsidian plugin — no manual refresh needed.
+
+```
+Obsidian edit → Plugin detects → Debounce 1s → POST /api/node-update
+    → Server diffs graph → WebSocket broadcast → Viz updates in real-time
+```
+
+**Setup:**
+1. Build the plugin: `cd plugins/obsidian && npm install && npm run build`
+2. Copy `manifest.json` + `main.js` to your vault's `.obsidian/plugins/bdh-graph-harness-sync/`
+3. Enable "BDH Graph Harness Sync" in Obsidian Settings → Community Plugins
+
+**Features:**
+- Debounced updates (1s, configurable) — no server spam
+- Status bar indicator (○ idle, ◎ syncing, ● ok, ✗ error)
+- Ignores non-`.md` files and `.obsidian/` directory
+- Configurable server URL, debounce delay, enable/disable
+
+**Pulse animation:** updated nodes pulse orange for 2.5s then restore to original appearance via remove + re-add (vis.js cannot reset explicit color overrides via `update()` — the remove+re-add trick restores group defaults cleanly).
+
 ## License
 
 MIT

@@ -429,8 +429,8 @@ async def api_node_update(request, app_state: dict, ws_clients: set) -> web.Resp
     for nid in sorted(old_ids & new_ids):
         old_title = old_nodes[nid].get('title', '')
         new_title = new_nodes[nid].get('title', '')
-        old_text = old_nodes[nid].get('text', '')[:500]
-        new_text = new_nodes[nid].get('text', '')[:500]
+        old_text = old_nodes[nid].get('text', '')
+        new_text = new_nodes[nid].get('text', '')
         if old_title != new_title or old_text != new_text:
             changed.append({
                 'id': nid,

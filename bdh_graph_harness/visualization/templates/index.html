@@ -1381,20 +1381,20 @@ function connectWS() {
               changedNodes.forEach((n, i) => {
                 setTimeout(() => {
                   if (nodesDS && nodesDS.get(n.id)) {
-                    // Select node (vis.js shows highlight border)
+                    // Save FULL original node for clean restore
+                    const origNode = JSON.parse(JSON.stringify(nodesDS.get(n.id)));
+                    // Select node
                     network.selectNodes([n.id]);
-                    // Zoom to first changed node
                     if (i === 0) {
                       network.focus(n.id, { scale: 1.5, animation: { duration: 800, easingFunction: 'easeInOutQuad' } });
                     }
-                    // Flash node with thick orange border + bigger size
-                    const origNode = nodesDS.get(n.id);
-                    const origSize = origNode ? origNode.size : undefined;
+                    // Flash: orange + bigger + thick border
                     nodesDS.update({ id: n.id, size: 30, borderWidth: 6, color: { background: '#f0883e', border: '#f0883e', highlight: { background: '#f0883e', border: '#f0883e' } }, font: { color: '#ffffff', size: 14 } });
+                    // Restore after 2.5s — remove + re-add to fully reset
                     setTimeout(() => {
-                      // Restore original appearance
                       network.unselectAll();
-                      nodesDS.update({ id: n.id, size: origSize, borderWidth: undefined, color: undefined, font: { color: undefined, size: undefined } });
+                      nodesDS.remove(n.id);
+                      nodesDS.add(origNode);
                     }, 2500);
                   }
                 }, i * 300);
@@ -1426,15 +1426,15 @@ function connectWS() {
               if (i === 0) {
                 network.focus(n.id, { scale: 1.5, animation: { duration: 800, easingFunction: 'easeInOutQuad' } });
               }
+              // Save FULL original node for clean restore
+              const origNode = JSON.parse(JSON.stringify(nodesDS.get(n.id)));
               // Flash: thick orange border + bigger
-              const origNode = nodesDS.get(n.id);
-              const origSize = origNode ? origNode.size : undefined;
-              const origBorder = origNode ? origNode.borderWidth : undefined;
               nodesDS.update({ id: n.id, size: 30, borderWidth: 6, color: { background: '#f0883e', border: '#f0883e', highlight: { background: '#f0883e', border: '#f0883e' } }, font: { color: '#ffffff', size: 14 } });
-              // Restore after 2.5s
+              // Restore after 2.5s — remove + re-add to fully reset
               setTimeout(() => {
                 network.unselectAll();
-                nodesDS.update({ id: n.id, size: origSize || undefined, borderWidth: origBorder || undefined, color: undefined, font: { color: undefined, size: undefined } });
+                nodesDS.remove(n.id);
+                nodesDS.add(origNode);
               }, 2500);
             }
           }, i * 300);

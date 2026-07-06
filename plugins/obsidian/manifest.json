@@ -1,0 +1,9 @@
+{
+  "id": "bdh-graph-harness-sync",
+  "name": "BDH Graph Harness Sync",
+  "version": "1.0.0",
+  "minAppVersion": "1.0.0",
+  "description": "Automatically sync vault changes to BDH Graph Harness server",
+  "author": "albi",
+  "isDesktopOnly": true
+}
