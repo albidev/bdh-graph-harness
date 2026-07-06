@@ -71,6 +71,11 @@ CONFIG = {
     'quality_threshold': 0.25,           # below this → dormant
     'quality_reactivation_score': 0.50,  # activation to re-awaken
     'quality_prune_interval': 50,        # re-evaluate every N queries
+    # Memory consolidation (Phase 4)
+    'consolidation_downscale_factor': 0.90,    # global weight multiplier per cycle
+    'consolidation_prune_weight_floor': 0.02,  # delete synapses below this weight
+    'consolidation_dormant_persist_cycles': 3, # remove nodes dormant for N+ cycles
+    'consolidation_prune_dormant_nodes': True,  # actually delete stale dormant nodes
     # Integrate-and-Fire attention model
     'experimental_integrate_fire': False,  # IaF attention — enable via bdh-config.yaml
     'iaf_tau_base': 0.15,       # base firing threshold
