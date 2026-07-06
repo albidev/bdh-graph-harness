@@ -34,3 +34,9 @@ wiki/.bdh-chroma/
 .bdh-chroma/
 chroma_db/
 .bdh-graph-cache.json
+
+# Node (Obsidian plugin)
+plugins/obsidian/node_modules/
+plugins/obsidian/coverage/
+plugins/obsidian/main.js
+plugins/obsidian/package-lock.json
