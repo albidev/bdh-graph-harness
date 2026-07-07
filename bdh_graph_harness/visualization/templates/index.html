@@ -988,6 +988,7 @@ function initNetwork(graphData) {
       color: nodeColor ? (typeof nodeColor === 'string' ? { background: nodeColor, border: nodeColor, highlight: { background: nodeColor, border: nodeColor } } : nodeColor) : undefined,
       opacity: isDormant ? 0.3 : 1.0,
       size: deg > 0 ? size : MIN_SIZE,
+      mass: 1 + (deg / maxDeg) * 4,  // hubs repel harder → more breathing room
     };
   });
 
