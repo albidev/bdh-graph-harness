@@ -194,7 +194,7 @@ def prune_stale_dormant(state: dict, nodes: dict, persist_cycles: int | None = N
 # Full consolidation pass
 # ---------------------------------------------------------------------------
 
-def consolidate(state: dict, nodes: dict) -> dict:
+def consolidate(state: dict, nodes: dict, edges: dict | None = None) -> dict:
     """Run a full consolidation cycle (sleep phase).
 
     Steps:
@@ -269,6 +269,13 @@ def consolidate(state: dict, nodes: dict) -> dict:
             DEFAULT_DORMANT_PERSIST_CYCLES,
         )
         state = prune_stale_dormant(state, nodes, persist)
+
+    # Step 5: Phantom links — semantic similarity connections
+    if CONFIG.get('phantom_links_enabled', True):
+        from bdh_graph_harness.memory.phantom import update_phantom_links
+        vault_root = CONFIG.get('vault_path', '')
+        if vault_root and edges:
+            state = update_phantom_links(state, nodes, edges or {}, vault_root)
 
     # Recompute dormant count after stale pruning
     dormant_after = len(state.get('dormant_nodes', []))

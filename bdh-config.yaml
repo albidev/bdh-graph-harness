@@ -79,6 +79,12 @@ consolidation_prune_weight_floor: 0.02  # delete synapses below this weight afte
 consolidation_dormant_persist_cycles: 3 # remove nodes dormant for N+ consolidation cycles
 consolidation_prune_dormant_nodes: true # actually delete stale dormant nodes (not just hide)
 
+# Phantom links — semantic similarity connections (created during consolidation)
+phantom_links_enabled: true             # enable/disable phantom link generation
+phantom_similarity_threshold: 0.65     # minimum cosine similarity to create a phantom link
+phantom_max_per_node: 3                # max phantom links per node (prevents hub creation)
+phantom_max_total: 100                 # hard cap on total phantom links per cycle
+
 # Python executable (for ChromaDB dependency) — auto-detected if omitted
 # python_exec: /path/to/venv/bin/python
 

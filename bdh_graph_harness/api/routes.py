@@ -124,15 +124,19 @@ async def api_graph(request, app_state: dict) -> web.Response:
             'frequency': syn.get('frequency', 0),
         })
 
+    phantom_list = s.get('phantom_links', [])
+
     return web.json_response({
         'nodes': node_list,
         'edges': edge_list,
         'hebbian': hebbian_list,
+        'phantom': phantom_list,
         'stats': {
             'neurons': len(n),
             'synapses': sum(len(links) for links in e.values()),
             'hebbian_synapses': len(s['synapses']),
             'dormant_neurons': len(s.get('dormant_nodes', [])),
+            'phantom_links': len(phantom_list),
         },
     })
 
@@ -607,17 +611,18 @@ async def api_consolidate(request, app_state: dict, ws_clients: set) -> web.Resp
         pass  # no body or invalid JSON — just run normally
 
     n = app_state['nodes']
+    e = app_state.get('edges', {})
     config = app_state['config']
 
     if dry_run:
         from copy import deepcopy
         state_copy = deepcopy(app_state['state'])
-        results = consolidate(state_copy, n)
+        results = consolidate(state_copy, n, e)
         results['dry_run'] = True
         return web.json_response(results)
 
     # Real consolidation — mutate state in place
-    results = consolidate(app_state['state'], n)
+    results = consolidate(app_state['state'], n, e)
     save_state(config['vault_path'], app_state['state'])
 
     # Broadcast consolidation event to WebSocket clients

@@ -539,7 +539,7 @@
   <h1>🐉 BDH Graph Harness</h1>
   <div class="controls">
     <label class="toggle-label" title="Show orphan nodes (no connections)">
-      <input type="checkbox" id="orphan-toggle" onchange="toggleOrphans(this.checked)">
+      <input type="checkbox" id="orphan-toggle" checked onchange="toggleOrphans(this.checked)">
       <span class="toggle-text">Orphans</span>
     </label>
     <label class="toggle-label" title="Color nodes by Obsidian tag">
@@ -551,6 +551,7 @@
       · Synapses: <span id="stat-synapses">{synapse_count}</span>
       · Hebbian: <span id="stat-hebbian">{hebbian_count}</span>
       · <span id="stat-dormant" style="display:none">💤 <span id="stat-dormant-count">0</span></span>
+      · <span id="stat-phantom" style="display:none">👻 <span id="stat-phantom-count">0</span></span>
       <span id="status-indicator"></span>
     </div>
     <button class="collapse-btn" onclick="togglePanel()" title="Toggle side panel" id="collapse-btn">▸</button>
@@ -615,6 +616,7 @@ const COLORS = {
   edgeHebbianHigh: '#d2a8ff',
   edgeHebbianPulse: '#d2a8ff',
   edgeNeurogenesis: '#3fb950',  // green dashed edges for new connections
+  edgePhantom: '#1f6feb',       // blue dashed edges for phantom links
   bg: '#0d1117',
 };
 // Hebbian edge color by weight (dim → bright green)
@@ -919,6 +921,25 @@ function initNetwork(graphData) {
       dashes: false,
     });
   });
+  // Phantom edges — semantic similarity connections (dashed blue)
+  (graphData.phantom || []).forEach(p => {
+    const eid = 'phantom_' + p.source + '→' + p.target;
+    if (edgeSet.has(eid)) return;
+    if (!connectedNodes.has(p.source) || !connectedNodes.has(p.target)) return;
+    edgeSet.add(eid);
+    const srcTitle = (allGraphNodes.find(n => n.id === p.source) || {}).title || p.source;
+    const tgtTitle = (allGraphNodes.find(n => n.id === p.target) || {}).title || p.target;
+    edgeInfoMap[eid] = { source_title: srcTitle, target_title: tgtTitle, type: 'phantom', similarity: p.similarity };
+    visEdges.push({
+      id: eid,
+      from: p.source,
+      to: p.target,
+      color: { color: COLORS.edgePhantom, highlight: COLORS.edgePhantom },
+      width: 1.5,
+      dashes: [5, 5],
+      title: `Semantic link (sim: ${p.similarity.toFixed(2)})`,
+    });
+  });
 
   allEdgeIds = Array.from(edgeSet);
 
@@ -987,6 +1008,10 @@ function initNetwork(graphData) {
   document.getElementById('stat-neurons').textContent = graphData.stats.neurons;
   document.getElementById('stat-synapses').textContent = graphData.stats.synapses;
   document.getElementById('stat-hebbian').textContent = graphData.stats.hebbian_synapses;
+
+  // Show orphan nodes by default (checkbox is checked on load)
+  if (orphanNodeIds.length > 0) toggleOrphans(true);
+
   // Show dormant count if > 0
   const dormantEl = document.getElementById('stat-dormant');
   const dormantCountEl = document.getElementById('stat-dormant-count');
@@ -996,6 +1021,17 @@ function initNetwork(graphData) {
     dormantCountEl.textContent = dormantCount;
   } else {
     dormantEl.style.display = 'none';
+  }
+
+  // Show phantom link count if > 0
+  const phantomEl = document.getElementById('stat-phantom');
+  const phantomCountEl = document.getElementById('stat-phantom-count');
+  const phantomCount = graphData.stats.phantom_links || 0;
+  if (phantomCount > 0) {
+    phantomEl.style.display = '';
+    phantomCountEl.textContent = phantomCount;
+  } else {
+    phantomEl.style.display = 'none';
   }
 }
 
@@ -1474,9 +1510,12 @@ function toggleOrphans(show) {
           nodesDS.add({
             id: n.id,
             label: n.title,
-            title: n.title,
+            title: `${n.title}\n👻 Orphan (no connections)`,
             group: 'inactive',
-            opacity: 0.3,
+            color: { background: '#1c2128', border: '#30363d', highlight: { background: '#2d333b', border: '#444c56' } },
+            opacity: 0.5,
+            font: { size: 8, color: '#484f58' },
+            size: 8,
           });
           allNodeIds.push(nid);
         }
