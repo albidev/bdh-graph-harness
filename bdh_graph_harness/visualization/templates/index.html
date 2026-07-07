@@ -898,7 +898,6 @@ function initNetwork(graphData) {
     return {
       id: n.id,
       label: n.title,
-      title: tooltip,
       group: nodeGroup,
       color: nodeColor ? (typeof nodeColor === 'string' ? { background: nodeColor, border: nodeColor, highlight: { background: nodeColor, border: nodeColor } } : nodeColor) : undefined,
       opacity: isDormant ? 0.3 : 1.0,
@@ -1147,7 +1146,6 @@ function handleActivation(event) {
           nodesDS.add({
             id: nid,
             label: hNode.title || nid.split('/').pop(),
-            title: hNode.title || nid.split('/').pop(),
             group: 'inactive',
             opacity: 0.3,
           });
@@ -1226,7 +1224,6 @@ function handleActivation(event) {
       nodesDS.add({
         id: nc.id,
         label: nc.title || nc.id.split('/').pop(),
-        title: nc.title || nc.id,
         group: 'neurogenesis',
         opacity: 1.0,
       });
@@ -1438,7 +1435,6 @@ function connectWS() {
                 nodesDS.add({
                   id: nid,
                   label: ndata.label,
-                  title: ndata.title,
                   group: 'neurogenesis',
                   opacity: 1.0,
                 });
@@ -1507,7 +1503,7 @@ function connectWS() {
           setTimeout(() => {
             if (nodesDS && nodesDS.get(n.id)) {
               // Update label
-              nodesDS.update({ id: n.id, label: n.title, title: n.title });
+              nodesDS.update({ id: n.id, label: n.title });
               // Select + zoom + flash
               network.selectNodes([n.id]);
               if (i === 0) {
@@ -1561,7 +1557,6 @@ function toggleOrphans(show) {
           nodesDS.add({
             id: n.id,
             label: n.title,
-            title: `${n.title}\n👻 Orphan (no connections)`,
             group: 'inactive',
             color: { background: '#1c2128', border: '#30363d', highlight: { background: '#2d333b', border: '#444c56' } },
             opacity: 0.5,
