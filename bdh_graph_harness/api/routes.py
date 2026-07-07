@@ -403,7 +403,7 @@ async def api_refresh(request, app_state: dict) -> web.Response:
 
     # compute_all_embeddings lives in the retrieval module
     from bdh_graph_harness.retrieval import compute_all_embeddings
-    coll = compute_all_embeddings(n, vault_root, force_refresh=True)
+    coll = compute_all_embeddings(n, vault_root, force_refresh=False)
     app_state['collection'] = coll
     return web.json_response({'status': 'ok', 'embeddings': coll.count()})
 
@@ -448,7 +448,7 @@ async def api_node_update(request, app_state: dict, ws_clients: set) -> web.Resp
     # Re-embed if needed
     if added or changed:
         from bdh_graph_harness.retrieval import compute_all_embeddings
-        app_state['collection'] = compute_all_embeddings(new_nodes, vault_root, force_refresh=True)
+        app_state['collection'] = compute_all_embeddings(new_nodes, vault_root, force_refresh=False)
 
     # Send targeted WS events
     from bdh_graph_harness.api.ws import broadcast_activation
@@ -543,7 +543,7 @@ async def api_refresh_graph(request, app_state: dict, ws_clients: set) -> web.Re
 
     # 4. Re-embed all notes
     from bdh_graph_harness.retrieval import compute_all_embeddings
-    coll = compute_all_embeddings(nodes, vault_root, force_refresh=True)
+    coll = compute_all_embeddings(nodes, vault_root, force_refresh=False)
     app_state['collection'] = coll
 
     # 5. Rebuild BM25 index if hybrid search is enabled
