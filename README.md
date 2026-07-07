@@ -16,6 +16,8 @@ Turns an Obsidian vault into a living knowledge graph where:
 - **Adaptive thresholding** — `max(Q75, mean+1std, 0.15)` to filter noise dynamically
 - **Neurogenesis** — LLM extracts new concepts from queries and creates notes in the vault
 - **Node quality scoring** — composite score (strong edges + mean weight + frequency) auto-prunes dormant nodes from visualization; re-activates on strong re-encounter
+- **Sleep-cycle consolidation** — periodic synaptic downscaling (×0.9), structural pruning below weight floor, and stale dormant node removal — mirrors biological sleep consolidation
+- **Server-side file watcher** — mtime-based polling detects vault changes from any source (Obsidian, LLM, scripts) and triggers incremental graph updates
 - **LLM responses** — OpenRouter (`openrouter/free`) or local Ollama, with citations back to source notes
 - **Real-time visualization** — vis.js network showing nodes activating, edges pulsing as Hebbian weights update during queries
 
@@ -31,6 +33,9 @@ Query → Vector Search → Attention Spread (max_hop=2)
 Hebbian Update (co-activation strengthening) → LLM Response (OpenRouter)
                                     ↓
 WebSocket → vis.js visualization (nodes light up, synapses pulse)
+
+Sleep Cycle (periodic):
+  Synaptic Downscaling (×0.9) → Prune (< floor) → Quality Re-eval → Stale Removal
 ```
 
 ## Package structure
@@ -53,6 +58,7 @@ bdh_graph_harness/
 ├── memory/
 │   ├── hebbian.py           # Synaptic weight update + decay
 │   ├── quality.py           # Node quality scoring + dormant pruning
+│   ├── consolidation.py     # Sleep-cycle: downscaling + pruning + stale removal
 │   └── state_store.py       # Persistent state (file-locked)
 ├── llm/
 │   ├── providers.py         # LLM factory + payload builder
@@ -65,7 +71,8 @@ bdh_graph_harness/
 ├── api/
 │   ├── server.py            # aiohttp app setup + WebSocket
 │   ├── routes.py            # REST endpoints
-│   └── ws.py                # WebSocket handlers
+│   ├── ws.py                # WebSocket handlers
+│   └── watcher.py           # Server-side vault file watcher (mtime polling)
 └── visualization/
     └── templates/index.html # vis.js real-time graph UI
 ```
@@ -137,6 +144,10 @@ See `bdh-config.yaml` for all parameters. Key ones:
 | `quality_reactivation_score` | 0.50 | Activation score to re-awaken a dormant node |
 | `quality_prune_interval` | 50 | Re-evaluate node quality every N queries |
 | `graph_ignore` | `[]` | fnmatch patterns to exclude nodes from the graph (e.g. `[".bdh-*"]`) |
+| `consolidation_downscale_factor` | 0.90 | Global weight multiplier per sleep cycle |
+| `consolidation_prune_weight_floor` | 0.02 | Delete synapses below this weight after downscaling |
+| `consolidation_dormant_persist_cycles` | 3 | Remove nodes dormant for N+ consolidation cycles |
+| `consolidation_prune_dormant_nodes` | `true` | Delete stale dormant nodes (not just hide) |
 
 ## Tests
 
@@ -144,7 +155,7 @@ See `bdh-config.yaml` for all parameters. Key ones:
 pytest tests/ -v
 ```
 
-155 tests covering graph building, attention spread, adaptive threshold, BM25, hybrid search (optional), Hebbian updates, LLM providers (Ollama + OpenRouter), neurogenesis, and API endpoints.
+180 tests covering graph building, attention spread, adaptive threshold, BM25, hybrid search (optional), Hebbian updates, LLM providers (Ollama + OpenRouter), neurogenesis, consolidation (downscaling, pruning, stale removal), and API endpoints.
 
 ## Visualization
 
@@ -206,6 +217,29 @@ Obsidian edit → Plugin detects → Debounce 1s → POST /api/node-update
 - Configurable server URL, debounce delay, enable/disable
 
 **Pulse animation:** updated nodes pulse orange for 2.5s then restore to original appearance via remove + re-add (vis.js cannot reset explicit color overrides via `update()` — the remove+re-add trick restores group defaults cleanly).
+
+## Sleep-Cycle Consolidation
+
+Periodic graph maintenance that mirrors biological sleep consolidation. Run it manually or schedule it (e.g. nightly via cron):
+
+```bash
+# Trigger a consolidation cycle
+curl -X POST http://localhost:8643/api/consolidate
+
+# Dry run (see what would change without committing)
+curl -X POST http://localhost:8643/api/consolidate -H "Content-Type: application/json" -d '{"dry_run": true}'
+
+# View config and cycle count
+curl http://localhost:8643/api/consolidation-stats
+```
+
+**Cycle steps:**
+1. **Synaptic downscaling** — multiply all Hebbian weights by `consolidation_downscale_factor` (default 0.90). Prevents runaway strengthening.
+2. **Structural pruning** — delete synapses with weight below `consolidation_prune_weight_floor` (default 0.02) after downscaling.
+3. **Quality re-evaluation** — recalculate node quality scores and update dormant state.
+4. **Stale removal** — delete nodes dormant for more than `consolidation_dormant_persist_cycles` (default 3) consecutive cycles, if `consolidation_prune_dormant_nodes` is true.
+
+No tokens consumed — pure algorithmic operation on the local graph state. Safe to run while the server is serving queries (file-locked state access).
 
 ## License
 
