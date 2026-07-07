@@ -84,6 +84,8 @@ class WebSocketManager:
                 'neurons': len(n),
                 'synapses': sum(len(links) for links in e.values()),
                 'hebbian_synapses': len(s['synapses']),
+                'dormant_neurons': len(s.get('dormant_nodes', [])),
+                'phantom_links': len(s.get('phantom_links', [])),
             },
         }
         await ws.send_str(json.dumps(init_msg))
@@ -186,6 +188,8 @@ async def websocket_handler(request, app_state: dict, ws_clients: set = None) ->
             'neurons': len(n),
             'synapses': sum(len(links) for links in e.values()),
             'hebbian_synapses': len(s['synapses']),
+            'dormant_neurons': len(s.get('dormant_nodes', [])),
+            'phantom_links': len(s.get('phantom_links', [])),
         },
     }
     await ws.send_str(json.dumps(init_msg))
