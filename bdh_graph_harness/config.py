@@ -158,7 +158,10 @@ def load_config(config_path: str | None = None):
     else:
         logger.info(f"LLM provider: Ollama ({merged.get('llm_model')})")
 
-    CONFIG = merged
+    # Update CONFIG in-place so modules that did `from config import CONFIG`
+    # see the merged values (reassigning CONFIG = merged would break those refs).
+    CONFIG.clear()
+    CONFIG.update(merged)
     return merged
 
 
