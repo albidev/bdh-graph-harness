@@ -58,6 +58,8 @@
     overflow: hidden;
     min-width: 0;
   }
+  /* Kill vis.js native tooltip — we use custom HTML tooltip instead */
+  div.vis-tooltip { display: none !important; }
   #side-panel {
     width: 30%;
     flex-shrink: 0;
@@ -563,8 +565,8 @@
       Neurons: <span id="stat-neurons">{neuron_count}</span>
       · Synapses: <span id="stat-synapses">{synapse_count}</span>
       · Hebbian: <span id="stat-hebbian">{hebbian_count}</span>
-      · <span id="stat-dormant" style="display:none">💤 <span id="stat-dormant-count">0</span></span>
-      · <span id="stat-phantom" style="display:none">👻 <span id="stat-phantom-count">0</span></span>
+      <span id="stat-dormant" style="display:none"> · 💤 <span id="stat-dormant-count">0</span></span>
+      <span id="stat-phantom" style="display:none"> · 👻 <span id="stat-phantom-count">0</span></span>
       <span id="status-indicator"></span>
     </div>
     <button class="collapse-btn" onclick="togglePanel()" title="Toggle side panel" id="collapse-btn">▸</button>
@@ -880,9 +882,9 @@ function initNetwork(graphData) {
       const tags = n.tags || '';
       let primaryTag = '';
       if (Array.isArray(tags) && tags.length > 0) {
-        primaryTag = tags[0];
+        primaryTag = tags[0].replace(/^[\[\]]+|[\[\]]+$/g, '').trim();
       } else if (typeof tags === 'string' && tags.trim()) {
-        primaryTag = tags.split(',')[0].trim();
+        primaryTag = tags.replace(/^[\[\]]+|[\[\]]+$/g, '').split(',')[0].trim();
       }
       if (primaryTag && tagColorMap[primaryTag]) {
         nodeColor = tagColorMap[primaryTag];
@@ -898,6 +900,7 @@ function initNetwork(graphData) {
     return {
       id: n.id,
       label: n.title,
+      title: '',  // suppress vis.js native tooltip — we use custom HTML tooltip
       group: nodeGroup,
       color: nodeColor ? (typeof nodeColor === 'string' ? { background: nodeColor, border: nodeColor, highlight: { background: nodeColor, border: nodeColor } } : nodeColor) : undefined,
       opacity: isDormant ? 0.3 : 1.0,
