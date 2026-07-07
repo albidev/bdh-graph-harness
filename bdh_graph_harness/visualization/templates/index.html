@@ -1017,10 +1017,12 @@ function initNetwork(graphData) {
   const maxDeg = Math.max(1, ...Object.values(degreeMap));
   const HUB_THRESHOLD = maxDeg * 0.4;  // nodes with degree > 40% of max are hubs
   const MIN_SIZE = 6, MAX_SIZE = 28;
+  const nodeScale = 0.5 + (edgeLengthMultiplier / 50);  // match console scale
   const visNodes = allNodeIds.map(id => {
     const n = graphData.nodes.find(x => x.id === id);
     const deg = degreeMap[id] || 0;
-    const size = MIN_SIZE + (deg / maxDeg) * (MAX_SIZE - MIN_SIZE);
+    const baseSize = MIN_SIZE + (deg / maxDeg) * (MAX_SIZE - MIN_SIZE);
+    const size = Math.max(4, baseSize * nodeScale);
     // Determine node color from tags if tag coloring is enabled
     let nodeGroup = 'inactive';
     let nodeColor = undefined;
@@ -1887,10 +1889,23 @@ function setEdgeLengthMultiplier(m) {
   const valEl = document.getElementById('el-val');
   if (slider) slider.value = m;
   if (valEl) valEl.textContent = m;
+
+  // Scale node sizes proportionally to edge length
+  const maxDeg = Math.max(1, ...Object.values(degreeMap));
+  const nodeScale = 0.5 + (m / 50);  // m=0→0.5x, m=50→1.5x, m=100→2.5x
+  const MIN_SIZE = 6, MAX_SIZE = 28;
+  allNodeIds.forEach(nid => {
+    const deg = degreeMap[nid] || 0;
+    const baseSize = MIN_SIZE + (deg / maxDeg) * (MAX_SIZE - MIN_SIZE);
+    const scaledSize = Math.max(4, baseSize * nodeScale);
+    if (nodesDS.get(nid)) {
+      nodesDS.update({ id: nid, size: scaledSize });
+    }
+  });
+
   if (!edgesDS || !degreeMap) return;
   // Update all edge lengths live
   allEdgeIds.forEach(eid => {
-    const info = edgeInfoMap[eid] || {};
     const parts = eid.replace('hebb_', '').replace('phantom_', '').split('→');
     const degA = degreeMap[parts[0]] || 0;
     const degB = degreeMap[parts[1]] || 0;
@@ -1899,7 +1914,7 @@ function setEdgeLengthMultiplier(m) {
       edgesDS.update({ id: eid, length: newLen });
     }
   });
-  console.log(`Edge length multiplier: ${m}. Base: ${BASE_LENGTH}px, max edge: ~${Math.round(BASE_LENGTH + m * 15)}px`);
+  console.log(`Edge length: ${m}, node scale: ${nodeScale.toFixed(2)}x`);
 }
 
 // Network spacing slider — live-tune physics repulsion & spring length
