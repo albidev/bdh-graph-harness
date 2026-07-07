@@ -1016,7 +1016,7 @@ function initNetwork(graphData) {
   // Size nodes by degree: more connections = bigger dot
   const maxDeg = Math.max(1, ...Object.values(degreeMap));
   const HUB_THRESHOLD = maxDeg * 0.4;  // nodes with degree > 40% of max are hubs
-  const MIN_SIZE = 6, MAX_SIZE = 28;
+  const MIN_SIZE = 10, MAX_SIZE = 40;
   const nodeScale = 0.5 + (edgeLengthMultiplier / 50);  // match console scale
   const visNodes = allNodeIds.map(id => {
     const n = graphData.nodes.find(x => x.id === id);
@@ -1893,13 +1893,20 @@ function setEdgeLengthMultiplier(m) {
   // Scale node sizes proportionally to edge length
   const maxDeg = Math.max(1, ...Object.values(degreeMap));
   const nodeScale = 0.5 + (m / 50);  // m=0→0.5x, m=50→1.5x, m=100→2.5x
-  const MIN_SIZE = 6, MAX_SIZE = 28;
+  const MIN_SIZE = 10, MAX_SIZE = 40;
   allNodeIds.forEach(nid => {
     const deg = degreeMap[nid] || 0;
     const baseSize = MIN_SIZE + (deg / maxDeg) * (MAX_SIZE - MIN_SIZE);
-    const scaledSize = Math.max(4, baseSize * nodeScale);
+    const scaledSize = Math.max(6, baseSize * nodeScale);
+    // Preserve tag color when updating size
+    const n = allGraphNodes.find(x => x.id === nid);
+    const color = nodeTagColorMap[nid] || null;
     if (nodesDS.get(nid)) {
-      nodesDS.update({ id: nid, size: scaledSize });
+      nodesDS.update({
+        id: nid,
+        size: scaledSize,
+        color: color || undefined,
+      });
     }
   });
 
@@ -1915,6 +1922,23 @@ function setEdgeLengthMultiplier(m) {
     }
   });
   console.log(`Edge length: ${m}, node scale: ${nodeScale.toFixed(2)}x`);
+}
+
+// Console command: setNodeSize(min, max) — change node size range live
+function setNodeSize(min, max) {
+  if (!nodesDS || !degreeMap) return;
+  const maxDeg = Math.max(1, ...Object.values(degreeMap));
+  const nodeScale = 0.5 + (edgeLengthMultiplier / 50);
+  allNodeIds.forEach(nid => {
+    const deg = degreeMap[nid] || 0;
+    const baseSize = min + (deg / maxDeg) * (max - min);
+    const scaledSize = Math.max(min * 0.6, baseSize * nodeScale);
+    const color = nodeTagColorMap[nid] || null;
+    if (nodesDS.get(nid)) {
+      nodesDS.update({ id: nid, size: scaledSize, color: color || undefined });
+    }
+  });
+  console.log(`Node size range: ${min}-${max}px, scale: ${nodeScale.toFixed(2)}x`);
 }
 
 // Network spacing slider — live-tune physics repulsion & spring length
