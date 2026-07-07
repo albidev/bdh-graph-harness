@@ -988,7 +988,7 @@ function initNetwork(graphData) {
       color: nodeColor ? (typeof nodeColor === 'string' ? { background: nodeColor, border: nodeColor, highlight: { background: nodeColor, border: nodeColor } } : nodeColor) : undefined,
       opacity: isDormant ? 0.3 : 1.0,
       size: deg > 0 ? size : MIN_SIZE,
-      mass: 1 + (deg / maxDeg) * massMultiplier,  // hubs repel harder → more breathing room
+      mass: 1,  // uniform mass — distance controlled by edge length
     };
   });
 
@@ -996,6 +996,14 @@ function initNetwork(graphData) {
   const visEdges = [];
   edgeSet.clear();
   edgeInfoMap = {};
+
+  // Edge length: base + average degree of endpoints * multiplier
+  function calcEdgeLen(a, b) {
+    const degA = degreeMap[a] || 0;
+    const degB = degreeMap[b] || 0;
+    return BASE_LENGTH + ((degA + degB) / 2) * edgeLengthMultiplier;
+  }
+
   graphData.edges.forEach(e => {
     const eid = e.source + '→' + e.target;
     if (edgeSet.has(eid)) return;
@@ -1010,6 +1018,7 @@ function initNetwork(graphData) {
       to: e.target,
       color: { color: COLORS.edgeWikilink, highlight: COLORS.edgeWikilink },
       width: 0.5,
+      length: calcEdgeLen(e.source, e.target),
     });
   });
 
@@ -1029,6 +1038,7 @@ function initNetwork(graphData) {
       color: { color: weightColor(h.weight), highlight: weightColor(h.weight) },
       width: w,
       dashes: false,
+      length: calcEdgeLen(h.note_a, h.note_b),
     });
   });
   // Phantom edges — semantic similarity connections (dashed blue)
@@ -1048,6 +1058,7 @@ function initNetwork(graphData) {
       width: 1.5,
       dashes: [5, 5],
       title: `Semantic link (sim: ${p.similarity.toFixed(2)})`,
+      length: calcEdgeLen(p.source, p.target),
     });
   });
 
@@ -1785,17 +1796,24 @@ function togglePhantom(on) {
   applyEdgeFilters();
 }
 
-// Console-tunable mass multiplier — paste in browser console: setMassMultiplier(4)
-let massMultiplier = 4;  // base multiplier (0=no extra mass, 10=extreme repulsion)
-function setMassMultiplier(m) {
-  massMultiplier = m;
-  if (!nodesDS || !allNodeIds || !degreeMap) return;
-  const maxDeg = Math.max(1, ...Object.values(degreeMap));
-  allNodeIds.forEach(nid => {
-    const deg = degreeMap[nid] || 0;
-    nodesDS.update({ id: nid, mass: 1 + (deg / maxDeg) * m });
+// Console-tunable edge length multiplier — paste in browser console: setEdgeLengthMultiplier(20)
+let edgeLengthMultiplier = 10;  // default: 10px per degree unit
+const BASE_LENGTH = 80;
+function setEdgeLengthMultiplier(m) {
+  edgeLengthMultiplier = m;
+  if (!edgesDS || !degreeMap) return;
+  // Update all edge lengths live
+  allEdgeIds.forEach(eid => {
+    const info = edgeInfoMap[eid] || {};
+    const parts = eid.replace('hebb_', '').replace('phantom_', '').split('→');
+    const degA = degreeMap[parts[0]] || 0;
+    const degB = degreeMap[parts[1]] || 0;
+    const newLen = BASE_LENGTH + ((degA + degB) / 2) * m;
+    if (edgesDS.get(eid)) {
+      edgesDS.update({ id: eid, length: newLen });
+    }
   });
-  console.log(`Mass multiplier set to ${m}. Hubs now push ${(1 + m).toFixed(0)}x harder.`);
+  console.log(`Edge length multiplier: ${m}. Base: ${BASE_LENGTH}px, max edge: ~${Math.round(BASE_LENGTH + m * 15)}px`);
 }
 
 // Network spacing slider — live-tune physics repulsion & spring length
