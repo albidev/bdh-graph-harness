@@ -53,6 +53,7 @@ The visualization is fully responsive:
 ## WebSocket
 
 The visualization connects to the server via WebSocket for real-time updates:
+- **Initial payload** — on connect, sends full graph (nodes with id/title/tags/path/text, edges, hebbian synapses, stats) to populate the visualization
 - Auto-reconnect with status indicator
 - Receives activation cascades, Hebbian updates, and neurogenesis events as they happen
 - Falls back to polling if WebSocket is unavailable
