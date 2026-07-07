@@ -92,6 +92,19 @@
   }
   .query-clear:hover { color: #f0883e; }
   .query-clear.visible { display: block; }
+  #reset-btn {
+    width: 100%;
+    margin-top: 6px;
+    padding: 8px;
+    background: #21262d;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    color: #8b949e;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  #reset-btn:hover { background: #30363d; color: #c9d1d9; border-color: #58a6ff; }
   #query-input {
     width: 100%;
     padding: 10px 32px 10px 12px;
@@ -585,6 +598,7 @@
         <button class="query-clear" id="query-clear" onclick="clearQuery()" title="Clear">&times;</button>
       </div>
       <button id="query-btn" onclick="sendQuery()">Query</button>
+      <button id="reset-btn" onclick="resetQuery()">↺ Reset</button>
     </div>
     <div id="response-section">
       <h3>Response</h3>
@@ -654,6 +668,7 @@ let showTagColors = true; // toggle for tag-based coloring (on by default)
 let degreeMap = {};      // node_id -> degree (computed from edges)
 let neighborMap = {};    // node_id -> [connected node titles]
 let neurogenesisNodes = {};  // node_id -> node data (preserved across graph refresh)
+let nodeTagColorMap = {};    // node_id -> vis.js color object (preserves tag color across dim/restore)
 let tooltipEl = null;    // custom HTML tooltip element
 let edgeInfoMap = {};    // edge_id -> {source_title, target_title, type, weight?, frequency?}
 let totalConcepts = 0;   // cumulative neurogenesis counter
@@ -873,6 +888,10 @@ function initNetwork(graphData) {
     const tooltip = isDormant
       ? `${n.title}\n💤 Dormant (Q: ${qualityScore.toFixed(2)})`
       : (qualityScore > 0 ? `${n.title}\n(Q: ${qualityScore.toFixed(2)})` : n.title);
+    // Track tag color for this node (used by handleActivation to preserve colors across dim/restore)
+    nodeTagColorMap[n.id] = nodeColor
+      ? (typeof nodeColor === 'string' ? { background: nodeColor, border: nodeColor, highlight: { background: nodeColor, border: nodeColor } } : nodeColor)
+      : null;
     return {
       id: n.id,
       label: n.title,
@@ -1046,10 +1065,10 @@ function handleActivation(event) {
   const activatedIds = new Set(activated.map(n => n.id));
   const seedId = activated.length > 0 ? activated[0].id : null;
 
-  // Dim all nodes first
+  // Dim all nodes first (preserve tag colors — don't override with group)
   allNodeIds.forEach(id => {
     if (nodesDS.get(id)) {
-      nodesDS.update({ id, group: 'inactive', opacity: activatedIds.size > 0 ? 0.3 : 1.0 });
+      nodesDS.update({ id, color: nodeTagColorMap[id] || undefined, group: 'inactive', opacity: activatedIds.size > 0 ? 0.3 : 1.0 });
     }
   });
 
@@ -1058,7 +1077,9 @@ function handleActivation(event) {
     setTimeout(() => {
       const group = note.id === seedId ? 'seed' : 'activated';
       if (nodesDS.get(note.id)) {
-        nodesDS.update({ id: note.id, group: group, opacity: 1.0 });
+        // Restore tag color if available, otherwise use group default
+        const tagColor = nodeTagColorMap[note.id];
+        nodesDS.update({ id: note.id, group: group, color: tagColor || undefined, opacity: 1.0 });
       }
     }, i * 80);
   });
@@ -1207,6 +1228,7 @@ function handleActivation(event) {
       allNodeIds.push(nc.id);
       // Track for preservation across graph refresh
       neurogenesisNodes[nc.id] = { label: nc.title || nc.id.split('/').pop(), title: nc.title || nc.id };
+      nodeTagColorMap[nc.id] = { background: COLORS.neurogenesis, border: COLORS.neurogenesis, highlight: { background: COLORS.neurogenesis, border: COLORS.neurogenesis } };
       totalConcepts++;
       const cEl = document.getElementById('stat-concepts');
       if (cEl) { cEl.textContent = totalConcepts; cEl.style.color = '#3fb950'; setTimeout(() => { cEl.style.color = ''; }, 1500); }
@@ -1414,6 +1436,7 @@ function connectWS() {
                   group: 'neurogenesis',
                   opacity: 1.0,
                 });
+                nodeTagColorMap[nid] = { background: COLORS.neurogenesis, border: COLORS.neurogenesis, highlight: { background: COLORS.neurogenesis, border: COLORS.neurogenesis } };
                 allNodeIds.push(nid);
               }
             });
@@ -1638,6 +1661,33 @@ const qClear = document.getElementById('query-clear');
 function updateClearBtn() { qClear.classList.toggle('visible', qInput.value.length > 0); }
 qInput.addEventListener('input', updateClearBtn);
 function clearQuery() { qInput.value = ''; updateClearBtn(); qInput.focus(); }
+
+// Full reset — clears results and restores graph to pre-query state
+function resetQuery() {
+  // Clear input + UI
+  qInput.value = '';
+  updateClearBtn();
+  document.getElementById('response-text').textContent = '—';
+  document.getElementById('activated-list').innerHTML = '<div class="empty">No activations yet</div>';
+
+  // Restore all nodes to original tag colors + full opacity
+  if (nodesDS) {
+    allNodeIds.forEach(id => {
+      const node = nodesDS.get(id);
+      if (!node) return;
+      const tagColor = nodeTagColorMap[id];
+      nodesDS.update({ id, color: tagColor || undefined, opacity: 1.0, group: 'inactive' });
+    });
+  }
+
+  // Restore all edges to full opacity
+  if (edgesDS) {
+    allEdgeIds.forEach(eid => {
+      const edge = edgesDS.get(eid);
+      if (edge) edgesDS.update({ id: eid, opacity: 1.0 });
+    });
+  }
+}
 
 // ======== ZOOM CONTROLS ========
 const ZOOM_MIN = 0.1;
