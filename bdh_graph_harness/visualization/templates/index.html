@@ -245,6 +245,37 @@
     left: 16px;
     background: #fff;
   }
+  .threshold-control {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: 8px;
+  }
+  .threshold-control input[type="range"] {
+    width: 60px;
+    height: 4px;
+    -webkit-appearance: none;
+    appearance: none;
+    background: #21262d;
+    border-radius: 2px;
+    outline: none;
+    cursor: pointer;
+  }
+  .threshold-control input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 12px;
+    height: 12px;
+    background: #58a6ff;
+    border-radius: 50%;
+    cursor: pointer;
+  }
+  .threshold-val {
+    font-size: 11px;
+    color: #58a6ff;
+    font-family: monospace;
+    min-width: 28px;
+    text-align: center;
+  }
   .tag-legend {
     position: absolute;
     bottom: 60px;
@@ -557,6 +588,25 @@
       <input type="checkbox" id="orphan-toggle" checked onchange="toggleOrphans(this.checked)">
       <span class="toggle-text">Orphans</span>
     </label>
+    <label class="toggle-label" title="Show only direct wikilink connections (hide Hebbian & phantom edges)">
+      <input type="checkbox" id="direct-toggle" onchange="toggleDirectOnly(this.checked)">
+      <span class="toggle-text">Direct</span>
+    </label>
+    <div class="threshold-control" id="threshold-control">
+      <label class="toggle-label" title="Hide Hebbian edges below this weight">
+        <span class="toggle-text">≥</span>
+        <input type="range" id="hebbian-threshold" min="0" max="1" step="0.05" value="0.15"
+               oninput="updateHebbianThreshold(this.value)">
+      </label>
+      <span class="threshold-val" id="threshold-val">0.15</span>
+    </div>
+    <div class="threshold-control" id="spacing-control">
+      <label class="toggle-label" title="Network spacing — distance between nodes">
+        <span class="toggle-text">↔</span>
+        <input type="range" id="spacing-slider" min="0" max="100" step="5" value="50"
+               oninput="updateSpacing(this.value)">
+      </label>
+    </div>
     <label class="toggle-label" title="Color nodes by Obsidian tag">
       <input type="checkbox" id="tag-toggle" checked onchange="toggleTagColors(this.checked)">
       <span class="toggle-text">Tags</span>
@@ -667,6 +717,8 @@ let orphanNodeIds = [];  // nodes with no connections (hidden by default)
 let allGraphNodes = [];  // full node list from server (for orphan toggle)
 let tagColorMap = {};    // tag -> color for tag-based node coloring
 let showTagColors = true; // toggle for tag-based coloring (on by default)
+let directOnly = false;   // toggle for showing only direct wikilink edges
+let hebbianThreshold = 0.15; // minimum weight for Hebbian edges to show
 let degreeMap = {};      // node_id -> degree (computed from edges)
 let neighborMap = {};    // node_id -> [connected node titles]
 let neurogenesisNodes = {};  // node_id -> node data (preserved across graph refresh)
@@ -868,8 +920,33 @@ function initNetwork(graphData) {
   const connectedSet = new Set(connectedNodes);
   orphanNodeIds = graphData.nodes.filter(n => !connectedSet.has(n.id)).map(n => n.id);
   allNodeIds = graphData.nodes.filter(n => connectedSet.has(n.id)).map(n => n.id);
+
+  allEdgeIds = Array.from(edgeSet);
+
+  // Compute degree map for node sizing (count edges per node)
+  degreeMap = {};
+  graphData.edges.forEach(e => {
+    degreeMap[e.source] = (degreeMap[e.source] || 0) + 1;
+    degreeMap[e.target] = (degreeMap[e.target] || 0) + 1;
+  });
+  graphData.hebbian.forEach(h => {
+    if (!edgeSet.has('hebb_' + h.note_a + '→' + h.note_b)) return;
+    degreeMap[h.note_a] = (degreeMap[h.note_a] || 0) + 1;
+    degreeMap[h.note_b] = (degreeMap[h.note_b] || 0) + 1;
+  });
+  (graphData.phantom || []).forEach(p => {
+    if (!edgeSet.has('phantom_' + p.source + '→' + p.target)) return;
+    degreeMap[p.source] = (degreeMap[p.source] || 0) + 1;
+    degreeMap[p.target] = (degreeMap[p.target] || 0) + 1;
+  });
+
+  // Size nodes by degree: more connections = bigger dot
+  const maxDeg = Math.max(1, ...Object.values(degreeMap));
+  const MIN_SIZE = 6, MAX_SIZE = 28;
   const visNodes = allNodeIds.map(id => {
     const n = graphData.nodes.find(x => x.id === id);
+    const deg = degreeMap[id] || 0;
+    const size = MIN_SIZE + (deg / maxDeg) * (MAX_SIZE - MIN_SIZE);
     // Determine node color from tags if tag coloring is enabled
     let nodeGroup = 'inactive';
     let nodeColor = undefined;
@@ -904,6 +981,7 @@ function initNetwork(graphData) {
       group: nodeGroup,
       color: nodeColor ? (typeof nodeColor === 'string' ? { background: nodeColor, border: nodeColor, highlight: { background: nodeColor, border: nodeColor } } : nodeColor) : undefined,
       opacity: isDormant ? 0.3 : 1.0,
+      size: deg > 0 ? size : MIN_SIZE,
     };
   });
 
@@ -976,7 +1054,6 @@ function initNetwork(graphData) {
   const options = {
     nodes: {
       shape: 'dot',
-      size: 8,
       font: { color: '#c9d1d9', size: 12, face: 'system-ui' },
       borderWidth: 1,
       borderWidthSelected: 2,
@@ -998,8 +1075,13 @@ function initNetwork(graphData) {
     },
     physics: {
       solver: 'barnesHut',
-      barnesHut: { gravitationalConstant: -3000, springLength: 120, springConstant: 0.04 },
-      stabilization: { iterations: 100, updateInterval: 25 },
+      barnesHut: {
+        gravitationalConstant: -6000,
+        springLength: 200,
+        springConstant: 0.02,
+        avoidOverlap: 1,
+      },
+      stabilization: { iterations: 150, updateInterval: 25 },
     },
     interaction: { hover: true, tooltipDelay: 150 },
   };
@@ -1036,6 +1118,8 @@ function initNetwork(graphData) {
 
   // Show orphan nodes by default (checkbox is checked on load)
   if (orphanNodeIds.length > 0) toggleOrphans(true);
+  // Apply edge filters on initial load
+  applyEdgeFilters();
 
   // Show dormant count if > 0
   const dormantEl = document.getElementById('stat-dormant');
@@ -1448,7 +1532,7 @@ function connectWS() {
             });
           }
           if (showTagColors) toggleTagColors(true);
-          // Update stats
+          // Update stats (filters applied inside initNetwork)
           document.getElementById('stat-neurons').textContent = event.neurons;
           document.getElementById('stat-synapses').textContent = event.synapses;
           // Animate new notes with neurogenesis birth animation
@@ -1638,6 +1722,70 @@ function toggleTagColors(enabled) {
     }
     nodesDS.update({ id: nid, color: color });
   });
+}
+
+// Direct-only toggle — hide Hebbian and phantom edges, show only wikilinks
+function toggleDirectOnly(on) {
+  directOnly = on;
+  const thresholdCtrl = document.getElementById('threshold-control');
+  if (thresholdCtrl) thresholdCtrl.style.display = on ? 'none' : 'flex';
+  applyEdgeFilters();
+}
+
+// Hebbian weight threshold — hide edges below the threshold
+function updateHebbianThreshold(val) {
+  hebbianThreshold = parseFloat(val);
+  document.getElementById('threshold-val').textContent = val;
+  applyEdgeFilters();
+}
+
+// Central edge filter — called by both toggles
+function applyEdgeFilters() {
+  if (!edgesDS) return;
+  allEdgeIds.forEach(eid => {
+    const edge = edgesDS.get(eid);
+    if (!edge) return;
+    const info = edgeInfoMap[eid] || {};
+    let visible = true;
+
+    if (directOnly) {
+      // In direct-only mode, hide everything that isn't a wikilink
+      visible = info.type === 'wikilink';
+    } else if (info.type === 'hebbian') {
+      // Filter by weight threshold
+      visible = (info.weight || 0) >= hebbianThreshold;
+    }
+
+    edgesDS.update({ id: eid, hidden: !visible });
+  });
+
+  // Update visible synapse count
+  const visibleEdges = allEdgeIds.filter(eid => {
+    const e = edgesDS.get(eid);
+    return e && !e.hidden;
+  }).length;
+  const synEl = document.getElementById('stat-synapses');
+  if (synEl) synEl.textContent = visibleEdges;
+}
+
+// Network spacing slider — live-tune physics repulsion & spring length
+function updateSpacing(val) {
+  const t = parseInt(val) / 100; // 0..1
+  // Map: 0=dense (gravity -2000, spring 80) → 1=sparse (gravity -12000, spring 400)
+  const gravity = Math.round(-2000 - t * 10000);
+  const spring = Math.round(80 + t * 320);
+  const springK = Math.max(0.005, 0.04 - t * 0.035);
+  if (network) {
+    network.setOptions({
+      physics: {
+        barnesHut: {
+          gravitationalConstant: gravity,
+          springLength: spring,
+          springConstant: springK,
+        }
+      }
+    });
+  }
 }
 
 // Legend collapse toggle (slide to left edge)
