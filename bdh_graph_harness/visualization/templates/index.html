@@ -252,22 +252,23 @@
     margin-left: 8px;
   }
   .threshold-control input[type="range"] {
-    width: 60px;
-    height: 4px;
+    width: 70px;
+    height: 6px;
     -webkit-appearance: none;
     appearance: none;
     background: #21262d;
-    border-radius: 2px;
+    border-radius: 3px;
     outline: none;
     cursor: pointer;
   }
   .threshold-control input[type="range"]::-webkit-slider-thumb {
     -webkit-appearance: none;
-    width: 12px;
-    height: 12px;
+    width: 14px;
+    height: 14px;
     background: #58a6ff;
     border-radius: 50%;
     cursor: pointer;
+    box-shadow: 0 0 4px rgba(88,166,255,0.4);
   }
   .threshold-val {
     font-size: 11px;
@@ -611,6 +612,10 @@
       <input type="checkbox" id="tag-toggle" checked onchange="toggleTagColors(this.checked)">
       <span class="toggle-text">Tags</span>
     </label>
+    <label class="toggle-label" title="Show phantom (semantic similarity) edges">
+      <input type="checkbox" id="phantom-toggle" checked onchange="togglePhantom(this.checked)">
+      <span class="toggle-text">👻</span>
+    </label>
     <div class="stats">
       Neurons: <span id="stat-neurons">{neuron_count}</span>
       · Synapses: <span id="stat-synapses">{synapse_count}</span>
@@ -719,6 +724,7 @@ let tagColorMap = {};    // tag -> color for tag-based node coloring
 let showTagColors = true; // toggle for tag-based coloring (on by default)
 let directOnly = false;   // toggle for showing only direct wikilink edges
 let hebbianThreshold = 0.15; // minimum weight for Hebbian edges to show
+let showPhantom = true;   // toggle for phantom (semantic similarity) edges
 let degreeMap = {};      // node_id -> degree (computed from edges)
 let neighborMap = {};    // node_id -> [connected node titles]
 let neurogenesisNodes = {};  // node_id -> node data (preserved across graph refresh)
@@ -1739,7 +1745,7 @@ function updateHebbianThreshold(val) {
   applyEdgeFilters();
 }
 
-// Central edge filter — called by both toggles
+// Central edge filter — called by all toggles
 function applyEdgeFilters() {
   if (!edgesDS) return;
   allEdgeIds.forEach(eid => {
@@ -1751,9 +1757,13 @@ function applyEdgeFilters() {
     if (directOnly) {
       // In direct-only mode, hide everything that isn't a wikilink
       visible = info.type === 'wikilink';
-    } else if (info.type === 'hebbian') {
-      // Filter by weight threshold
-      visible = (info.weight || 0) >= hebbianThreshold;
+    } else {
+      // Filter by type
+      if (info.type === 'hebbian') {
+        visible = (info.weight || 0) >= hebbianThreshold;
+      } else if (info.type === 'phantom') {
+        visible = showPhantom;
+      }
     }
 
     edgesDS.update({ id: eid, hidden: !visible });
@@ -1766,6 +1776,12 @@ function applyEdgeFilters() {
   }).length;
   const synEl = document.getElementById('stat-synapses');
   if (synEl) synEl.textContent = visibleEdges;
+}
+
+// Phantom edges toggle
+function togglePhantom(on) {
+  showPhantom = on;
+  applyEdgeFilters();
 }
 
 // Network spacing slider — live-tune physics repulsion & spring length
