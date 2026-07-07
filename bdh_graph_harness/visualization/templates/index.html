@@ -653,6 +653,7 @@ let tagColorMap = {};    // tag -> color for tag-based node coloring
 let showTagColors = true; // toggle for tag-based coloring (on by default)
 let degreeMap = {};      // node_id -> degree (computed from edges)
 let neighborMap = {};    // node_id -> [connected node titles]
+let neurogenesisNodes = {};  // node_id -> node data (preserved across graph refresh)
 let tooltipEl = null;    // custom HTML tooltip element
 let edgeInfoMap = {};    // edge_id -> {source_title, target_title, type, weight?, frequency?}
 let totalConcepts = 0;   // cumulative neurogenesis counter
@@ -1204,6 +1205,8 @@ function handleActivation(event) {
         opacity: 1.0,
       });
       allNodeIds.push(nc.id);
+      // Track for preservation across graph refresh
+      neurogenesisNodes[nc.id] = { label: nc.title || nc.id.split('/').pop(), title: nc.title || nc.id };
       totalConcepts++;
       const cEl = document.getElementById('stat-concepts');
       if (cEl) { cEl.textContent = totalConcepts; cEl.style.color = '#3fb950'; setTimeout(() => { cEl.style.color = ''; }, 1500); }
@@ -1395,8 +1398,26 @@ function connectWS() {
         console.log('Graph refresh:', event.message);
         const changedNodes = event.changed_nodes || [];
         const newConcepts = event.new_concepts || [];
+        // Preserve neurogenesis nodes before rebuild
+        const savedNeurogenesis = Object.assign({}, neurogenesisNodes);
         fetch('/api/graph').then(r => r.json()).then(data => {
           initNetwork(data);
+          // Re-add preserved neurogenesis nodes that aren't in new data
+          if (Object.keys(savedNeurogenesis).length > 0 && nodesDS) {
+            const newDataIds = new Set(data.nodes.map(n => n.id));
+            Object.entries(savedNeurogenesis).forEach(([nid, ndata]) => {
+              if (!newDataIds.has(nid) && !nodesDS.get(nid)) {
+                nodesDS.add({
+                  id: nid,
+                  label: ndata.label,
+                  title: ndata.title,
+                  group: 'neurogenesis',
+                  opacity: 1.0,
+                });
+                allNodeIds.push(nid);
+              }
+            });
+          }
           if (showTagColors) toggleTagColors(true);
           // Update stats
           document.getElementById('stat-neurons').textContent = event.neurons;
