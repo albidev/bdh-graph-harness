@@ -670,6 +670,7 @@ let neighborMap = {};    // node_id -> [connected node titles]
 let neurogenesisNodes = {};  // node_id -> node data (preserved across graph refresh)
 let nodeTagColorMap = {};    // node_id -> vis.js color object (preserves tag color across dim/restore)
 let tooltipEl = null;    // custom HTML tooltip element
+let nodeDataMap = {};    // node_id -> full node data (fast tooltip lookup, updated on live adds)
 let edgeInfoMap = {};    // edge_id -> {source_title, target_title, type, weight?, frequency?}
 let totalConcepts = 0;   // cumulative neurogenesis counter
 
@@ -685,7 +686,7 @@ function ensureTooltip() {
 // Show tooltip for a node
 function showTooltip(nodeId, evt) {
   ensureTooltip();
-  const n = allGraphNodes.find(x => x.id === nodeId);
+  const n = nodeDataMap[nodeId] || allGraphNodes.find(x => x.id === nodeId);
   if (!n) { hideTooltip(); return; }
 
   const title = escapeHtml(n.title || n.id);
@@ -795,8 +796,10 @@ function showEdgeTooltip(edgeId, evt) {
 }
 
 function initNetwork(graphData) {
-  // Store full node list for orphan toggle
+  // Store full node list for orphan toggle + build fast lookup map for tooltips
   allGraphNodes = graphData.nodes;
+  nodeDataMap = {};
+  graphData.nodes.forEach(n => { nodeDataMap[n.id] = n; });
 
   // Build tag color map from unique tags
   const tagSet = new Set();
@@ -1147,6 +1150,7 @@ function handleActivation(event) {
             group: 'inactive',
             opacity: 0.3,
           });
+          nodeDataMap[nid] = hNode;
           allNodeIds.push(nid);
         }
       });
@@ -1228,6 +1232,7 @@ function handleActivation(event) {
       allNodeIds.push(nc.id);
       // Track for preservation across graph refresh
       neurogenesisNodes[nc.id] = { label: nc.title || nc.id.split('/').pop(), title: nc.title || nc.id };
+      nodeDataMap[nc.id] = { id: nc.id, title: nc.title || nc.id, tags: 'neurogenesis', text: nc.definition || '', path: '' };
       nodeTagColorMap[nc.id] = { background: COLORS.neurogenesis, border: COLORS.neurogenesis, highlight: { background: COLORS.neurogenesis, border: COLORS.neurogenesis } };
       totalConcepts++;
       const cEl = document.getElementById('stat-concepts');
@@ -1436,6 +1441,7 @@ function connectWS() {
                   group: 'neurogenesis',
                   opacity: 1.0,
                 });
+                nodeDataMap[nid] = { id: nid, title: ndata.title, tags: 'neurogenesis', text: '', path: '' };
                 nodeTagColorMap[nid] = { background: COLORS.neurogenesis, border: COLORS.neurogenesis, highlight: { background: COLORS.neurogenesis, border: COLORS.neurogenesis } };
                 allNodeIds.push(nid);
               }
