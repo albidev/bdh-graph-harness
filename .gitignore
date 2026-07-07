@@ -40,3 +40,7 @@ plugins/obsidian/node_modules/
 plugins/obsidian/coverage/
 plugins/obsidian/main.js
 plugins/obsidian/package-lock.json
+
+# Local vault (not part of the repo)
+wiki/
+

@@ -51,7 +51,7 @@ CONFIG = {
     'beta': 0.3,
     'decay': 0.95,
     'hebbian_min_score': 0.15,  # min activation score to create Hebbian synapse
-    'neurogenesis_dir': 'concepts',
+    'neurogenesis_dir': 'wiki/concepts',
     'neurogenesis_enabled': True,
     'api_host': '127.0.0.1',
     'api_port': 8642,
