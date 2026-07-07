@@ -988,7 +988,7 @@ function initNetwork(graphData) {
       color: nodeColor ? (typeof nodeColor === 'string' ? { background: nodeColor, border: nodeColor, highlight: { background: nodeColor, border: nodeColor } } : nodeColor) : undefined,
       opacity: isDormant ? 0.3 : 1.0,
       size: deg > 0 ? size : MIN_SIZE,
-      mass: 1 + (deg / maxDeg) * 4,  // hubs repel harder → more breathing room
+      mass: 1 + (deg / maxDeg) * massMultiplier,  // hubs repel harder → more breathing room
     };
   });
 
@@ -1783,6 +1783,19 @@ function applyEdgeFilters() {
 function togglePhantom(on) {
   showPhantom = on;
   applyEdgeFilters();
+}
+
+// Console-tunable mass multiplier — paste in browser console: setMassMultiplier(4)
+let massMultiplier = 4;  // base multiplier (0=no extra mass, 10=extreme repulsion)
+function setMassMultiplier(m) {
+  massMultiplier = m;
+  if (!nodesDS || !allNodeIds || !degreeMap) return;
+  const maxDeg = Math.max(1, ...Object.values(degreeMap));
+  allNodeIds.forEach(nid => {
+    const deg = degreeMap[nid] || 0;
+    nodesDS.update({ id: nid, mass: 1 + (deg / maxDeg) * m });
+  });
+  console.log(`Mass multiplier set to ${m}. Hubs now push ${(1 + m).toFixed(0)}x harder.`);
 }
 
 // Network spacing slider — live-tune physics repulsion & spring length
