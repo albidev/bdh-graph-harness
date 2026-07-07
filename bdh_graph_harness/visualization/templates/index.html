@@ -433,6 +433,67 @@
     color: #58a6ff;
     border-color: #58a6ff;
   }
+  /* Edge length vertical slider */
+  #edge-length-controls {
+    position: absolute;
+    bottom: 56px;
+    right: 16px;
+    z-index: 100;
+    pointer-events: auto;
+    background: rgba(22, 27, 34, 0.92);
+    border: 1px solid #30363d;
+    border-radius: 8px;
+    padding: 8px 6px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+  }
+  #edge-length-controls .el-label {
+    font-size: 9px;
+    color: #8b949e;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    user-select: none;
+  }
+  #edge-length-controls .el-val {
+    font-size: 10px;
+    color: #58a6ff;
+    font-family: monospace;
+    font-variant-numeric: tabular-nums;
+    min-width: 18px;
+    text-align: center;
+  }
+  #edge-length-controls #edge-length-slider {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 4px;
+    height: 120px;
+    background: #30363d;
+    border-radius: 2px;
+    outline: none;
+    cursor: pointer;
+    writing-mode: vertical-lr;
+    direction: rtl;
+  }
+  #edge-length-controls #edge-length-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 14px;
+    height: 14px;
+    background: #58a6ff;
+    border-radius: 50%;
+    cursor: pointer;
+    border: 2px solid #161b22;
+  }
+  #edge-length-controls #edge-length-slider::-moz-range-thumb {
+    width: 14px;
+    height: 14px;
+    background: #58a6ff;
+    border-radius: 50%;
+    cursor: pointer;
+    border: 2px solid #161b22;
+  }
   .tag-legend .tag-item {
     display: flex;
     align-items: center;
@@ -634,6 +695,12 @@
 <div id="main">
   <div id="graph-area">
     <div id="graph-container"></div>
+    <div id="edge-length-controls">
+      <span class="el-label">↔</span>
+      <input type="range" id="edge-length-slider" min="0" max="100" step="10" value="10"
+             orient="vertical" oninput="setEdgeLengthMultiplier(parseInt(this.value)); document.getElementById('el-val').textContent=this.value">
+      <span class="el-val" id="el-val">10</span>
+    </div>
     <div id="zoom-controls">
     <div class="zoom-row">
       <button class="zoom-btn" onclick="zoomStep(-0.15)" title="Zoom out">−</button>
@@ -1801,6 +1868,11 @@ let edgeLengthMultiplier = 10;  // default: 10px per degree unit
 const BASE_LENGTH = 80;
 function setEdgeLengthMultiplier(m) {
   edgeLengthMultiplier = m;
+  // Sync slider UI
+  const slider = document.getElementById('edge-length-slider');
+  const valEl = document.getElementById('el-val');
+  if (slider) slider.value = m;
+  if (valEl) valEl.textContent = m;
   if (!edgesDS || !degreeMap) return;
   // Update all edge lengths live
   allEdgeIds.forEach(eid => {
