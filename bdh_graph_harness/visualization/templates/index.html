@@ -1015,6 +1015,7 @@ function initNetwork(graphData) {
 
   // Size nodes by degree: more connections = bigger dot
   const maxDeg = Math.max(1, ...Object.values(degreeMap));
+  const HUB_THRESHOLD = maxDeg * 0.4;  // nodes with degree > 40% of max are hubs
   const MIN_SIZE = 6, MAX_SIZE = 28;
   const visNodes = allNodeIds.map(id => {
     const n = graphData.nodes.find(x => x.id === id);
@@ -1041,12 +1042,24 @@ function initNetwork(graphData) {
       }
     }
     const tooltip = isDormant
-      ? `${n.title}\n💤 Dormant (Q: ${qualityScore.toFixed(2)})`
-      : (qualityScore > 0 ? `${n.title}\n(Q: ${qualityScore.toFixed(2)})` : n.title);
+      ? `${n.title}\\n💤 Dormant (Q: ${qualityScore.toFixed(2)})`
+      : (qualityScore > 0 ? `${n.title}\\n(Q: ${qualityScore.toFixed(2)})` : n.title);
     // Track tag color for this node (used by handleActivation to preserve colors across dim/restore)
     nodeTagColorMap[n.id] = nodeColor
       ? (typeof nodeColor === 'string' ? { background: nodeColor, border: nodeColor, highlight: { background: nodeColor, border: nodeColor } } : nodeColor)
       : null;
+
+    // Assign shape by node type
+    const tags = (n.tags || '').toLowerCase();
+    let shape = 'dot';
+    if (isDormant) {
+      shape = 'triangleDown';  // sopito
+    } else if (tags.includes('neurogenesis')) {
+      shape = 'diamond';       // generato dal sistema
+    } else if (deg >= HUB_THRESHOLD) {
+      shape = 'hexagon';       // hub
+    }
+
     return {
       id: n.id,
       label: n.title,
@@ -1055,7 +1068,8 @@ function initNetwork(graphData) {
       color: nodeColor ? (typeof nodeColor === 'string' ? { background: nodeColor, border: nodeColor, highlight: { background: nodeColor, border: nodeColor } } : nodeColor) : undefined,
       opacity: isDormant ? 0.3 : 1.0,
       size: deg > 0 ? size : MIN_SIZE,
-      mass: 1,  // uniform mass — distance controlled by edge length
+      mass: 1,
+      shape: shape,
     };
   });
 
