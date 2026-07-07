@@ -1141,8 +1141,9 @@ function handleActivation(event) {
       // New Hebbian synapse — add nodes if missing, then create edge
       [a, b].forEach(nid => {
         if (!nodesDS.get(nid)) {
-          // Node not in graph yet — add it live
-          const hNode = allGraphNodes.find(x => x.id === nid) || { id: nid, title: nid.split('/').pop(), tags: '', text: '', path: '' };
+          // Node not in graph yet — add it live (prefer full server data for tooltip)
+          const fullNode = allGraphNodes.find(x => x.id === nid);
+          const hNode = fullNode || { id: nid, title: nid.split('/').pop(), tags: '', text: '', path: '' };
           nodesDS.add({
             id: nid,
             label: hNode.title || nid.split('/').pop(),
@@ -1150,7 +1151,7 @@ function handleActivation(event) {
             group: 'inactive',
             opacity: 0.3,
           });
-          nodeDataMap[nid] = hNode;
+          nodeDataMap[nid] = fullNode || hNode;
           allNodeIds.push(nid);
         }
       });
