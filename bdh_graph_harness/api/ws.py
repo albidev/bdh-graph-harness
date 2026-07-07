@@ -47,6 +47,8 @@ class WebSocketManager:
                 'id': note_id,
                 'title': node['title'],
                 'tags': node.get('tags', []),
+                'path': node.get('path', ''),
+                'text': node.get('text', '')[:200],
             })
 
         # _resolve_target is in the graph module
@@ -148,6 +150,8 @@ async def websocket_handler(request, app_state: dict, ws_clients: set = None) ->
             'id': note_id,
             'title': node['title'],
             'tags': node.get('tags', []),
+            'path': node.get('path', ''),
+            'text': node.get('text', '')[:200],
         })
 
     from bdh_graph_harness.graph import _resolve_target
