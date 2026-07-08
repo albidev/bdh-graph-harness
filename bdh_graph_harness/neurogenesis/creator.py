@@ -55,6 +55,7 @@ def extract_new_concepts(llm_response, query, active_notes, nodes):
         headers['Authorization'] = f"Bearer {CONFIG.get('openrouter_key', '')}"
         headers['HTTP-Referer'] = 'https://github.com/bdh-graph-harness'
         headers['X-Title'] = 'BDH Graph Harness'
+        headers['User-Agent'] = 'BDH-Graph-Harness/1.0'
 
     def _extract_call():
         req = urllib.request.Request(_config.OLLAMA_LLM_URL, data=data, headers=headers)

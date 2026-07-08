@@ -23,7 +23,7 @@ Turns an Obsidian vault into a living knowledge graph where:
 - **Node quality scoring** — composite score (strong edges + mean weight + frequency) auto-prunes dormant nodes from visualization; re-activates on strong re-encounter
 - **Sleep-cycle consolidation** — periodic synaptic downscaling (×0.9), structural pruning below weight floor, and stale dormant node removal — mirrors biological sleep consolidation
 - **Server-side file watcher** — mtime-based polling detects vault changes from any source (Obsidian, LLM, scripts) and triggers incremental graph updates
-- **LLM responses** — OpenRouter (`openrouter/free`) or local Ollama, with citations back to source notes
+- **LLM responses** — any OpenAI-compatible provider (OpenRouter, Ollama Cloud, local Ollama), with citations back to source notes
 - **Real-time visualization** — vis.js network showing nodes activating, edges pulsing as Hebbian weights update during queries
 
 For the theory behind these choices — why Hebbian plasticity, why Obsidian, why not just RAG — see [`docs/philosophy.md`](docs/philosophy.md).
@@ -35,7 +35,7 @@ Obsidian Vault → Embed (Ollama) → ChromaDB + Graph
                                     ↓
 Query → Vector Search → Attention Spread (max_hop=2)
                                     ↓
-Hebbian Update (co-activation strengthening) → LLM Response (OpenRouter)
+Hebbian Update (co-activation strengthening) → LLM Response (OpenAI-compatible)
                                     ↓
 WebSocket → vis.js visualization (nodes light up, synapses pulse)
 
@@ -86,8 +86,12 @@ bdh_graph_harness/
 
 ## Setup
 
-1. **Ollama** running locally with `nomic-embed-text-v2-moe` pulled
-2. **OpenRouter API key** in `OPENROUTER_API_KEY` env var (or switch `llm_provider: ollama` in config)
+1. **Ollama** running locally with `nomic-embed-text-v2-moe` pulled (for embeddings)
+2. **LLM provider** — any OpenAI-compatible endpoint:
+   - **OpenRouter**: set `OPENROUTER_API_KEY` env var (default config uses `openrouter/free`)
+   - **Ollama Cloud**: set `OLLAMA_API_KEY` and point `openrouter_url` to `https://ollama.com/v1/chat/completions`
+   - **Local Ollama**: switch `llm_provider: ollama` in config
+   - Any other OpenAI-compatible API works — just set `openrouter_url`, `openrouter_key`, and `llm_model`
 3. **Python 3.11+** with dependencies:
 
 ```bash
@@ -142,8 +146,8 @@ See `bdh-config.yaml` for all parameters. Key ones:
 | `hybrid_search` | `false` | Enable BM25 hybrid mode (disabled by default for Italian vaults) |
 | `hybrid_alpha` | 0.7 | Vector search weight (only when `hybrid_search: true`) |
 | `hybrid_beta` | 0.3 | BM25 search weight (only when `hybrid_search: true`) |
-| `llm_provider` | `openrouter` | `openrouter` or `ollama` |
-| `llm_model` | `openrouter/free` | Auto-selects available free models |
+| `llm_provider` | `openrouter` | `openrouter` (any OpenAI-compatible endpoint) or `ollama` (local) |
+| `llm_model` | `openrouter/free` | Model name for chosen provider |
 | `api_port` | 8643 | Server port |
 | `quality_threshold` | 0.25 | Quality score below this → node marked dormant |
 | `quality_reactivation_score` | 0.50 | Activation score to re-awaken a dormant node |
@@ -160,7 +164,7 @@ See `bdh-config.yaml` for all parameters. Key ones:
 pytest tests/ -v
 ```
 
-180 tests covering graph building, attention spread, adaptive threshold, BM25, hybrid search (optional), Hebbian updates, LLM providers (Ollama + OpenRouter), neurogenesis, consolidation (downscaling, pruning, stale removal), and API endpoints.
+180 tests covering graph building, attention spread, adaptive threshold, BM25, hybrid search (optional), Hebbian updates, LLM providers (Ollama + OpenAI-compatible), neurogenesis, consolidation (downscaling, pruning, stale removal), and API endpoints.
 
 ## Visualization
 

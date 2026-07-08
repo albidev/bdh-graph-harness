@@ -20,6 +20,7 @@ def build_openrouter_payload(messages, stream, config):
         'Authorization': f"Bearer {config.get('openrouter_key', '')}",
         'HTTP-Referer': 'https://github.com/bdh-graph-harness',
         'X-Title': 'BDH Graph Harness',
+        'User-Agent': 'BDH-Graph-Harness/1.0',
     }
     return json.dumps(payload).encode(), headers
 
