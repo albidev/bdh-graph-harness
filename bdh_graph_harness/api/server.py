@@ -104,7 +104,10 @@ def start_api_server(config, nodes, edges, collection, state):
 
             if added or changed:
                 from bdh_graph_harness.retrieval import compute_all_embeddings
-                app_state['collection'] = compute_all_embeddings(new_nodes, vault_path, force_refresh=True)
+                # Use force_refresh=False for incremental updates — only compute
+                # embeddings for new/changed notes, not all 400+ notes every time.
+                # force_refresh=True was causing server freezes during watcher updates.
+                app_state['collection'] = compute_all_embeddings(new_nodes, vault_path, force_refresh=False)
 
             if added:
                 new_concepts = []
