@@ -484,18 +484,29 @@ async def api_node_update(request, app_state: dict, ws_clients: set) -> web.Resp
     from bdh_graph_harness.api.ws import broadcast_activation
 
     if added:
+        added_node_data = []
         new_concepts = []
         for nid in added:
             node = new_nodes[nid]
             source_notes = []
+            node_edges = []
             for link in new_edges.get(nid, []):
                 target_id = link['target'] if isinstance(link, dict) else link
+                node_edges.append({'source': nid, 'target': target_id})
                 if target_id in old_ids:
                     source_notes.append(old_nodes.get(target_id, {}).get('title', target_id))
             new_concepts.append({
                 'id': nid,
                 'title': node.get('title', nid.split('/')[-1]),
                 'source_notes': source_notes[:5],
+            })
+            added_node_data.append({
+                'id': nid,
+                'title': node.get('title', nid.split('/')[-1]),
+                'tags': node.get('tags', ''),
+                'text': node.get('text', ''),
+                'path': node.get('path', ''),
+                'edges': node_edges,
             })
         await broadcast_activation({
             'type': 'graph_refresh',
@@ -505,6 +516,7 @@ async def api_node_update(request, app_state: dict, ws_clients: set) -> web.Resp
             'new_concepts': new_concepts,
             'changed_nodes': changed,
             'deleted_nodes': deleted,
+            'added_node_data': added_node_data,
             'message': f'{len(added)} new, {len(changed)} changed, {len(deleted)} deleted',
         }, ws_clients)
     elif changed or deleted:
@@ -552,14 +564,17 @@ async def api_refresh_graph(request, app_state: dict, ws_clients: set) -> web.Re
         if old_title != new_title:
             changed_nodes.append({'id': nid, 'title': new_title})
     new_concepts = []
+    added_node_data = []
     for nid in sorted(new_node_ids):
         node = nodes[nid]
         title = node.get('title', nid.split('/')[-1])
         # Find source notes: existing nodes this new note links TO (outgoing wikilinks)
         source_notes = []
         node_links = edges.get(nid, [])
+        node_edges = []
         for t in node_links:
             target_id = t['target'] if isinstance(t, dict) else t
+            node_edges.append({'source': nid, 'target': target_id})
             # Targets may lack wiki/ prefix — try both formats
             resolved = target_id if target_id in old_node_ids else ('wiki/' + target_id if ('wiki/' + target_id) in old_node_ids else None)
             if resolved:
@@ -569,6 +584,14 @@ async def api_refresh_graph(request, app_state: dict, ws_clients: set) -> web.Re
             'id': nid,
             'title': title,
             'source_notes': source_notes[:5],  # cap at 5
+        })
+        added_node_data.append({
+            'id': nid,
+            'title': title,
+            'tags': node.get('tags', ''),
+            'text': node.get('text', ''),
+            'path': node.get('path', ''),
+            'edges': node_edges,
         })
 
     # 4. Re-embed all notes
@@ -593,6 +616,7 @@ async def api_refresh_graph(request, app_state: dict, ws_clients: set) -> web.Re
         'delta': delta,
         'new_concepts': new_concepts,
         'changed_nodes': changed_nodes,
+        'added_node_data': added_node_data,
         'message': f'Graph refreshed: {new_count} neurons ({delta:+d}), {len(new_concepts)} new, {len(changed_nodes)} updated',
     }
     await broadcast_activation(event, ws_clients)
