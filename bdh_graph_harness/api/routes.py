@@ -162,7 +162,7 @@ async def api_hebbian(request, app_state: dict) -> web.Response:
 
 
 async def run_attention_and_plasticity(
-    query: str, app_state: dict, ws_clients: set
+    query: str, app_state: dict, ws_clients: set, source: str | None = None
 ) -> tuple[dict, list, list]:
     """Run the attention + Hebbian plasticity phase shared by all query routes.
 
@@ -172,6 +172,10 @@ async def run_attention_and_plasticity(
       3. Online plasticity: Hebbian update + persist state.
       4. Build ``hebbian_updates`` from the current synaptic state.
       5. Broadcast an activation event to WebSocket clients.
+
+    Args:
+        source: When ``"assistant_response"``, Hebbian dampening is applied
+                to prevent echo-loop reinforcement.
 
     Returns ``(active, activated_notes, hebbian_updates)``.
     """
@@ -199,7 +203,7 @@ async def run_attention_and_plasticity(
     pruned_count = 0
     if CONFIG.get('online_plasticity', True):
         app_state['state'], updated_keys, pruned_count = hebbian_update(
-            active, app_state['state'], nodes=n
+            active, app_state['state'], nodes=n, source=source
         )
         save_state(config['vault_path'], app_state['state'])
 
@@ -266,11 +270,15 @@ def run_neurogenesis(
 
 
 async def api_query(request, app_state: dict, ws_clients: set) -> web.Response:
-    """Accept {\"query\": \"...\"} and run the full BDH pipeline.
+    """Accept {"query": "..."} and run the full BDH pipeline.
 
     Phase 3.2: Online plasticity — Hebbian update happens right after
     attention (not after LLM), so synaptic state reflects what was
     activated, not what the LLM happened to use.
+
+    Optional fields:
+      - source: "assistant_response" triggers Hebbian dampening (echo-loop prevention)
+      - user_prompt: original user question, combined with query for LLM context
     """
     try:
         data = await request.json()
@@ -281,14 +289,24 @@ async def api_query(request, app_state: dict, ws_clients: set) -> web.Response:
     if not query:
         return web.json_response({'error': 'Missing "query" field'}, status=400)
 
+    source = data.get('source')
+    user_prompt = data.get('user_prompt', '').strip()
+
+    # Combine user prompt + assistant response for richer LLM context
+    # when user_prompt is available (prevents losing question→answer association)
+    llm_query = query
+    if user_prompt:
+        llm_query = f"{user_prompt}\n\n---\n\n{query}"
+
     # Shared attention + plasticity phase (broadcasts activation to WS)
+    # Pass source for echo-loop dampening
     active, activated_notes, hebbian_updates = await run_attention_and_plasticity(
-        query, app_state, ws_clients
+        query, app_state, ws_clients, source=source
     )
 
-    # LLM response
+    # LLM response — use combined query for richer context
     n = app_state['nodes']
-    response_text = llm_respond(query, active, n)
+    response_text = llm_respond(llm_query, active, n)
 
     # Neurogenesis on the full response
     new_concepts_list = run_neurogenesis(response_text, query, active, app_state)
@@ -323,11 +341,19 @@ async def api_stream(request, app_state: dict, ws_clients: set) -> web.StreamRes
     if not query:
         return web.json_response({'error': 'Missing "query" field'}, status=400)
 
+    source = data.get('source')
+    user_prompt = data.get('user_prompt', '').strip()
+
+    # Combine user prompt + assistant response for richer LLM context
+    llm_query = query
+    if user_prompt:
+        llm_query = f"{user_prompt}\n\n---\n\n{query}"
+
     n = app_state['nodes']
 
     # Shared attention + plasticity phase (broadcasts activation to WS)
     active, activated_notes, hebbian_updates = await run_attention_and_plasticity(
-        query, app_state, ws_clients
+        query, app_state, ws_clients, source=source
     )
 
     # Stream LLM response via SSE
@@ -352,7 +378,7 @@ async def api_stream(request, app_state: dict, ws_clients: set) -> web.StreamRes
     # Stream tokens
     full_response = []
     try:
-        for token in llm_stream(query, active, n):
+        for token in llm_stream(llm_query, active, n):
             full_response.append(token)
             token_data = json.dumps({'type': 'token', 'content': token})
             await resp.write(f"data: {token_data}\n\n".encode())

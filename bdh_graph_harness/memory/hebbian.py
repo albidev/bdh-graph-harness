@@ -6,7 +6,7 @@ from bdh_graph_harness.config import CONFIG
 from bdh_graph_harness.memory.quality import prune_dormant, try_reactivate
 
 
-def hebbian_update(active_notes, state, nodes=None):
+def hebbian_update(active_notes, state, nodes=None, source=None):
     """
     Hebbian update: reinforce links between co-activated notes.
     'Neurons that fire together, wire together.'
@@ -21,12 +21,21 @@ def hebbian_update(active_notes, state, nodes=None):
 
     Dormant nodes with a strong re-activation are automatically woken up.
 
+    Args:
+        source: When ``"assistant_response"``, dampens frequency increment
+                to 0.3 (instead of 1.0) to prevent echo-loop reinforcement
+                where Hermes repeats BDH context back into the graph.
+
     Returns (state, updated_keys, pruned_count) — updated_keys is the
     set of synapse keys that were created or reinforced in this call;
     pruned_count is the number of newly dormant nodes (0 if no prune
     happened).
     """
     min_score = CONFIG.get('hebbian_min_score', 0.15)
+
+    # Dampening for assistant responses: reduce frequency increment
+    # to prevent echo loops (Hermes repeats BDH context → same nodes reinforced)
+    freq_increment = 0.3 if source == "assistant_response" else 1.0
 
     # Filter to only notes above threshold
     strong = {nid: s for nid, s in active_notes.items() if s >= min_score}
@@ -48,7 +57,7 @@ def hebbian_update(active_notes, state, nodes=None):
                 }
 
             syn = state['synapses'][key]
-            syn['frequency'] += 1
+            syn['frequency'] += freq_increment
             syn['last_coactivated'] = now
 
             # Weight = alpha * normalized_freq + beta * recency
