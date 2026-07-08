@@ -110,6 +110,22 @@ def start_api_server(config, nodes, edges, collection, state):
                 app_state['collection'] = compute_all_embeddings(new_nodes, vault_path, force_refresh=False)
 
             if added:
+                # Build full node data for delta update (no client-side fetch needed)
+                added_node_data = []
+                for nid in added:
+                    node = new_nodes[nid]
+                    node_edges = []
+                    for link in new_edges.get(nid, []):
+                        target_id = link['target'] if isinstance(link, dict) else link
+                        node_edges.append({'source': nid, 'target': target_id})
+                    added_node_data.append({
+                        'id': nid,
+                        'title': node.get('title', nid.split('/')[-1]),
+                        'tags': node.get('tags', ''),
+                        'text': node.get('text', ''),
+                        'path': node.get('path', ''),
+                        'edges': node_edges,
+                    })
                 new_concepts = []
                 for nid in added:
                     node = new_nodes[nid]
@@ -131,6 +147,7 @@ def start_api_server(config, nodes, edges, collection, state):
                     'new_concepts': new_concepts,
                     'changed_nodes': changed,
                     'deleted_nodes': deleted,
+                    'added_node_data': added_node_data,
                     'message': f'{len(added)} new, {len(changed)} changed, {len(deleted)} deleted',
                 }, ws_clients)
             elif changed or deleted:

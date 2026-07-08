@@ -1607,72 +1607,146 @@ function connectWS() {
       } else if (event.type === 'activation') {
         handleActivation(event);
       } else if (event.type === 'graph_refresh') {
-        // Server rebuilt the graph — reload data + animate new/changed notes
-        console.log('Graph refresh:', event.message);
+        // Delta update: add new nodes, update changed ones, remove deleted ones — no full rebuild
+        console.log('Graph refresh (delta):', event.message);
         const changedNodes = event.changed_nodes || [];
         const newConcepts = event.new_concepts || [];
-        // Preserve neurogenesis nodes before rebuild
-        const savedNeurogenesis = Object.assign({}, neurogenesisNodes);
-        fetch('/api/graph').then(r => r.json()).then(data => {
-          initNetwork(data);
-          // Re-add preserved neurogenesis nodes that aren't in new data
-          if (Object.keys(savedNeurogenesis).length > 0 && nodesDS) {
-            const newDataIds = new Set(data.nodes.map(n => n.id));
-            Object.entries(savedNeurogenesis).forEach(([nid, ndata]) => {
-              if (!newDataIds.has(nid) && !nodesDS.get(nid)) {
-                nodesDS.add({
-                  id: nid,
-                  label: ndata.label,
-                  group: 'neurogenesis',
-                  opacity: 1.0,
-                });
-                nodeDataMap[nid] = { id: nid, title: ndata.title, tags: 'neurogenesis', text: '', path: '' };
-                nodeTagColorMap[nid] = { background: COLORS.neurogenesis, border: COLORS.neurogenesis, highlight: { background: COLORS.neurogenesis, border: COLORS.neurogenesis } };
-                allNodeIds.push(nid);
-              }
-            });
-          }
-          if (showTagColors) toggleTagColors(true);
-          // Update stats (filters applied inside initNetwork)
-          document.getElementById('stat-neurons').textContent = event.neurons;
-          document.getElementById('stat-synapses').textContent = event.synapses;
-          // Animate new notes with neurogenesis birth animation
-          if (newConcepts.length > 0) {
-            handleActivation({
-              type: 'activation',
-              query: 'graph_refresh',
-              activated_notes: [],
-              hebbian_updates: [],
-              new_concepts: newConcepts,
-            });
-          }
-          // Pulse changed nodes AFTER network has rendered (1.5s delay)
-          if (changedNodes.length > 0 && network) {
-            setTimeout(() => {
-              changedNodes.forEach((n, i) => {
-                setTimeout(() => {
-                  if (nodesDS && nodesDS.get(n.id)) {
-                    // Save FULL original node for clean restore
-                    const origNode = JSON.parse(JSON.stringify(nodesDS.get(n.id)));
-                    // Select node
-                    network.selectNodes([n.id]);
-                    if (i === 0) {
-                      network.focus(n.id, { scale: 1.5, animation: { duration: 800, easingFunction: 'easeInOutQuad' } });
-                    }
-                    // Flash: orange + bigger + thick border
-                    nodesDS.update({ id: n.id, size: 30, borderWidth: 6, color: { background: '#f0883e', border: '#f0883e', highlight: { background: '#f0883e', border: '#f0883e' } }, font: { color: '#ffffff', size: 14 } });
-                    // Restore after 2.5s — remove + re-add to fully reset
-                    setTimeout(() => {
-                      network.unselectAll();
-                      nodesDS.remove(n.id);
-                      nodesDS.add(origNode);
-                    }, 2500);
-                  }
-                }, i * 300);
-              });
-            }, 1500);
+        const deletedNodes = event.deleted_nodes || [];
+        const addedNodeData = event.added_node_data || [];
+
+        // 1. Remove deleted nodes from DataSets
+        deletedNodes.forEach(nid => {
+          if (nodesDS && nodesDS.get(nid)) {
+            nodesDS.remove(nid);
+            allNodeIds = allNodeIds.filter(id => id !== nid);
+            delete nodeDataMap[nid];
+            delete nodeTagColorMap[nid];
+            delete neurogenesisNodes[nid];
           }
         });
+        // Also remove edges that referenced deleted nodes
+        if (edgesDS && deletedNodes.length > 0) {
+          const deletedSet = new Set(deletedNodes);
+          allEdgeIds = allEdgeIds.filter(eid => {
+            const edge = edgesDS.get(eid);
+            if (edge && (deletedSet.has(edge.from) || deletedSet.has(edge.to))) {
+              edgesDS.remove(eid);
+              delete edgeInfoMap[eid];
+              return false;
+            }
+            return true;
+          });
+        }
+
+        // 2. Add new nodes with their edges (from server-provided data)
+        addedNodeData.forEach(nd => {
+          if (nodesDS && !nodesDS.get(nd.id)) {
+            const isNeurogenesis = (nd.tags || '').toLowerCase().includes('neurogenesis');
+            const nodeColor = isNeurogenesis
+              ? { background: COLORS.neurogenesis, border: COLORS.neurogenesis, highlight: { background: COLORS.neurogenesis, border: COLORS.neurogenesis } }
+              : undefined;
+            nodesDS.add({
+              id: nd.id,
+              label: nd.title || nd.id.split('/').pop(),
+              group: 'inactive',
+              color: nodeColor,
+              opacity: 1.0,
+              size: 10,
+              mass: 1,
+              shape: isNeurogenesis ? 'diamond' : 'dot',
+            });
+            nodeDataMap[nd.id] = nd;
+            nodeTagColorMap[nd.id] = nodeColor || null;
+            if (!allNodeIds.includes(nd.id)) allNodeIds.push(nd.id);
+            // Track as neurogenesis for preservation
+            if (isNeurogenesis) {
+              neurogenesisNodes[nd.id] = { label: nd.title, title: nd.title };
+            }
+          }
+          // Add edges from this new node
+          (nd.edges || []).forEach(e => {
+            const eid = e.source + '→' + e.target;
+            if (edgesDS && !edgesDS.get(eid)) {
+              const srcTitle = (nodeDataMap[e.source] || {}).title || e.source;
+              const tgtTitle = (nodeDataMap[e.target] || {}).title || e.target;
+              edgeInfoMap[eid] = { source_title: srcTitle, target_title: tgtTitle, type: 'wikilink' };
+              edgesDS.add({
+                id: eid,
+                from: e.source,
+                to: e.target,
+                color: { color: COLORS.edgeWikilink, highlight: COLORS.edgeWikilink },
+                width: 0.5,
+                length: 200,
+              });
+              if (!allEdgeIds.includes(eid)) allEdgeIds.push(eid);
+            }
+          });
+          // Add hebbian edges from this new node
+          (nd.hebbian || []).forEach(h => {
+            const eid = 'hebb_' + h.note_a + '→' + h.note_b;
+            if (edgesDS && !edgesDS.get(eid)) {
+              const srcTitle = (nodeDataMap[h.note_a] || {}).title || h.note_a;
+              const tgtTitle = (nodeDataMap[h.note_b] || {}).title || h.note_b;
+              edgeInfoMap[eid] = { source_title: srcTitle, target_title: tgtTitle, type: 'hebbian', weight: h.weight, frequency: h.frequency };
+              const w = Math.min(1 + h.weight * 3, 5);
+              edgesDS.add({
+                id: eid,
+                from: h.note_a,
+                to: h.note_b,
+                color: { color: weightColor(h.weight), highlight: weightColor(h.weight) },
+                width: w,
+                length: 200,
+              });
+              if (!allEdgeIds.includes(eid)) allEdgeIds.push(eid);
+            }
+          });
+        });
+
+        // 3. Update changed node labels
+        changedNodes.forEach(n => {
+          if (nodesDS && nodesDS.get(n.id)) {
+            nodesDS.update({ id: n.id, label: n.title });
+            if (nodeDataMap[n.id]) nodeDataMap[n.id].title = n.title;
+          }
+        });
+
+        // 4. Update stats
+        document.getElementById('stat-neurons').textContent = event.neurons;
+        document.getElementById('stat-synapses').textContent = event.synapses;
+
+        // 5. Animate new concepts with neurogenesis birth animation
+        if (newConcepts.length > 0) {
+          handleActivation({
+            type: 'activation',
+            query: 'graph_refresh',
+            activated_notes: [],
+            hebbian_updates: [],
+            new_concepts: newConcepts,
+          });
+        }
+
+        // 6. Pulse changed nodes (staggered, after a short delay)
+        if (changedNodes.length > 0 && network) {
+          setTimeout(() => {
+            changedNodes.forEach((n, i) => {
+              setTimeout(() => {
+                if (nodesDS && nodesDS.get(n.id)) {
+                  const origNode = JSON.parse(JSON.stringify(nodesDS.get(n.id)));
+                  network.selectNodes([n.id]);
+                  if (i === 0) {
+                    network.focus(n.id, { scale: 1.5, animation: { duration: 800, easingFunction: 'easeInOutQuad' } });
+                  }
+                  nodesDS.update({ id: n.id, size: 30, borderWidth: 6, color: { background: '#f0883e', border: '#f0883e', highlight: { background: '#f0883e', border: '#f0883e' } }, font: { color: '#ffffff', size: 14 } });
+                  setTimeout(() => {
+                    network.unselectAll();
+                    nodesDS.remove(n.id);
+                    nodesDS.add(origNode);
+                  }, 2500);
+                }
+              }, i * 300);
+            });
+          }, 1500);
+        }
       } else if (event.type === 'node_update') {
         // Lightweight update — patch changed nodes in existing DataSet, no rebuild
         console.log('Node update:', event.message);
