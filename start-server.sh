@@ -1,15 +1,19 @@
 #!/bin/bash
 # BDH Graph Harness server launcher
-# Expects OPENROUTER_API_KEY in env or in a .env file next to this script
-if [ -z "$OPENROUTER_API_KEY" ]; then
-  # Try .env in the script directory, then common locations
-  for envfile in "$(dirname "$0")/.env" "$HOME/.hermes/.env" "$HOME/.env"; do
-    if [ -f "$envfile" ]; then
-      export OPENROUTER_API_KEY=$(grep OPENROUTER_API_KEY "$envfile" 2>/dev/null | grep -v '^#' | cut -d'=' -f2-)
-      [ -n "$OPENROUTER_API_KEY" ] && break
-    fi
-  done
-fi
+# Expects OPENCODE_ZEN_API_KEY (preferred) or OPENROUTER_API_KEY in env or .env file
+for varname in OPENCODE_ZEN_API_KEY OPENROUTER_API_KEY OLLAMA_API_KEY; do
+  if [ -z "${!varname}" ]; then
+    for envfile in "$(dirname "$0")/.env" "$HOME/.hermes/.env" "$HOME/.env"; do
+      if [ -f "$envfile" ]; then
+        val=$(grep "^${varname}=" "$envfile" 2>/dev/null | grep -v '^#' | head -1 | cut -d'=' -f2-)
+        if [ -n "$val" ]; then
+          export "$varname=$val"
+          break
+        fi
+      fi
+    done
+  fi
+done
 cd "$(dirname "$0")"
 # Use local config if it exists (not committed), otherwise the public one
 CONFIG="bdh-config.yaml"
