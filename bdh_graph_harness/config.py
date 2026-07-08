@@ -11,6 +11,11 @@ import json
 import time
 import logging
 
+from dotenv import load_dotenv
+
+# Load .env file from project root (if present) before reading config
+load_dotenv()
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
