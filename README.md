@@ -4,7 +4,12 @@
 
 # BDH Graph Harness
 
-Graph-based retrieval system for Obsidian vaults with Hebbian synaptic plasticity.
+> **⚠️ Disclaimer**
+> This is an **experimental research project** implementing biological neural network analogies (Hebbian plasticity, neurogenesis, sleep-cycle consolidation) on Obsidian vault graphs. It is **not production software** — API endpoints, configuration, and data formats may change without notice between versions.
+>
+> The theoretical foundation comes from the [Dragon Hatchling paper](https://arxiv.org/abs/2509.26507) (Kosowski et al., 2025). This implementation is an independent exploration of those ideas, not an official implementation of the paper.
+>
+> If you're looking for a stable knowledge management tool, consider [Obsidian](https://obsidian.md) + [Dataview](https://github.com/blacksmithgu/obsidian-dataview) or a mature RAG solution. This project is for people who want to experiment with bio-inspired graph learning.
 
 ## What it does
 
