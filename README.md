@@ -188,7 +188,28 @@ See [`docs/mcp-server.md`](docs/mcp-server.md) for client configuration (Claude 
 
 ## Hermes Agent integration
 
-The harness ships with a [Hermes Agent](https://hermes-agent.nousresearch.com) skill that lets you query the graph from chat. The skill definition is in [`docs/hermes-skill.md`](docs/hermes-skill.md) — copy it to `~/.hermes/skills/research/bdh-graph-harness/SKILL.md` to activate it.
+### bdh-hermes-bridge plugin (recommended)
+
+The **[bdh-hermes-bridge](https://github.com/albidev/bdh-hermes-bridge)** plugin provides bidirectional integration between [Hermes Agent](https://github.com/NousResearch/hermes-agent) and BDH:
+
+- **Write path** — every Hermes response (>200 chars) is fed to BDH, triggering Hebbian reinforcement and neurogenesis from real usage
+- **Read path** — `bdh_query` tool lets Hermes pull context from the knowledge graph on demand
+- **Echo-loop dampening** — assistant responses are flagged with `source: "assistant_response"` to prevent feedback amplification
+- **User context capture** — original user prompt is included in write payloads, enabling proper question→answer synaptic associations
+
+```bash
+# Install
+git clone https://github.com/albidev/bdh-hermes-bridge.git ~/.hermes/plugins/bdh-hermes-bridge
+
+# Enable in ~/.hermes/config.yaml
+plugins:
+  enabled:
+    - bdh-hermes-bridge
+```
+
+### Hermes skill (CLI)
+
+The harness also ships with a [Hermes Agent](https://hermes-agent.nousresearch.com) skill that lets you query the graph from chat. The skill definition is in [`docs/hermes-skill.md`](docs/hermes-skill.md) — copy it to `~/.hermes/skills/research/bdh-graph-harness/SKILL.md` to activate it.
 
 Once installed, your Hermes agent can:
 - Query the graph via natural language ("bdh query: how does Hebbian learning work?")
