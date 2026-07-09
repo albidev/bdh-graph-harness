@@ -1119,7 +1119,11 @@ function drawNode(node, ctx, globalScale) {
   const baseOpacity = actOpacity != null ? actOpacity : 1.0;
   const hoverActive = isHoverActive();
   const hoverMatch = isHoverNode(node);
-  const opacity = hoverActive ? (hoverMatch ? Math.max(baseOpacity, 0.95) : Math.min(baseOpacity, 0.38)) : baseOpacity;
+  // Ensure baseOpacity is a valid number — Math.min(undefined, 0.38) === NaN
+  // which makes ctx.globalAlpha default to 1.0, so non-query nodes appear
+  // full-bright during hover and look "highlighted" when they shouldn't be.
+  const safeBase = (typeof baseOpacity === 'number' && !isNaN(baseOpacity)) ? baseOpacity : 1.0;
+  const opacity = hoverActive ? (hoverMatch ? Math.max(safeBase, 0.95) : Math.min(safeBase, 0.38)) : safeBase;
   const x = node.x;
   const y = node.y;
 
