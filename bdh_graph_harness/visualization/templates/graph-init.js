@@ -349,13 +349,14 @@ function initNetwork(graphData) {
     n._cluster = primaryTag;
     tagCounts[primaryTag] = (tagCounts[primaryTag] || 0) + 1;
   });
-  // Assign random centroid angles in a circle layout for clusters
+  // Assign centroid angles in a circle layout for clusters
+  // Large radius so clusters are well-separated and don't collapse to center
   const tagList = Object.keys(tagCounts).sort((a, b) => tagCounts[b] - tagCounts[a]);
   const clusterCenters = {};
+  const clusterRadius = 800 + tagList.length * 40;
   tagList.forEach((tag, i) => {
     const angle = (i / tagList.length) * 2 * Math.PI;
-    const radius = 400 + tagList.length * 20;
-    clusterCenters[tag] = { x: Math.cos(angle) * radius, y: Math.sin(angle) * radius };
+    clusterCenters[tag] = { x: Math.cos(angle) * clusterRadius, y: Math.sin(angle) * clusterRadius };
   });
   // Manual collision force — grid-based spatial hash for O(N) performance.
   // With 584 nodes, the old O(N²) loop did 170k comparisons per tick.
@@ -375,8 +376,9 @@ function initNetwork(graphData) {
         const nodes = data.nodes;
         const N = nodes.length;
 
-        // Cluster force — gently pull nodes toward their tag cluster center
-        const CLUSTER_STRENGTH = 0.015;
+        // Cluster force — very gentle pull toward tag cluster center
+        // Low strength so it doesn't overpower the charge repulsion
+        const CLUSTER_STRENGTH = 0.003;
         for (let i = 0; i < N; i++) {
           const n = nodes[i];
           if (n.x == null || n.y == null) continue;
