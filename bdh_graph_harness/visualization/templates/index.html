@@ -1016,13 +1016,16 @@ function setHoverHighlight(seedNodeIds = [], seedLinkId = null) {
   const linkIds = new Set(seedLinkId ? [seedLinkId] : []);
 
   // DEBUG: log traversal for hovered node
-  const _debugLinks = { total: 0, phantomSkip: 0, invisSkip: 0, actSkip: 0, matched: 0 };
+  const _debugLinks = { total: 0, phantomSkip: 0, invisSkip: 0, actSkip: 0, visSkip: 0, matched: 0 };
   _debugLinks.total = data.links.length;
 
   data.links.forEach(link => {
     if (link._visible === false) { _debugLinks.invisSkip++; return; }
     if (linkActivationVisible.get(linkKey(link)) === false) { _debugLinks.actSkip++; return; }
     if (link.type === 'phantom') { _debugLinks.phantomSkip++; return; }
+    // Skip links hidden by hebbian threshold slider — they're not visually connected
+    const linkVis = linkVisibilityState.get(linkKey(link));
+    if (linkVis === false) { _debugLinks.visSkip++; return; }
     const sourceId = linkEndpointId(link.source);
     const targetId = linkEndpointId(link.target);
     if (seedSet.has(sourceId) || seedSet.has(targetId) || link._id === seedLinkId) {
