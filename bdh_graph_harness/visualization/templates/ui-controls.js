@@ -185,7 +185,7 @@ function toggleDirectOnly(on) {
 }
 
 function updateHebbianThreshold(val, persist = true) {
-  hebbianThreshold = clampNumber(val, 0, 1, 0.3);
+  hebbianThreshold = clampNumber(val, 0, 1, 0.15);
   const slider = document.getElementById('hebbian-threshold');
   if (slider) slider.value = hebbianThreshold;
   document.getElementById('threshold-val').textContent = hebbianThreshold;
