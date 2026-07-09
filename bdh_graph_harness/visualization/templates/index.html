@@ -13,6 +13,8 @@
     overflow: hidden;
     height: 100vh;
   }
+  /* force-graph's native label tooltip is too sparse; custom HTML tooltip owns hover UI. */
+  .float-tooltip-kap { display: none !important; }
   #titlebar {
     display: flex;
     align-items: center;
@@ -655,10 +657,10 @@
     <div class="threshold-control" id="threshold-control">
       <label class="toggle-label" title="Hide Hebbian edges below this weight">
         <span class="toggle-text">≥</span>
-        <input type="range" id="hebbian-threshold" min="0" max="1" step="0.05" value="0.15"
+        <input type="range" id="hebbian-threshold" min="0" max="1" step="0.05" value="0.3"
                oninput="updateHebbianThreshold(this.value)">
       </label>
-      <span class="threshold-val" id="threshold-val">0.15</span>
+      <span class="threshold-val" id="threshold-val">0.3</span>
     </div>
     <div class="threshold-control" id="spacing-control">
       <label class="toggle-label" title="Network spacing — distance between nodes">
@@ -796,7 +798,7 @@ let orphanNodeIds = [];       // nodes with no connections (hidden by default)
 let tagColorMap = {};         // tag -> color for tag-based node coloring
 let showTagColors = true;     // toggle for tag-based coloring (on by default)
 let directOnly = false;       // toggle for showing only direct wikilink edges
-let hebbianThreshold = 0.15;  // minimum weight for Hebbian edges to show
+let hebbianThreshold = 0.3;    // minimum weight for Hebbian edges to show
 let showPhantom = true;       // toggle for phantom (semantic similarity) edges
 let degreeMap = {};           // node_id -> degree (computed from edges)
 let neighborMap = {};         // node_id -> [connected node titles]
@@ -809,6 +811,7 @@ let edgeLengthMultiplier = 10; // default: 10px per degree unit
 let showOrphans = true;
 let zoomPollTimer = null;
 let lastMouseEvent = { clientX: 0, clientY: 0 }; // tracked for tooltip positioning
+let mouseTrackingInstalled = false;
 
 // ============================================================================
 // Custom HTML tooltip
@@ -940,22 +943,25 @@ function hideTooltip() {
 // Node canvas rendering — custom shapes, colors, opacity, 💤 text
 // ============================================================================
 function drawNode(node, ctx, globalScale) {
-  const size = node.val || 4;
+  const val = node.val || 4;
   const color = node.color || COLORS.inactive;
   const opacity = node._opacity != null ? node._opacity : 1.0;
+  const x = node.x;
+  const y = node.y;
 
   ctx.globalAlpha = opacity;
 
   const shape = node._shape || 'circle';
-  const r = Math.sqrt(size) * 2; // force-graph val is area; scale to radius
+  // force-graph: r = sqrt(val * nodeRelSize), with nodeRelSize=20
+  const r = Math.sqrt(val * 20);
 
   if (shape === 'diamond') {
     // Neurogenesis — diamond shape
     ctx.beginPath();
-    ctx.moveTo(0, -r);
-    ctx.lineTo(r, 0);
-    ctx.lineTo(0, r);
-    ctx.lineTo(-r, 0);
+    ctx.moveTo(x, y - r);
+    ctx.lineTo(x + r, y);
+    ctx.lineTo(x, y + r);
+    ctx.lineTo(x - r, y);
     ctx.closePath();
     ctx.fillStyle = color;
     ctx.fill();
@@ -965,9 +971,9 @@ function drawNode(node, ctx, globalScale) {
   } else if (shape === 'triangleDown') {
     // Dormant — triangle pointing down
     ctx.beginPath();
-    ctx.moveTo(0, r);
-    ctx.lineTo(r, -r * 0.7);
-    ctx.lineTo(-r, -r * 0.7);
+    ctx.moveTo(x, y + r);
+    ctx.lineTo(x + r, y - r * 0.7);
+    ctx.lineTo(x - r, y - r * 0.7);
     ctx.closePath();
     ctx.fillStyle = color;
     ctx.fill();
@@ -977,17 +983,17 @@ function drawNode(node, ctx, globalScale) {
       ctx.textAlign = 'center';
       ctx.textBaseline = 'bottom';
       ctx.fillStyle = '#6e7681';
-      ctx.fillText('💤', 0, -r - 2);
+      ctx.fillText('\u{1F4A4}', x, y - r - 2);
     }
   } else if (shape === 'hexagon') {
     // Hub — hexagon
     ctx.beginPath();
     for (let i = 0; i < 6; i++) {
       const angle = (Math.PI / 3) * i;
-      const x = r * Math.cos(angle);
-      const y = r * Math.sin(angle);
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
+      const px = x + r * Math.cos(angle);
+      const py = y + r * Math.sin(angle);
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
     }
     ctx.closePath();
     ctx.fillStyle = color;
@@ -998,7 +1004,7 @@ function drawNode(node, ctx, globalScale) {
   } else {
     // Default — circle
     ctx.beginPath();
-    ctx.arc(0, 0, r, 0, 2 * Math.PI);
+    ctx.arc(x, y, r, 0, 2 * Math.PI);
     ctx.fillStyle = color;
     ctx.fill();
     ctx.strokeStyle = color;
@@ -1013,8 +1019,8 @@ function drawNode(node, ctx, globalScale) {
     ctx.textBaseline = 'top';
     ctx.fillStyle = '#c9d1d9';
     ctx.globalAlpha = opacity * 0.8;
-    const label = node.name.length > 25 ? node.name.substring(0, 22) + '…' : node.name;
-    ctx.fillText(label, 0, r + 2);
+    const label = node.name.length > 25 ? node.name.substring(0, 22) + '\u2026' : node.name;
+    ctx.fillText(label, x, y + r + 2);
   }
 
   ctx.globalAlpha = 1.0;
@@ -1149,6 +1155,9 @@ function initNetwork(graphData) {
       name: n.title || n.id,
       color: color,
       val: val,
+      // Random initial positions to prevent all-at-origin collapse
+      x: (Math.random() - 0.5) * 1000,
+      y: (Math.random() - 0.5) * 1000,
       _opacity: isDormant ? 0.3 : 1.0,
       _shape: shape,
       _dormant: isDormant,
@@ -1235,25 +1244,30 @@ function initNetwork(graphData) {
   graph = ForceGraph()(container)
     .graphData({ nodes: fgNodes, links: fgLinks })
     .backgroundColor(COLORS.bg)
-    .nodeRelSize(4)
+    .nodeRelSize(20)
     .nodeId('id')
     .nodeVal(node => node.val)
-    .nodeLabel(node => node.name)
+    .nodeLabel(() => null)
     .nodeColor(node => node.color)
     .nodeCanvasObject(drawNode)
     .nodeCanvasObjectMode(() => 'replace')
+    .nodeVisibility(node => !node._hidden)
     .linkSource('source')
     .linkTarget('target')
-    .linkColor(link => link._visible ? link.color : 'rgba(0,0,0,0)')
-    .linkWidth(link => link._visible ? link.width : 0)
+    .linkVisibility(link => link._visible !== false)
+    .linkColor(link => link._visible !== false ? link.color : 'rgba(0,0,0,0)')
+    .linkWidth(link => link._visible !== false ? link.width : 0)
     .linkCurvature(0.15)
+    .linkLineDash(link => link._dashes ? [5, 5] : null)
     .linkDirectionalParticles(link => link.particles || 0)
     .linkDirectionalParticleSpeed(0.006)
     .linkDirectionalParticleWidth(2)
     .linkDirectionalParticleColor(link => link.particleColor || link.color)
+    .warmupTicks(100)
+    .cooldownTime(30000)
+    .enableNodeDrag(false)
     .onNodeHover((node, prevNode) => {
       if (node) {
-        // Get mouse position from last known event
         const evt = lastMouseEvent || { clientX: 0, clientY: 0 };
         showTooltip(node, evt);
       } else {
@@ -1267,23 +1281,38 @@ function initNetwork(graphData) {
       } else {
         hideTooltip();
       }
+    })
+    .onZoom(({ k }) => {
+      zoomSlider.value = k;
+      zoomLabel.textContent = Math.round(k * 100) + '%';
     });
 
-  // Physics — barnesHut equivalent
-  graph.d3Force('charge').strength(-600);
-  graph.d3Force('link').distance(200);
+  // Physics — tuned for readable graph layout
+  graph.d3Force('charge').strength(-400);
+  graph.d3Force('link').distance(120);
   graph.d3Force('center').strength(0.1);
+  // Add collision force to prevent node overlap when d3-force is available.
+  // Keep a guard here because this page is CDN-backed: visualization should not die
+  // just because a secondary script failed to load.
+  if (window.d3 && typeof window.d3.forceCollide === 'function') {
+    graph.d3Force('collide', window.d3.forceCollide().radius(node => Math.sqrt((node.val || 4) * 20) + 3));
+  }
+  // Let simulation settle before rendering
+  graph.d3ReheatSimulation();
 
-  // Track mouse position for tooltips (force-graph doesn't pass event to hover callbacks)
-  container.addEventListener('mousemove', (e) => {
-    lastMouseEvent = e;
-    if (tooltipEl && tooltipEl.style.display === 'block') {
-      positionTooltip(e);
-    }
-  });
+  // Track mouse position globally for tooltip positioning. Install once only —
+  // initNetwork can run after WS graph_refresh/full reloads.
+  if (!mouseTrackingInstalled) {
+    document.addEventListener('mousemove', (e) => {
+      lastMouseEvent = e;
+      if (tooltipEl && tooltipEl.style.display === 'block') {
+        positionTooltip(e);
+      }
+    });
+    mouseTrackingInstalled = true;
+  }
 
-  // Start zoom sync polling
-  startZoomPoll();
+  // onZoom callback handles slider sync (no polling needed)
 
   // Update stats
   document.getElementById('stat-neurons').textContent = graphData.stats.neurons;
@@ -1316,6 +1345,43 @@ function initNetwork(graphData) {
   }
 }
 
+// Repaint mutated node/link style without resetting the force-graph viewport.
+// Calling graph.graphData(currentData) for every query highlight makes force-graph
+// recalculate bounds/transform and the graph appears to jump out of the window.
+function requestGraphRedraw() {
+  if (!graph) return;
+  if (typeof graph.resumeAnimation === 'function') graph.resumeAnimation();
+}
+
+// Use only for structural changes (added/removed nodes or links). Preserve the
+// user's current pan/zoom so live updates don't throw the graph off-screen.
+function setGraphDataPreservingView(data, opts = {}) {
+  if (!graph) return;
+  const center = typeof graph.centerAt === 'function' ? graph.centerAt() : null;
+  const zoom = typeof graph.zoom === 'function' ? graph.zoom() : null;
+  // force-graph mutates node/link objects internally (source/target become node
+  // objects, physics writes x/y/vx/vy). Re-submitting the live graph.graphData()
+  // objects after a query can crash WebKit/Safari with "Attempted to assign to
+  // readonly property" inside the simulation tick. Always hand force-graph a
+  // fresh, plain-object graph and normalize link endpoints back to ids.
+  const safeData = {
+    nodes: (data.nodes || []).map(node => ({ ...node })),
+    links: (data.links || []).map(link => ({
+      ...link,
+      source: typeof link.source === 'object' ? link.source.id : link.source,
+      target: typeof link.target === 'object' ? link.target.id : link.target,
+    })),
+  };
+  graph.graphData(safeData);
+  if (opts.reheat && typeof graph.d3ReheatSimulation === 'function') graph.d3ReheatSimulation();
+  requestAnimationFrame(() => {
+    if (center && typeof graph.centerAt === 'function') graph.centerAt(center.x, center.y, 0);
+    if (zoom != null && typeof graph.zoom === 'function') graph.zoom(zoom, 0);
+    if (typeof syncZoomUI === 'function') syncZoomUI();
+  });
+  return safeData;
+}
+
 // ============================================================================
 // Activation handler — dim non-active nodes, light up active ones, pulse Hebbian
 // ============================================================================
@@ -1325,7 +1391,7 @@ function handleActivation(event) {
   const seedId = activated.length > 0 ? activated[0].id : null;
 
   // Dim all nodes, light up activated ones
-  const currentData = graph.graphData();
+  let currentData = graph.graphData();
   currentData.nodes.forEach(node => {
     if (activatedIds.has(node.id)) {
       node._opacity = 1.0;
@@ -1356,8 +1422,7 @@ function handleActivation(event) {
     }
   });
 
-  // Trigger re-render
-  graph.graphData(currentData);
+  requestGraphRedraw();
 
   // Pulse Hebbian synapses that were strengthened in this query
   const hebbianUpdates = event.hebbian_updates || [];
@@ -1385,18 +1450,18 @@ function handleActivation(event) {
         targetLink.color = COLORS.edgeHebbianPulse;
         targetLink.width = newWidth + 5;
         targetLink._visible = true;
-        graph.graphData(currentData);
+        requestGraphRedraw();
       }, delay);
 
       setTimeout(() => {
         targetLink.width = newWidth + 3;
-        graph.graphData(currentData);
+        requestGraphRedraw();
       }, delay + 600);
 
       setTimeout(() => {
         targetLink.width = newWidth + 1.5;
         targetLink.color = weightColor(h.weight);
-        graph.graphData(currentData);
+        requestGraphRedraw();
       }, delay + 1400);
 
       setTimeout(() => {
@@ -1426,22 +1491,28 @@ function handleActivation(event) {
       const tgtTitle = (nodeDataMap[b] || {}).title || b;
       edgeInfoMap[eid] = { source_title: srcTitle, target_title: tgtTitle, type: 'hebbian', weight: h.weight, frequency: h.frequency };
       currentData.links.push(newLink);
-      graph.graphData(currentData);
+      currentData = setGraphDataPreservingView(currentData, { reheat: true }) || currentData;
 
       // Settle animation
       setTimeout(() => {
-        newLink.width = newWidth + 3;
-        graph.graphData(currentData);
+        const liveLink = currentData.links.find(l => l._id === eid);
+        if (!liveLink) return;
+        liveLink.width = newWidth + 3;
+        requestGraphRedraw();
       }, delay + 600);
       setTimeout(() => {
-        newLink.width = newWidth + 1.5;
-        newLink.color = weightColor(h.weight);
-        graph.graphData(currentData);
+        const liveLink = currentData.links.find(l => l._id === eid);
+        if (!liveLink) return;
+        liveLink.width = newWidth + 1.5;
+        liveLink.color = weightColor(h.weight);
+        requestGraphRedraw();
       }, delay + 1400);
       setTimeout(() => {
-        newLink.width = newWidth;
-        newLink.particles = 0;
-        newLink.color = weightColor(h.weight);
+        const liveLink = currentData.links.find(l => l._id === eid);
+        if (!liveLink) return;
+        liveLink.width = newWidth;
+        liveLink.particles = 0;
+        liveLink.color = weightColor(h.weight);
         applyEdgeFilters();
       }, delay + 2500);
     }
@@ -1454,7 +1525,7 @@ function handleActivation(event) {
         link._visible = true;
       }
     });
-    graph.graphData(currentData);
+    requestGraphRedraw();
   }, 4000);
 
   // Update side panel
@@ -1500,16 +1571,21 @@ function handleActivation(event) {
       // Birth pulse animation
       const birthDelay = ncIdx * 200;
       setTimeout(() => {
-        newNode.val = 40;
-        graph.graphData(currentData);
+        const liveNode = currentData.nodes.find(n => n.id === nc.id) || newNode;
+        liveNode.val = 40;
+        currentData = setGraphDataPreservingView(currentData, { reheat: true }) || currentData;
       }, birthDelay);
       setTimeout(() => {
-        newNode.val = 30;
-        graph.graphData(currentData);
+        const liveNode = currentData.nodes.find(n => n.id === nc.id);
+        if (!liveNode) return;
+        liveNode.val = 30;
+        requestGraphRedraw();
       }, birthDelay + 300);
       setTimeout(() => {
-        newNode.val = 20;
-        graph.graphData(currentData);
+        const liveNode = currentData.nodes.find(n => n.id === nc.id);
+        if (!liveNode) return;
+        liveNode.val = 20;
+        requestGraphRedraw();
       }, birthDelay + 600);
 
       // Add edges to source notes
@@ -1532,7 +1608,7 @@ function handleActivation(event) {
           edgeInfoMap[eid] = { source_title: nc.title || nc.id, target_title: srcTitle, type: 'neurogenesis' };
           setTimeout(() => {
             currentData.links.push(newLink);
-            graph.graphData(currentData);
+            currentData = setGraphDataPreservingView(currentData, { reheat: true }) || currentData;
           }, birthDelay + 400 + srcIdx * 150);
         }
       });
@@ -1760,8 +1836,8 @@ function connectWS() {
           if (nodeDataMap[n.id]) nodeDataMap[n.id].title = n.title;
         });
 
-        // 4. Trigger re-render
-        graph.graphData(currentData);
+        // 4. Apply structural delta without losing the current viewport
+        setGraphDataPreservingView(currentData, { reheat: true });
 
         // 5. Update stats
         if (event.neurons != null) document.getElementById('stat-neurons').textContent = event.neurons;
@@ -1788,11 +1864,11 @@ function connectWS() {
                 const origVal = node.val;
                 node.color = COLORS.activated;
                 node.val = (origVal || 10) * 2;
-                graph.graphData(currentData);
+                requestGraphRedraw();
                 setTimeout(() => {
                   node.color = origColor;
                   node.val = origVal;
-                  graph.graphData(currentData);
+                  requestGraphRedraw();
                 }, 2500);
               }
             }, i * 300 + 1500);
@@ -1817,6 +1893,10 @@ function connectWS() {
           return !deletedSet.has(ls) && !deletedSet.has(lt);
         });
 
+        if (deletedNodes.length > 0) {
+          setGraphDataPreservingView(currentData, { reheat: true });
+        }
+
         // Update changed nodes with pulse
         changedNodes.forEach((n, i) => {
           setTimeout(() => {
@@ -1828,11 +1908,11 @@ function connectWS() {
               const origVal = node.val;
               node.color = COLORS.activated;
               node.val = (origVal || 10) * 2;
-              graph.graphData(currentData);
+              requestGraphRedraw();
               setTimeout(() => {
                 node.color = origColor;
                 node.val = origVal;
-                graph.graphData(currentData);
+                requestGraphRedraw();
               }, 2500);
             }
           }, i * 300);
@@ -1899,7 +1979,7 @@ function toggleOrphans(show) {
     currentData.nodes = currentData.nodes.filter(n => !orphanSet.has(n.id));
   }
 
-  graph.graphData(currentData);
+  setGraphDataPreservingView(currentData, { reheat: true });
 
   // Update neuron count
   const el = document.getElementById('stat-neurons');
@@ -1962,7 +2042,7 @@ function toggleTagColors(enabled) {
       nodeTagColorMap[node.id] = COLORS.inactive;
     }
   });
-  graph.graphData(currentData);
+  requestGraphRedraw();
 }
 
 // ============================================================================
@@ -2004,7 +2084,7 @@ function applyEdgeFilters() {
     if (visible) visibleCount++;
   });
 
-  graph.graphData(currentData);
+  requestGraphRedraw();
 
   // Update visible synapse count
   const synEl = document.getElementById('stat-synapses');
@@ -2027,14 +2107,14 @@ function setEdgeLengthMultiplier(m) {
   if (valEl) valEl.textContent = m;
 
   if (graph) {
-    // Map 0-100 to link distance 50-500
-    const distance = 50 + m * 4.5;
+    // Map 0-100 to link distance 40-300
+    const distance = 40 + m * 2.6;
     graph.d3Force('link').distance(distance);
-    // Re-heat simulation
+    // Re-heat simulation so nodes react to new distance
     graph.d3ReheatSimulation();
   }
 
-  // Scale node sizes proportionally
+  // Scale node sizes in-place (no graphData reset — avoids jump/pan)
   if (graph) {
     const currentData = graph.graphData();
     const maxDeg = Math.max(1, ...Object.values(degreeMap));
@@ -2042,12 +2122,13 @@ function setEdgeLengthMultiplier(m) {
     const MIN_VAL = 4, MAX_VAL = 40;
     currentData.nodes.forEach(node => {
       const deg = degreeMap[node.id] || 0;
+      // Modify node directly — it's a reference, next render frame picks it up
       node.val = Math.max(2, (MIN_VAL + (deg / maxDeg) * (MAX_VAL - MIN_VAL)) * nodeScale);
     });
-    graph.graphData(currentData);
+    // Do NOT call graph.graphData() — that would reset positions and cause a jump
   }
 
-  console.log(`Edge length: ${m}, node scale: ${(0.5 + m / 50).toFixed(2)}x`);
+  console.log('Edge length: ' + m + ', node scale: ' + (0.5 + m / 50).toFixed(2) + 'x');
 }
 
 // ============================================================================
@@ -2055,8 +2136,8 @@ function setEdgeLengthMultiplier(m) {
 // ============================================================================
 function updateSpacing(val) {
   const t = parseInt(val) / 100; // 0..1
-  // Map: 0=dense (charge -200) → 1=sparse (charge -1200)
-  const chargeStrength = Math.round(-200 - t * 1000);
+  // Map: 0=dense (charge -150) → 1=sparse (charge -800)
+  const chargeStrength = Math.round(-150 - t * 650);
   if (graph) {
     graph.d3Force('charge').strength(chargeStrength);
     graph.d3ReheatSimulation();
@@ -2111,7 +2192,7 @@ function resetQuery() {
       link._visible = true;
       link.particles = 0;
     });
-    graph.graphData(currentData);
+    requestGraphRedraw();
     applyEdgeFilters();
   }
 }
