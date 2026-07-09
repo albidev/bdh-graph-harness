@@ -58,8 +58,6 @@
     overflow: hidden;
     min-width: 0;
   }
-  /* Kill vis.js native tooltip — we use custom HTML tooltip instead */
-  div.vis-tooltip { display: none !important; }
   #side-panel {
     width: 30%;
     flex-shrink: 0;
@@ -740,8 +738,13 @@
     </div>
   </div>
 </div>
-<script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+<script src="https://unpkg.com/force-graph/dist/force-graph.min.js"></script>
 <script>
+// ============================================================================
+// BDH Graph Harness — force-graph visualization
+// Replaces vis.js with WebGL-powered force-graph for 60 FPS on large vaults
+// ============================================================================
+
 const COLORS = {
   inactive: '#6e7681',
   activated: '#f0883e',
@@ -757,6 +760,7 @@ const COLORS = {
   edgePhantom: '#1f6feb',       // blue dashed edges for phantom links
   bg: '#0d1117',
 };
+
 // Hebbian edge color by weight (dim → bright green)
 function weightColor(weight) {
   if (weight < 0.3) return COLORS.edgeHebbianLow;
@@ -779,29 +783,38 @@ const TAG_COLORS = [
   '#b392f0', // lavender
   '#85e89d', // mint
 ];
-let network = null;
-let nodesDS = null;
-let edgesDS = null;
-let hebbianMap = {};  // "a|b" -> weight
-let allNodeIds = [];
-let allEdgeIds = [];
-let orphanNodeIds = [];  // nodes with no connections (hidden by default)
-let allGraphNodes = [];  // full node list from server (for orphan toggle)
-let tagColorMap = {};    // tag -> color for tag-based node coloring
-let showTagColors = true; // toggle for tag-based coloring (on by default)
-let directOnly = false;   // toggle for showing only direct wikilink edges
-let hebbianThreshold = 0.15; // minimum weight for Hebbian edges to show
-let showPhantom = true;   // toggle for phantom (semantic similarity) edges
-let degreeMap = {};      // node_id -> degree (computed from edges)
-let neighborMap = {};    // node_id -> [connected node titles]
-let neurogenesisNodes = {};  // node_id -> node data (preserved across graph refresh)
-let nodeTagColorMap = {};    // node_id -> vis.js color object (preserves tag color across dim/restore)
-let tooltipEl = null;    // custom HTML tooltip element
-let nodeDataMap = {};    // node_id -> full node data (fast tooltip lookup, updated on live adds)
-let edgeInfoMap = {};    // edge_id -> {source_title, target_title, type, weight?, frequency?}
-let totalConcepts = 0;   // cumulative neurogenesis counter
 
-// Create the tooltip element (once)
+// ============================================================================
+// Global state
+// ============================================================================
+let graph = null;             // force-graph instance
+let allGraphNodes = [];       // full node list from server
+let fgNodes = [];             // force-graph node objects
+let fgLinks = [];             // force-graph link objects
+let hebbianMap = {};          // "a|b" -> weight
+let orphanNodeIds = [];       // nodes with no connections (hidden by default)
+let tagColorMap = {};         // tag -> color for tag-based node coloring
+let showTagColors = true;     // toggle for tag-based coloring (on by default)
+let directOnly = false;       // toggle for showing only direct wikilink edges
+let hebbianThreshold = 0.15;  // minimum weight for Hebbian edges to show
+let showPhantom = true;       // toggle for phantom (semantic similarity) edges
+let degreeMap = {};           // node_id -> degree (computed from edges)
+let neighborMap = {};         // node_id -> [connected node titles]
+let neurogenesisNodes = {};   // node_id -> node data (preserved across graph refresh)
+let nodeDataMap = {};         // node_id -> full node data (fast tooltip lookup)
+let edgeInfoMap = {};         // edge_id -> {source_title, target_title, type, weight?, frequency?}
+let nodeTagColorMap = {};     // node_id -> color string (preserves tag color across dim/restore)
+let totalConcepts = 0;        // cumulative neurogenesis counter
+let edgeLengthMultiplier = 10; // default: 10px per degree unit
+let showOrphans = true;
+let zoomPollTimer = null;
+let lastMouseEvent = { clientX: 0, clientY: 0 }; // tracked for tooltip positioning
+
+// ============================================================================
+// Custom HTML tooltip
+// ============================================================================
+let tooltipEl = null;
+
 function ensureTooltip() {
   if (tooltipEl) return;
   tooltipEl = document.createElement('div');
@@ -810,20 +823,19 @@ function ensureTooltip() {
   document.body.appendChild(tooltipEl);
 }
 
-// Show tooltip for a node
-function showTooltip(nodeId, evt) {
+function showTooltip(node, evt) {
   ensureTooltip();
-  const n = nodeDataMap[nodeId] || allGraphNodes.find(x => x.id === nodeId);
+  const n = node ? nodeDataMap[node.id] : null;
   if (!n) { hideTooltip(); return; }
 
   const title = escapeHtml(n.title || n.id);
-  const path = n.path || '';
+  const path = n._path || n.path || '';
   const shortPath = path.replace(/.*\/Documents\/Hermes\//, '').replace(/.*\/wiki\//, 'wiki/');
-  const text = (n.text || '').replace(/\n/g, ' ').substring(0, 150);
+  const text = (n._text || n.text || '').replace(/\n/g, ' ').substring(0, 150);
   const deg = degreeMap[n.id] || 0;
 
   // Tags
-  const rawTags = n.tags || '';
+  const rawTags = n._tags || n.tags || '';
   let tagList = [];
   if (Array.isArray(rawTags)) {
     tagList = rawTags.map(t => t.replace(/^[\[\]]+|[\[\]]+$/g, '').trim()).filter(Boolean);
@@ -851,51 +863,14 @@ function showTooltip(nodeId, evt) {
   positionTooltip(evt);
 }
 
-function isMobile() {
-  return window.innerWidth <= 768 || 'ontouchstart' in window;
-}
-function positionTooltip(evt) {
-  if (!tooltipEl) return;
-  if (isMobile()) {
-    // On mobile: fixed at bottom, above query input area
-    tooltipEl.style.left = '10px';
-    tooltipEl.style.right = '10px';
-    tooltipEl.style.bottom = (60 + envInset()) + 'px';
-    tooltipEl.style.top = 'auto';
-    tooltipEl.style.maxWidth = 'calc(100vw - 20px)';
-    tooltipEl.style.width = 'auto';
-  } else {
-    const pad = 16;
-    let x = evt.clientX + pad;
-    let y = evt.clientY + pad;
-    tooltipEl.style.width = '';
-    tooltipEl.style.right = '';
-    tooltipEl.style.bottom = '';
-    const rect = tooltipEl.getBoundingClientRect();
-    if (x + rect.width > window.innerWidth) x = evt.clientX - rect.width - pad;
-    if (y + rect.height > window.innerHeight) y = evt.clientY - rect.height - pad;
-    tooltipEl.style.left = x + 'px';
-    tooltipEl.style.top = y + 'px';
-  }
-}
-function envInset() {
-  try { return parseInt(getComputedStyle(document.documentElement).getPropertyValue('env(safe-area-inset-bottom)')) || 0; }
-  catch(e) { return 0; }
-}
-
-function hideTooltip() {
-  if (tooltipEl) tooltipEl.style.display = 'none';
-}
-
-// Show tooltip for an edge (synapse)
-function showEdgeTooltip(edgeId, evt) {
+function showEdgeTooltip(link, evt) {
   ensureTooltip();
-  const info = edgeInfoMap[edgeId];
+  const info = edgeInfoMap[link._id];
   if (!info) { hideTooltip(); return; }
 
   const isHebbian = info.type === 'hebbian';
-  const icon = isHebbian ? '⚡' : '🔗';
-  const typeLabel = isHebbian ? 'Hebbian Synapse' : 'Wikilink';
+  const icon = isHebbian ? '⚡' : (info.type === 'phantom' ? '👻' : '🔗');
+  const typeLabel = isHebbian ? 'Hebbian Synapse' : (info.type === 'phantom' ? 'Phantom Link' : 'Wikilink');
 
   let html = '<div style="max-width:280px">';
   html += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">';
@@ -913,6 +888,8 @@ function showEdgeTooltip(edgeId, evt) {
     html += '<span>Weight: <b style="color:' + weightColor(info.weight) + '">' + info.weight.toFixed(3) + '</b></span>';
     html += '<span>Freq: <b>' + info.frequency + '</b></span>';
     html += '</div>';
+  } else if (info.type === 'phantom') {
+    html += '<div style="font-size:11px;color:#8b949e">Similarity: <b>' + (info.similarity || 0).toFixed(2) + '</b></div>';
   }
 
   html += '</div>';
@@ -922,8 +899,132 @@ function showEdgeTooltip(edgeId, evt) {
   positionTooltip(evt);
 }
 
+function isMobile() {
+  return window.innerWidth <= 768 || 'ontouchstart' in window;
+}
+
+function positionTooltip(evt) {
+  if (!tooltipEl) return;
+  if (isMobile()) {
+    tooltipEl.style.left = '10px';
+    tooltipEl.style.right = '10px';
+    tooltipEl.style.bottom = (60 + envInset()) + 'px';
+    tooltipEl.style.top = 'auto';
+    tooltipEl.style.maxWidth = 'calc(100vw - 20px)';
+    tooltipEl.style.width = 'auto';
+  } else {
+    const pad = 16;
+    let x = (evt.clientX || evt.pageX || 0) + pad;
+    let y = (evt.clientY || evt.pageY || 0) + pad;
+    tooltipEl.style.width = '';
+    tooltipEl.style.right = '';
+    tooltipEl.style.bottom = '';
+    const rect = tooltipEl.getBoundingClientRect();
+    if (x + rect.width > window.innerWidth) x = (evt.clientX || evt.pageX || 0) - rect.width - pad;
+    if (y + rect.height > window.innerHeight) y = (evt.clientY || evt.pageY || 0) - rect.height - pad;
+    tooltipEl.style.left = x + 'px';
+    tooltipEl.style.top = y + 'px';
+  }
+}
+
+function envInset() {
+  try { return parseInt(getComputedStyle(document.documentElement).getPropertyValue('env(safe-area-inset-bottom)')) || 0; }
+  catch(e) { return 0; }
+}
+
+function hideTooltip() {
+  if (tooltipEl) tooltipEl.style.display = 'none';
+}
+
+// ============================================================================
+// Node canvas rendering — custom shapes, colors, opacity, 💤 text
+// ============================================================================
+function drawNode(node, ctx, globalScale) {
+  const size = node.val || 4;
+  const color = node.color || COLORS.inactive;
+  const opacity = node._opacity != null ? node._opacity : 1.0;
+
+  ctx.globalAlpha = opacity;
+
+  const shape = node._shape || 'circle';
+  const r = Math.sqrt(size) * 2; // force-graph val is area; scale to radius
+
+  if (shape === 'diamond') {
+    // Neurogenesis — diamond shape
+    ctx.beginPath();
+    ctx.moveTo(0, -r);
+    ctx.lineTo(r, 0);
+    ctx.lineTo(0, r);
+    ctx.lineTo(-r, 0);
+    ctx.closePath();
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  } else if (shape === 'triangleDown') {
+    // Dormant — triangle pointing down
+    ctx.beginPath();
+    ctx.moveTo(0, r);
+    ctx.lineTo(r, -r * 0.7);
+    ctx.lineTo(-r, -r * 0.7);
+    ctx.closePath();
+    ctx.fillStyle = color;
+    ctx.fill();
+    // Draw 💤 text above
+    if (globalScale >= 1.5) {
+      ctx.font = (10 / globalScale) + 'px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'bottom';
+      ctx.fillStyle = '#6e7681';
+      ctx.fillText('💤', 0, -r - 2);
+    }
+  } else if (shape === 'hexagon') {
+    // Hub — hexagon
+    ctx.beginPath();
+    for (let i = 0; i < 6; i++) {
+      const angle = (Math.PI / 3) * i;
+      const x = r * Math.cos(angle);
+      const y = r * Math.sin(angle);
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  } else {
+    // Default — circle
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, 2 * Math.PI);
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+
+  // Node label (visible when zoomed in)
+  if (globalScale >= 1.2 && node.name) {
+    ctx.font = (10 / globalScale) + 'px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    ctx.fillStyle = '#c9d1d9';
+    ctx.globalAlpha = opacity * 0.8;
+    const label = node.name.length > 25 ? node.name.substring(0, 22) + '…' : node.name;
+    ctx.fillText(label, 0, r + 2);
+  }
+
+  ctx.globalAlpha = 1.0;
+}
+
+// ============================================================================
+// Graph initialization
+// ============================================================================
 function initNetwork(graphData) {
-  // Store full node list for orphan toggle + build fast lookup map for tooltips
+  // Store full node list for orphan toggle + build fast lookup map
   allGraphNodes = graphData.nodes;
   nodeDataMap = {};
   graphData.nodes.forEach(n => { nodeDataMap[n.id] = n; });
@@ -952,7 +1053,7 @@ function initNetwork(graphData) {
     }
   });
 
-  // Build edge set first to know which nodes have connections
+  // Build edge set and compute degree/neighbor maps
   const edgeSet = new Set();
   const connectedNodes = new Set();
   degreeMap = {};
@@ -966,7 +1067,6 @@ function initNetwork(graphData) {
     connectedNodes.add(e.target);
     degreeMap[e.source] = (degreeMap[e.source] || 0) + 1;
     degreeMap[e.target] = (degreeMap[e.target] || 0) + 1;
-    // Build neighbor map (id -> list of titles)
     if (!neighborMap[e.source]) neighborMap[e.source] = [];
     if (!neighborMap[e.target]) neighborMap[e.target] = [];
     const srcNode = graphData.nodes.find(n => n.id === e.source);
@@ -975,250 +1075,218 @@ function initNetwork(graphData) {
     if (srcNode) neighborMap[e.target].push(srcNode.title || e.source);
   });
 
-  // Add hebbian edges
+  // Add hebbian edges to degree count
   hebbianMap = {};
   graphData.hebbian.forEach(h => {
     const key = h.note_a + '|' + h.note_b;
     hebbianMap[key] = h.weight;
-    const eid = 'hebb_' + h.note_a + '→' + h.note_b;
-    if (edgeSet.has(eid)) return;
-    edgeSet.add(eid);
     connectedNodes.add(h.note_a);
     connectedNodes.add(h.note_b);
-    const w = Math.min(1 + h.weight * 3, 5);
-    visEdges_tmp = []; // placeholder
-  });
-
-  // Only include nodes that have at least one connection
-  const connectedSet = new Set(connectedNodes);
-  orphanNodeIds = graphData.nodes.filter(n => !connectedSet.has(n.id)).map(n => n.id);
-  allNodeIds = graphData.nodes.filter(n => connectedSet.has(n.id)).map(n => n.id);
-
-  allEdgeIds = Array.from(edgeSet);
-
-  // Compute degree map for node sizing (count edges per node)
-  degreeMap = {};
-  graphData.edges.forEach(e => {
-    degreeMap[e.source] = (degreeMap[e.source] || 0) + 1;
-    degreeMap[e.target] = (degreeMap[e.target] || 0) + 1;
-  });
-  graphData.hebbian.forEach(h => {
-    if (!edgeSet.has('hebb_' + h.note_a + '→' + h.note_b)) return;
     degreeMap[h.note_a] = (degreeMap[h.note_a] || 0) + 1;
     degreeMap[h.note_b] = (degreeMap[h.note_b] || 0) + 1;
   });
+
+  // Phantom edges degree count
   (graphData.phantom || []).forEach(p => {
-    if (!edgeSet.has('phantom_' + p.source + '→' + p.target)) return;
+    connectedNodes.add(p.source);
+    connectedNodes.add(p.target);
     degreeMap[p.source] = (degreeMap[p.source] || 0) + 1;
     degreeMap[p.target] = (degreeMap[p.target] || 0) + 1;
   });
 
-  // Size nodes by degree: more connections = bigger dot
+  // Identify orphans
+  const connectedSet = new Set(connectedNodes);
+  orphanNodeIds = graphData.nodes.filter(n => !connectedSet.has(n.id)).map(n => n.id);
+
+  // Size nodes by degree
   const maxDeg = Math.max(1, ...Object.values(degreeMap));
-  const HUB_THRESHOLD = maxDeg * 0.4;  // nodes with degree > 40% of max are hubs
-  const MIN_SIZE = 10, MAX_SIZE = 40;
-  const nodeScale = 0.5 + (edgeLengthMultiplier / 50);  // match console scale
-  const visNodes = allNodeIds.map(id => {
+  const HUB_THRESHOLD = maxDeg * 0.4;
+
+  // Build force-graph nodes
+  fgNodes = [];
+  const activeNodeIds = showOrphans
+    ? graphData.nodes.map(n => n.id)
+    : graphData.nodes.filter(n => connectedSet.has(n.id)).map(n => n.id);
+
+  activeNodeIds.forEach(id => {
     const n = graphData.nodes.find(x => x.id === id);
+    if (!n) return;
     const deg = degreeMap[id] || 0;
-    const baseSize = MIN_SIZE + (deg / maxDeg) * (MAX_SIZE - MIN_SIZE);
-    const size = Math.max(4, baseSize * nodeScale);
-    // Determine node color from tags if tag coloring is enabled
-    let nodeGroup = 'inactive';
-    let nodeColor = undefined;
-    // Handle dormant nodes — dark gray, reduced opacity
     const isDormant = n.dormant === true;
     const qualityScore = n.quality_score || 0;
+    const tags = (n.tags || '').toLowerCase();
+
+    // Determine shape
+    let shape = 'circle';
+    if (isDormant) shape = 'triangleDown';
+    else if (tags.includes('neurogenesis')) shape = 'diamond';
+    else if (deg >= HUB_THRESHOLD) shape = 'hexagon';
+
+    // Determine color
+    let color = COLORS.inactive;
     if (isDormant) {
-      nodeColor = { background: COLORS.dormant, border: '#21262d', highlight: { background: COLORS.dormant, border: '#21262d' } };
+      color = COLORS.dormant;
     } else if (showTagColors && tagColorMap) {
-      const tags = n.tags || '';
+      const rawTags = n.tags || '';
       let primaryTag = '';
-      if (Array.isArray(tags) && tags.length > 0) {
-        primaryTag = tags[0].replace(/^[\[\]]+|[\[\]]+$/g, '').trim();
-      } else if (typeof tags === 'string' && tags.trim()) {
-        primaryTag = tags.replace(/^[\[\]]+|[\[\]]+$/g, '').split(',')[0].trim();
+      if (Array.isArray(rawTags) && rawTags.length > 0) {
+        primaryTag = rawTags[0].replace(/^[\[\]]+|[\[\]]+$/g, '').trim();
+      } else if (typeof rawTags === 'string' && rawTags.trim()) {
+        primaryTag = rawTags.replace(/^[\[\]]+|[\[\]]+$/g, '').split(',')[0].trim();
       }
       if (primaryTag && tagColorMap[primaryTag]) {
-        nodeColor = tagColorMap[primaryTag];
+        color = tagColorMap[primaryTag];
       }
     }
-    const tooltip = isDormant
-      ? `${n.title}\\n💤 Dormant (Q: ${qualityScore.toFixed(2)})`
-      : (qualityScore > 0 ? `${n.title}\\n(Q: ${qualityScore.toFixed(2)})` : n.title);
-    // Track tag color for this node (used by handleActivation to preserve colors across dim/restore)
-    nodeTagColorMap[n.id] = nodeColor
-      ? (typeof nodeColor === 'string' ? { background: nodeColor, border: nodeColor, highlight: { background: nodeColor, border: nodeColor } } : nodeColor)
-      : null;
+    nodeTagColorMap[n.id] = color;
 
-    // Assign shape by node type
-    const tags = (n.tags || '').toLowerCase();
-    let shape = 'dot';
-    if (isDormant) {
-      shape = 'triangleDown';  // sopito
-    } else if (tags.includes('neurogenesis')) {
-      shape = 'diamond';       // generato dal sistema
-    } else if (deg >= HUB_THRESHOLD) {
-      shape = 'hexagon';       // hub
-    }
+    // val = node size (area), scaled by degree
+    const MIN_VAL = 4, MAX_VAL = 40;
+    const val = MIN_VAL + (deg / maxDeg) * (MAX_VAL - MIN_VAL);
 
-    return {
+    fgNodes.push({
       id: n.id,
-      label: n.title,
-      title: '',  // suppress vis.js native tooltip — we use custom HTML tooltip
-      group: nodeGroup,
-      color: nodeColor ? (typeof nodeColor === 'string' ? { background: nodeColor, border: nodeColor, highlight: { background: nodeColor, border: nodeColor } } : nodeColor) : undefined,
-      opacity: isDormant ? 0.3 : 1.0,
-      size: deg > 0 ? size : MIN_SIZE,
-      mass: 1,
-      shape: shape,
-    };
+      name: n.title || n.id,
+      color: color,
+      val: val,
+      _opacity: isDormant ? 0.3 : 1.0,
+      _shape: shape,
+      _dormant: isDormant,
+      _qualityScore: qualityScore,
+      _tags: n.tags || '',
+      _title: n.title || n.id,
+      _path: n.path || '',
+      _text: n.text || '',
+    });
   });
 
-  // Rebuild visEdges properly
-  const visEdges = [];
-  edgeSet.clear();
+  // Build force-graph links
+  fgLinks = [];
   edgeInfoMap = {};
 
-  // Edge length: base + average degree of endpoints * multiplier
-  function calcEdgeLen(a, b) {
-    const degA = degreeMap[a] || 0;
-    const degB = degreeMap[b] || 0;
-    return BASE_LENGTH + ((degA + degB) / 2) * edgeLengthMultiplier;
-  }
-
+  // Wikilinks
   graphData.edges.forEach(e => {
     const eid = e.source + '→' + e.target;
-    if (edgeSet.has(eid)) return;
-    if (!connectedNodes.has(e.source) || !connectedNodes.has(e.target)) return;
-    edgeSet.add(eid);
-    const srcTitle = (allGraphNodes.find(n => n.id === e.source) || {}).title || e.source;
-    const tgtTitle = (allGraphNodes.find(n => n.id === e.target) || {}).title || e.target;
+    const srcTitle = (graphData.nodes.find(n => n.id === e.source) || {}).title || e.source;
+    const tgtTitle = (graphData.nodes.find(n => n.id === e.target) || {}).title || e.target;
     edgeInfoMap[eid] = { source_title: srcTitle, target_title: tgtTitle, type: 'wikilink' };
-    visEdges.push({
-      id: eid,
-      from: e.source,
-      to: e.target,
-      color: { color: COLORS.edgeWikilink, highlight: COLORS.edgeWikilink },
+    fgLinks.push({
+      source: e.source,
+      target: e.target,
+      color: COLORS.edgeWikilink,
       width: 0.5,
-      length: calcEdgeLen(e.source, e.target),
+      type: 'wikilink',
+      particles: 0,
+      _id: eid,
+      _visible: true,
     });
   });
 
+  // Hebbian synapses
   graphData.hebbian.forEach(h => {
     const eid = 'hebb_' + h.note_a + '→' + h.note_b;
-    if (edgeSet.has(eid)) return;
-    if (!connectedNodes.has(h.note_a) || !connectedNodes.has(h.note_b)) return;
-    edgeSet.add(eid);
-    const srcTitle = (allGraphNodes.find(n => n.id === h.note_a) || {}).title || h.note_a;
-    const tgtTitle = (allGraphNodes.find(n => n.id === h.note_b) || {}).title || h.note_b;
+    const srcTitle = (graphData.nodes.find(n => n.id === h.note_a) || {}).title || h.note_a;
+    const tgtTitle = (graphData.nodes.find(n => n.id === h.note_b) || {}).title || h.note_b;
     edgeInfoMap[eid] = { source_title: srcTitle, target_title: tgtTitle, type: 'hebbian', weight: h.weight, frequency: h.frequency };
     const w = Math.min(1 + h.weight * 3, 5);
-    visEdges.push({
-      id: eid,
-      from: h.note_a,
-      to: h.note_b,
-      color: { color: weightColor(h.weight), highlight: weightColor(h.weight) },
+    fgLinks.push({
+      source: h.note_a,
+      target: h.note_b,
+      color: weightColor(h.weight),
       width: w,
-      dashes: false,
-      length: calcEdgeLen(h.note_a, h.note_b),
+      type: 'hebbian',
+      weight: h.weight,
+      frequency: h.frequency,
+      particles: 0,
+      _id: eid,
+      _visible: true,
     });
   });
-  // Phantom edges — semantic similarity connections (dashed blue)
+
+  // Phantom links
   (graphData.phantom || []).forEach(p => {
     const eid = 'phantom_' + p.source + '→' + p.target;
-    if (edgeSet.has(eid)) return;
-    if (!connectedNodes.has(p.source) || !connectedNodes.has(p.target)) return;
-    edgeSet.add(eid);
-    const srcTitle = (allGraphNodes.find(n => n.id === p.source) || {}).title || p.source;
-    const tgtTitle = (allGraphNodes.find(n => n.id === p.target) || {}).title || p.target;
+    const srcTitle = (graphData.nodes.find(n => n.id === p.source) || {}).title || p.source;
+    const tgtTitle = (graphData.nodes.find(n => n.id === p.target) || {}).title || p.target;
     edgeInfoMap[eid] = { source_title: srcTitle, target_title: tgtTitle, type: 'phantom', similarity: p.similarity };
-    visEdges.push({
-      id: eid,
-      from: p.source,
-      to: p.target,
-      color: { color: COLORS.edgePhantom, highlight: COLORS.edgePhantom },
+    fgLinks.push({
+      source: p.source,
+      target: p.target,
+      color: COLORS.edgePhantom,
       width: 1.5,
-      dashes: [5, 5],
-      title: `Semantic link (sim: ${p.similarity.toFixed(2)})`,
-      length: calcEdgeLen(p.source, p.target),
+      type: 'phantom',
+      _id: eid,
+      _dashes: true,
+      _visible: true,
     });
   });
 
-  allEdgeIds = Array.from(edgeSet);
-
-  nodesDS = new vis.DataSet(visNodes);
-  edgesDS = new vis.DataSet(visEdges);
-
+  // Create or recreate force-graph instance
   const container = document.getElementById('graph-container');
-  const data = { nodes: nodesDS, edges: edgesDS };
-  const options = {
-    nodes: {
-      shape: 'dot',
-      font: { color: '#c9d1d9', size: 12, face: 'system-ui' },
-      borderWidth: 1,
-      borderWidthSelected: 2,
-    },
-    edges: {
-      smooth: { type: 'continuous', roundness: 0.15 },
-      selectionWidth: 0,
-    },
-    groups: {
-      inactive: { color: { background: COLORS.inactive, border: COLORS.inactive } },
-      activated: { color: { background: COLORS.activated, border: COLORS.activated } },
-      seed: { color: { background: COLORS.seed, border: COLORS.seed } },
-      neurogenesis: {
-        color: { background: COLORS.neurogenesis, border: COLORS.neurogenesis },
-        borderWidth: 3,
-        shape: 'dot',
-        size: 20,
-      },
-    },
-    physics: {
-      solver: 'barnesHut',
-      barnesHut: {
-        gravitationalConstant: -6000,
-        springLength: 200,
-        springConstant: 0.02,
-        avoidOverlap: 1,
-      },
-      stabilization: { iterations: 150, updateInterval: 25 },
-    },
-    interaction: { hover: true, tooltipDelay: 150 },
-  };
+  if (graph) {
+    graph._destructor();
+    graph = null;
+  }
 
-  if (network) network.destroy();
-  network = new vis.Network(container, data, options);
+  graph = ForceGraph()(container)
+    .graphData({ nodes: fgNodes, links: fgLinks })
+    .backgroundColor(COLORS.bg)
+    .nodeRelSize(4)
+    .nodeId('id')
+    .nodeVal(node => node.val)
+    .nodeLabel(node => node.name)
+    .nodeColor(node => node.color)
+    .nodeOpacity(node => node._opacity != null ? node._opacity : 1.0)
+    .nodeCanvasObject(drawNode)
+    .nodeCanvasObjectMode(() => 'replace')
+    .linkSource('source')
+    .linkTarget('target')
+    .linkColor(link => link._visible ? link.color : 'rgba(0,0,0,0)')
+    .linkWidth(link => link._visible ? link.width : 0)
+    .linkCurvature(0.15)
+    .linkDirectionalParticles(link => link.particles || 0)
+    .linkDirectionalParticleSpeed(0.006)
+    .linkDirectionalParticleWidth(2)
+    .linkDirectionalParticleColor(link => link.particleColor || link.color)
+    .onNodeHover((node, prevNode) => {
+      if (node) {
+        // Get mouse position from last known event
+        const evt = lastMouseEvent || { clientX: 0, clientY: 0 };
+        showTooltip(node, evt);
+      } else {
+        hideTooltip();
+      }
+    })
+    .onLinkHover((link, prevLink) => {
+      if (link) {
+        const evt = lastMouseEvent || { clientX: 0, clientY: 0 };
+        showEdgeTooltip(link, evt);
+      } else {
+        hideTooltip();
+      }
+    });
 
-  // Custom HTML tooltip via hover events
-  network.on('hoverNode', function(params) {
-    showTooltip(params.node, params.event);
-  });
-  network.on('hoverEdge', function(params) {
-    showEdgeTooltip(params.edge, params.event);
-  });
-  network.on('blurNode', function(params) {
-    hideTooltip();
-  });
-  network.on('blurEdge', function(params) {
-    hideTooltip();
-  });
-  network.on('mousemove', function(params) {
-    if (params.node) {
-      positionTooltip(params.event);
+  // Physics — barnesHut equivalent
+  graph.d3Force('charge').strength(-600);
+  graph.d3Force('link').distance(200);
+  graph.d3Force('center').strength(0.1);
+
+  // Track mouse position for tooltips (force-graph doesn't pass event to hover callbacks)
+  container.addEventListener('mousemove', (e) => {
+    lastMouseEvent = e;
+    if (tooltipEl && tooltipEl.style.display === 'block') {
+      positionTooltip(e);
     }
   });
 
-  // Sync zoom slider with scroll/pinch gestures
-  watchZoom();
-  syncZoomUI();
+  // Start zoom sync polling
+  startZoomPoll();
 
+  // Update stats
   document.getElementById('stat-neurons').textContent = graphData.stats.neurons;
   document.getElementById('stat-synapses').textContent = graphData.stats.synapses;
   document.getElementById('stat-hebbian').textContent = graphData.stats.hebbian_synapses;
 
-  // Show orphan nodes by default (checkbox is checked on load)
-  if (orphanNodeIds.length > 0) toggleOrphans(true);
   // Apply edge filters on initial load
   applyEdgeFilters();
 
@@ -1245,46 +1313,48 @@ function initNetwork(graphData) {
   }
 }
 
-function animateNodeColor(nodeId, newGroup) {
-  if (!nodesDS) return;
-  nodesDS.update({ id: nodeId, group: newGroup });
-}
-
+// ============================================================================
+// Activation handler — dim non-active nodes, light up active ones, pulse Hebbian
+// ============================================================================
 function handleActivation(event) {
   const activated = event.activated_notes || [];
   const activatedIds = new Set(activated.map(n => n.id));
   const seedId = activated.length > 0 ? activated[0].id : null;
 
-  // Dim all nodes first (preserve tag colors — don't override with group)
-  allNodeIds.forEach(id => {
-    if (nodesDS.get(id)) {
-      nodesDS.update({ id, color: nodeTagColorMap[id] || undefined, group: 'inactive', opacity: activatedIds.size > 0 ? 0.3 : 1.0 });
-    }
-  });
-
-  // Light up activated nodes with staggered timing for cascade effect
-  activated.forEach((note, i) => {
-    setTimeout(() => {
-      const group = note.id === seedId ? 'seed' : 'activated';
-      if (nodesDS.get(note.id)) {
-        // Restore tag color if available, otherwise use group default
-        const tagColor = nodeTagColorMap[note.id];
-        nodesDS.update({ id: note.id, group: group, color: tagColor || undefined, opacity: 1.0 });
+  // Dim all nodes, light up activated ones
+  const currentData = graph.graphData();
+  currentData.nodes.forEach(node => {
+    if (activatedIds.has(node.id)) {
+      node._opacity = 1.0;
+      // Light up with activation color
+      if (node.id === seedId) {
+        node.color = COLORS.seed;
+      } else {
+        node.color = COLORS.activated;
       }
-    }, i * 80);
-  });
-
-  // Highlight edges between activated nodes + pulse Hebbian synapses
-  allEdgeIds.forEach(eid => {
-    const edge = edgesDS.get(eid);
-    if (!edge) return;
-    const bothActive = activatedIds.has(edge.from) && activatedIds.has(edge.to);
-    if (bothActive) {
-      edgesDS.update({ id: eid, opacity: 1.0 });
     } else {
-      edgesDS.update({ id: eid, opacity: 0.15 });
+      node._opacity = activatedIds.size > 0 ? 0.3 : 1.0;
+      // Restore tag color
+      node.color = nodeTagColorMap[node.id] || COLORS.inactive;
     }
   });
+
+  // Dim non-active edges
+  currentData.links.forEach(link => {
+    const sourceId = typeof link.source === 'object' ? link.source.id : link.source;
+    const targetId = typeof link.target === 'object' ? link.target.id : link.target;
+    const bothActive = activatedIds.has(sourceId) && activatedIds.has(targetId);
+    if (bothActive) {
+      link._visible = true;
+    } else if (activatedIds.size > 0) {
+      link._visible = false;
+    } else {
+      link._visible = true;
+    }
+  });
+
+  // Trigger re-render
+  graph.graphData(currentData);
 
   // Pulse Hebbian synapses that were strengthened in this query
   const hebbianUpdates = event.hebbian_updates || [];
@@ -1292,101 +1362,96 @@ function handleActivation(event) {
     const parts = h.pair.split('|');
     if (parts.length !== 2) return;
     const [a, b] = parts;
-    // Update hebbianMap with new weight
     hebbianMap[h.pair] = h.weight;
 
-    // Find the Hebbian edge in vis (could be a→b or b→a)
-    const eid1 = 'hebb_' + a + '→' + b;
-    const eid2 = 'hebb_' + b + '→' + a;
-    const eid = edgesDS.get(eid1) ? eid1 : (edgesDS.get(eid2) ? eid2 : null);
+    // Find the Hebbian link
+    const targetLink = currentData.links.find(l => {
+      const ls = typeof l.source === 'object' ? l.source.id : l.source;
+      const lt = typeof l.target === 'object' ? l.target.id : l.target;
+      return (ls === a && lt === b) || (ls === b && lt === a);
+    });
 
-    // Stagger pulses so they cascade instead of all firing at once
     const delay = idx * 120;
     const newWidth = Math.min(1 + h.weight * 3, 5);
 
-    if (eid) {
-      // Existing edge: multi-step fade from pulse → settle
-      const pulseSteps = [
-        { w: newWidth + 5, c: COLORS.edgeHebbianPulse, t: 0 },
-        { w: newWidth + 3, c: COLORS.edgeHebbianPulse, t: 600 },
-        { w: newWidth + 1.5, c: weightColor(h.weight), t: 1400 },
-        { w: newWidth,      c: weightColor(h.weight), t: 2500 },
-      ];
-      pulseSteps.forEach(s => {
-        setTimeout(() => {
-          if (edgesDS.get(eid)) {
-            edgesDS.update({
-              id: eid,
-              color: { color: s.c, highlight: s.c },
-              width: s.w,
-              opacity: 1.0,
-            });
-          }
-        }, delay + s.t);
-      });
-    } else if (activatedIds.has(a) || activatedIds.has(b)) {
-      // New Hebbian synapse — add nodes if missing, then create edge
-      [a, b].forEach(nid => {
-        if (!nodesDS.get(nid)) {
-          // Node not in graph yet — add it live (prefer full server data for tooltip)
-          const fullNode = allGraphNodes.find(x => x.id === nid);
-          const hNode = fullNode || { id: nid, title: nid.split('/').pop(), tags: '', text: '', path: '' };
-          nodesDS.add({
-            id: nid,
-            label: hNode.title || nid.split('/').pop(),
-            group: 'inactive',
-            opacity: 0.3,
-          });
-          nodeDataMap[nid] = fullNode || hNode;
-          allNodeIds.push(nid);
-        }
-      });
-      const newEid = 'hebb_' + a + '→' + b;
-        if (!edgesDS.get(newEid)) {
-          const pulseStepsNew = [
-            { w: newWidth + 5,   c: COLORS.edgeHebbianPulse, t: 0 },
-            { w: newWidth + 3,   c: COLORS.edgeHebbianPulse, t: 600 },
-            { w: newWidth + 1.5, c: weightColor(h.weight), t: 1400 },
-            { w: newWidth,       c: weightColor(h.weight), t: 2500 },
-          ];
-          pulseStepsNew.forEach(s => {
-            setTimeout(() => {
-              if (edgesDS.get(newEid)) {
-                edgesDS.update({
-                  id: newEid,
-                  color: { color: s.c, highlight: s.c },
-                  width: s.w,
-                  opacity: 1.0,
-                });
-              } else if (s.t === 0) {
-                // First step — create the edge
-                edgesDS.add({
-                  id: newEid,
-                  from: a,
-                  to: b,
-                  color: { color: s.c, highlight: s.c },
-                  width: s.w,
-                  dashes: false,
-                  opacity: 1.0,
-                });
-                allEdgeIds.push(newEid);
-              }
-            }, delay + s.t);
-          });
-        }
-      }
-    });
+    if (targetLink) {
+      // Pulse: set particles, widen, brighten, then settle
+      setTimeout(() => {
+        targetLink.particles = 4;
+        targetLink.particleColor = COLORS.edgeHebbianPulse;
+        targetLink.color = COLORS.edgeHebbianPulse;
+        targetLink.width = newWidth + 5;
+        targetLink._visible = true;
+        graph.graphData(currentData);
+      }, delay);
 
-  // Reset non-Hebbian edge opacity after 4s
+      setTimeout(() => {
+        targetLink.width = newWidth + 3;
+        graph.graphData(currentData);
+      }, delay + 600);
+
+      setTimeout(() => {
+        targetLink.width = newWidth + 1.5;
+        targetLink.color = weightColor(h.weight);
+        graph.graphData(currentData);
+      }, delay + 1400);
+
+      setTimeout(() => {
+        targetLink.width = newWidth;
+        targetLink.particles = 0;
+        targetLink.color = weightColor(h.weight);
+        // Re-apply edge filters
+        applyEdgeFilters();
+      }, delay + 2500);
+    } else if (activatedIds.has(a) || activatedIds.has(b)) {
+      // New Hebbian synapse — add the link live
+      const newLink = {
+        source: a,
+        target: b,
+        color: COLORS.edgeHebbianPulse,
+        width: newWidth + 5,
+        type: 'hebbian',
+        weight: h.weight,
+        frequency: h.frequency,
+        particles: 4,
+        particleColor: COLORS.edgeHebbianPulse,
+        _id: 'hebb_' + a + '→' + b,
+        _visible: true,
+      };
+      const eid = 'hebb_' + a + '→' + b;
+      const srcTitle = (nodeDataMap[a] || {}).title || a;
+      const tgtTitle = (nodeDataMap[b] || {}).title || b;
+      edgeInfoMap[eid] = { source_title: srcTitle, target_title: tgtTitle, type: 'hebbian', weight: h.weight, frequency: h.frequency };
+      currentData.links.push(newLink);
+      graph.graphData(currentData);
+
+      // Settle animation
+      setTimeout(() => {
+        newLink.width = newWidth + 3;
+        graph.graphData(currentData);
+      }, delay + 600);
+      setTimeout(() => {
+        newLink.width = newWidth + 1.5;
+        newLink.color = weightColor(h.weight);
+        graph.graphData(currentData);
+      }, delay + 1400);
+      setTimeout(() => {
+        newLink.width = newWidth;
+        newLink.particles = 0;
+        newLink.color = weightColor(h.weight);
+        applyEdgeFilters();
+      }, delay + 2500);
+    }
+  });
+
+  // Reset non-Hebbian edge visibility after 4s
   setTimeout(() => {
-    allEdgeIds.forEach(eid => {
-      const edge = edgesDS.get(eid);
-      if (!edge) return;
-      // Don't reset Hebbian edges — they keep their weight-based width
-      if (!eid.startsWith('hebb_')) {
-        edgesDS.update({ id: eid, opacity: 1.0 });
+    currentData.links.forEach(link => {
+      if (link.type !== 'hebbian') {
+        link._visible = true;
       }
     });
+    graph.graphData(currentData);
   }, 4000);
 
   // Update side panel
@@ -1403,115 +1468,106 @@ function handleActivation(event) {
     });
   }
 
-  // Add new concept nodes to the graph (neurogenesis) with live edges
+  // Add new concept nodes (neurogenesis) with birth animation
   const newConcepts = event.new_concepts || [];
   newConcepts.forEach((nc, ncIdx) => {
-    if (nc.id && nodesDS && !nodesDS.get(nc.id)) {
+    if (nc.id && !nodeDataMap[nc.id]) {
       const ncNode = { id: nc.id, title: nc.title || nc.id, tags: 'neurogenesis', text: nc.definition || '', path: '' };
-      // Start with green neurogenesis group — visible, distinct, stays
-      nodesDS.add({
-        id: nc.id,
-        label: nc.title || nc.id.split('/').pop(),
-        group: 'neurogenesis',
-        opacity: 1.0,
-      });
-      allNodeIds.push(nc.id);
-      // Track for preservation across graph refresh
-      neurogenesisNodes[nc.id] = { label: nc.title || nc.id.split('/').pop(), title: nc.title || nc.id };
-      nodeDataMap[nc.id] = { id: nc.id, title: nc.title || nc.id, tags: 'neurogenesis', text: nc.definition || '', path: '' };
-      nodeTagColorMap[nc.id] = { background: COLORS.neurogenesis, border: COLORS.neurogenesis, highlight: { background: COLORS.neurogenesis, border: COLORS.neurogenesis } };
+      nodeDataMap[nc.id] = ncNode;
+      nodeTagColorMap[nc.id] = COLORS.neurogenesis;
+      neurogenesisNodes[nc.id] = { title: nc.title || nc.id };
       totalConcepts++;
-      const cEl = document.getElementById('stat-concepts');
-      if (cEl) { cEl.textContent = totalConcepts; cEl.style.color = '#3fb950'; setTimeout(() => { cEl.style.color = ''; }, 1500); }
 
-      // Birth pulse animation — expand + glow, then settle
+      // Add to graph data
+      const newNode = {
+        id: nc.id,
+        name: nc.title || nc.id.split('/').pop(),
+        color: COLORS.neurogenesis,
+        val: 20,
+        _opacity: 1.0,
+        _shape: 'diamond',
+        _dormant: false,
+        _tags: 'neurogenesis',
+        _title: nc.title || nc.id,
+        _path: '',
+        _text: nc.definition || '',
+      };
+      currentData.nodes.push(newNode);
+
+      // Birth pulse animation
       const birthDelay = ncIdx * 200;
-      const pulseSteps = [
-        { size: 30, opacity: 1.0, t: 0 },      // expand big
-        { size: 25, opacity: 1.0, t: 300 },     // shrink slightly
-        { size: 20, opacity: 1.0, t: 600 },     // settle to final size
-      ];
-      pulseSteps.forEach(s => {
-        setTimeout(() => {
-          if (nodesDS.get(nc.id)) {
-            nodesDS.update({ id: nc.id, size: s.size, opacity: s.opacity });
-          }
-        }, birthDelay + s.t);
-      });
+      setTimeout(() => {
+        newNode.val = 40;
+        graph.graphData(currentData);
+      }, birthDelay);
+      setTimeout(() => {
+        newNode.val = 30;
+        graph.graphData(currentData);
+      }, birthDelay + 300);
+      setTimeout(() => {
+        newNode.val = 20;
+        graph.graphData(currentData);
+      }, birthDelay + 600);
 
-      // Add edges to source notes (live wikilinks) — staggered appearance
+      // Add edges to source notes
       const sources = nc.source_notes || [];
       sources.forEach((srcTitle, srcIdx) => {
         const srcNode = allGraphNodes.find(n => n.title === srcTitle);
-        if (srcNode && nodesDS.get(srcNode.id)) {
+        if (srcNode) {
           const eid = nc.id + '→' + srcNode.id;
-          if (!edgesDS.get(eid)) {
-            setTimeout(() => {
-              if (!edgesDS.get(eid)) {
-                edgesDS.add({
-                  id: eid,
-                  from: nc.id,
-                  to: srcNode.id,
-                  color: { color: COLORS.edgeNeurogenesis, highlight: COLORS.edgeNeurogenesis },
-                  width: 2,
-                  dashes: [5, 5],
-                  opacity: 0.0,
-                });
-                allEdgeIds.push(eid);
-                // Fade in edge
-                setTimeout(() => {
-                  if (edgesDS.get(eid)) {
-                    edgesDS.update({ id: eid, opacity: 1.0 });
-                  }
-                }, 100);
-              }
-            }, birthDelay + 400 + srcIdx * 150);
-          }
+          const newLink = {
+            source: nc.id,
+            target: srcNode.id,
+            color: COLORS.edgeNeurogenesis,
+            width: 2,
+            type: 'neurogenesis',
+            particles: 0,
+            _id: eid,
+            _visible: true,
+            _dashes: true,
+          };
+          edgeInfoMap[eid] = { source_title: nc.title || nc.id, target_title: srcTitle, type: 'neurogenesis' };
+          setTimeout(() => {
+            currentData.links.push(newLink);
+            graph.graphData(currentData);
+          }, birthDelay + 400 + srcIdx * 150);
         }
       });
+
+      const cEl = document.getElementById('stat-concepts');
+      if (cEl) { cEl.textContent = totalConcepts; cEl.style.color = '#3fb950'; setTimeout(() => { cEl.style.color = ''; }, 1500); }
     }
   });
 
   // Update stats
   document.getElementById('stat-last').textContent = event.query || '—';
 
-  // Update neuron count — prefer server total, fall back to local increment
   const nEl = document.getElementById('stat-neurons');
   if (nEl) {
-    if (event.neuron_count != null) {
-      nEl.textContent = event.neuron_count;
-    } else if (newConcepts.length > 0) {
-      nEl.textContent = parseInt(nEl.textContent) + newConcepts.length;
-    }
+    if (event.neuron_count != null) nEl.textContent = event.neuron_count;
+    else if (newConcepts.length > 0) nEl.textContent = parseInt(nEl.textContent) + newConcepts.length;
   }
 
-  // Update synapse count from server total when available
   const sEl = document.getElementById('stat-synapses');
-  if (sEl && event.synapse_count != null) {
-    sEl.textContent = event.synapse_count;
-  }
+  if (sEl && event.synapse_count != null) sEl.textContent = event.synapse_count;
 
-  // Update queries processed counter
   if (event.queries_processed != null) {
     const qEl = document.getElementById('stat-queries');
     if (qEl) qEl.textContent = event.queries_processed;
   }
 
-  // Update hebbian synapse count with the real total
   if (event.hebbian_synapses != null) {
     const hebbEl = document.getElementById('stat-hebbian');
     if (hebbEl) {
       const prev = parseInt(hebbEl.textContent) || 0;
       hebbEl.textContent = event.hebbian_synapses;
       if (event.hebbian_synapses > prev) {
-        // Flash green when new synapses were learned
         hebbEl.style.color = COLORS.edgeHebbianPulse;
         setTimeout(() => { hebbEl.style.color = ''; }, 1000);
       }
     }
   }
 
-  // Update dormant count
   if (event.dormant_count != null) {
     const dormantEl = document.getElementById('stat-dormant');
     const dormantCountEl = document.getElementById('stat-dormant-count');
@@ -1527,12 +1583,18 @@ function handleActivation(event) {
   setTimeout(() => ind.classList.remove('active'), 1000);
 }
 
+// ============================================================================
+// Utilities
+// ============================================================================
 function escapeHtml(s) {
   const d = document.createElement('div');
   d.textContent = s;
   return d.innerHTML;
 }
 
+// ============================================================================
+// Query — HTTP POST to /api/query
+// ============================================================================
 function sendQuery() {
   const input = document.getElementById('query-input');
   const btn = document.getElementById('query-btn');
@@ -1543,7 +1605,7 @@ function sendQuery() {
   document.getElementById('response-text').textContent = 'Thinking...';
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 120000);  // 2 min timeout
+  const timeoutId = setTimeout(() => controller.abort(), 120000);
 
   fetch('/api/query', {
     method: 'POST',
@@ -1561,7 +1623,6 @@ function sendQuery() {
       if (data.response) {
         document.getElementById('response-text').textContent = data.response;
       }
-      // Update activation panel from HTTP response (works even if WS is down)
       if (data.activated_notes) {
         handleActivation({
           type: 'activation',
@@ -1590,7 +1651,9 @@ function sendQuery() {
   });
 }
 
+// ============================================================================
 // WebSocket connection
+// ============================================================================
 function connectWS() {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
   const ws = new WebSocket(proto + '//' + location.host + '/ws');
@@ -1607,114 +1670,101 @@ function connectWS() {
       } else if (event.type === 'activation') {
         handleActivation(event);
       } else if (event.type === 'graph_refresh') {
-        // Delta update: add new nodes, update changed ones, remove deleted ones — no full rebuild
+        // Delta update: add/remove nodes and links immutably
         console.log('Graph refresh (delta):', event.message);
         const changedNodes = event.changed_nodes || [];
         const newConcepts = event.new_concepts || [];
         const deletedNodes = event.deleted_nodes || [];
         const addedNodeData = event.added_node_data || [];
 
-        // 1. Remove deleted nodes from DataSets
-        deletedNodes.forEach(nid => {
-          if (nodesDS && nodesDS.get(nid)) {
-            nodesDS.remove(nid);
-            allNodeIds = allNodeIds.filter(id => id !== nid);
-            delete nodeDataMap[nid];
-            delete nodeTagColorMap[nid];
-            delete neurogenesisNodes[nid];
-          }
-        });
-        // Also remove edges that referenced deleted nodes
-        if (edgesDS && deletedNodes.length > 0) {
-          const deletedSet = new Set(deletedNodes);
-          allEdgeIds = allEdgeIds.filter(eid => {
-            const edge = edgesDS.get(eid);
-            if (edge && (deletedSet.has(edge.from) || deletedSet.has(edge.to))) {
-              edgesDS.remove(eid);
-              delete edgeInfoMap[eid];
-              return false;
-            }
-            return true;
-          });
-        }
+        if (!graph) return;
+        const currentData = graph.graphData();
+        const deletedSet = new Set(deletedNodes);
 
-        // 2. Add new nodes with their edges (from server-provided data)
+        // 1. Remove deleted nodes and their links
+        currentData.nodes = currentData.nodes.filter(n => !deletedSet.has(n.id));
+        currentData.links = currentData.links.filter(l => {
+          const ls = typeof l.source === 'object' ? l.source.id : l.source;
+          const lt = typeof l.target === 'object' ? l.target.id : l.target;
+          if (deletedSet.has(ls) || deletedSet.has(lt)) {
+            delete edgeInfoMap[l._id];
+            return false;
+          }
+          return true;
+        });
+        deletedNodes.forEach(nid => {
+          delete nodeDataMap[nid];
+          delete nodeTagColorMap[nid];
+          delete neurogenesisNodes[nid];
+        });
+
+        // 2. Add new nodes with their edges
         addedNodeData.forEach(nd => {
-          if (nodesDS && !nodesDS.get(nd.id)) {
+          if (!nodeDataMap[nd.id]) {
             const isNeurogenesis = (nd.tags || '').toLowerCase().includes('neurogenesis');
-            const nodeColor = isNeurogenesis
-              ? { background: COLORS.neurogenesis, border: COLORS.neurogenesis, highlight: { background: COLORS.neurogenesis, border: COLORS.neurogenesis } }
-              : undefined;
-            nodesDS.add({
-              id: nd.id,
-              label: nd.title || nd.id.split('/').pop(),
-              group: 'inactive',
-              color: nodeColor,
-              opacity: 1.0,
-              size: 10,
-              mass: 1,
-              shape: isNeurogenesis ? 'diamond' : 'dot',
-            });
+            const color = isNeurogenesis ? COLORS.neurogenesis : COLORS.inactive;
             nodeDataMap[nd.id] = nd;
-            nodeTagColorMap[nd.id] = nodeColor || null;
-            if (!allNodeIds.includes(nd.id)) allNodeIds.push(nd.id);
-            // Track as neurogenesis for preservation
-            if (isNeurogenesis) {
-              neurogenesisNodes[nd.id] = { label: nd.title, title: nd.title };
-            }
+            nodeTagColorMap[nd.id] = color;
+            currentData.nodes.push({
+              id: nd.id,
+              name: nd.title || nd.id.split('/').pop(),
+              color: color,
+              val: 10,
+              _opacity: 1.0,
+              _shape: isNeurogenesis ? 'diamond' : 'circle',
+              _dormant: false,
+              _tags: nd.tags || '',
+              _title: nd.title || nd.id,
+              _path: nd.path || '',
+              _text: nd.text || '',
+            });
+            if (isNeurogenesis) neurogenesisNodes[nd.id] = { title: nd.title };
           }
           // Add edges from this new node
           (nd.edges || []).forEach(e => {
             const eid = e.source + '→' + e.target;
-            if (edgesDS && !edgesDS.get(eid)) {
-              const srcTitle = (nodeDataMap[e.source] || {}).title || e.source;
-              const tgtTitle = (nodeDataMap[e.target] || {}).title || e.target;
-              edgeInfoMap[eid] = { source_title: srcTitle, target_title: tgtTitle, type: 'wikilink' };
-              edgesDS.add({
-                id: eid,
-                from: e.source,
-                to: e.target,
-                color: { color: COLORS.edgeWikilink, highlight: COLORS.edgeWikilink },
-                width: 0.5,
-                length: 200,
-              });
-              if (!allEdgeIds.includes(eid)) allEdgeIds.push(eid);
-            }
+            const srcTitle = (nodeDataMap[e.source] || {}).title || e.source;
+            const tgtTitle = (nodeDataMap[e.target] || {}).title || e.target;
+            edgeInfoMap[eid] = { source_title: srcTitle, target_title: tgtTitle, type: 'wikilink' };
+            currentData.links.push({
+              source: e.source, target: e.target,
+              color: COLORS.edgeWikilink, width: 0.5, type: 'wikilink',
+              particles: 0, _id: eid, _visible: true,
+            });
           });
           // Add hebbian edges from this new node
           (nd.hebbian || []).forEach(h => {
             const eid = 'hebb_' + h.note_a + '→' + h.note_b;
-            if (edgesDS && !edgesDS.get(eid)) {
-              const srcTitle = (nodeDataMap[h.note_a] || {}).title || h.note_a;
-              const tgtTitle = (nodeDataMap[h.note_b] || {}).title || h.note_b;
-              edgeInfoMap[eid] = { source_title: srcTitle, target_title: tgtTitle, type: 'hebbian', weight: h.weight, frequency: h.frequency };
-              const w = Math.min(1 + h.weight * 3, 5);
-              edgesDS.add({
-                id: eid,
-                from: h.note_a,
-                to: h.note_b,
-                color: { color: weightColor(h.weight), highlight: weightColor(h.weight) },
-                width: w,
-                length: 200,
-              });
-              if (!allEdgeIds.includes(eid)) allEdgeIds.push(eid);
-            }
+            const srcTitle = (nodeDataMap[h.note_a] || {}).title || h.note_a;
+            const tgtTitle = (nodeDataMap[h.note_b] || {}).title || h.note_b;
+            edgeInfoMap[eid] = { source_title: srcTitle, target_title: tgtTitle, type: 'hebbian', weight: h.weight, frequency: h.frequency };
+            currentData.links.push({
+              source: h.note_a, target: h.note_b,
+              color: weightColor(h.weight), width: Math.min(1 + h.weight * 3, 5),
+              type: 'hebbian', weight: h.weight, frequency: h.frequency,
+              particles: 0, _id: eid, _visible: true,
+            });
           });
         });
 
         // 3. Update changed node labels
         changedNodes.forEach(n => {
-          if (nodesDS && nodesDS.get(n.id)) {
-            nodesDS.update({ id: n.id, label: n.title });
-            if (nodeDataMap[n.id]) nodeDataMap[n.id].title = n.title;
+          const existing = currentData.nodes.find(x => x.id === n.id);
+          if (existing) {
+            existing.name = n.title;
+            existing._title = n.title;
           }
+          if (nodeDataMap[n.id]) nodeDataMap[n.id].title = n.title;
         });
 
-        // 4. Update stats
-        document.getElementById('stat-neurons').textContent = event.neurons;
-        document.getElementById('stat-synapses').textContent = event.synapses;
+        // 4. Trigger re-render
+        graph.graphData(currentData);
 
-        // 5. Animate new concepts with neurogenesis birth animation
+        // 5. Update stats
+        if (event.neurons != null) document.getElementById('stat-neurons').textContent = event.neurons;
+        if (event.synapses != null) document.getElementById('stat-synapses').textContent = event.synapses;
+
+        // 6. Animate new concepts
         if (newConcepts.length > 0) {
           handleActivation({
             type: 'activation',
@@ -1725,61 +1775,61 @@ function connectWS() {
           });
         }
 
-        // 6. Pulse changed nodes (staggered, after a short delay)
-        if (changedNodes.length > 0 && network) {
-          setTimeout(() => {
-            changedNodes.forEach((n, i) => {
-              setTimeout(() => {
-                if (nodesDS && nodesDS.get(n.id)) {
-                  const origNode = JSON.parse(JSON.stringify(nodesDS.get(n.id)));
-                  network.selectNodes([n.id]);
-                  if (i === 0) {
-                    network.focus(n.id, { scale: 1.5, animation: { duration: 800, easingFunction: 'easeInOutQuad' } });
-                  }
-                  nodesDS.update({ id: n.id, size: 30, borderWidth: 6, color: { background: '#f0883e', border: '#f0883e', highlight: { background: '#f0883e', border: '#f0883e' } }, font: { color: '#ffffff', size: 14 } });
-                  setTimeout(() => {
-                    network.unselectAll();
-                    nodesDS.remove(n.id);
-                    nodesDS.add(origNode);
-                  }, 2500);
-                }
-              }, i * 300);
-            });
-          }, 1500);
+        // 7. Pulse changed nodes
+        if (changedNodes.length > 0) {
+          changedNodes.forEach((n, i) => {
+            setTimeout(() => {
+              const node = currentData.nodes.find(x => x.id === n.id);
+              if (node) {
+                const origColor = node.color;
+                const origVal = node.val;
+                node.color = COLORS.activated;
+                node.val = (origVal || 10) * 2;
+                graph.graphData(currentData);
+                setTimeout(() => {
+                  node.color = origColor;
+                  node.val = origVal;
+                  graph.graphData(currentData);
+                }, 2500);
+              }
+            }, i * 300 + 1500);
+          });
         }
+
       } else if (event.type === 'node_update') {
-        // Lightweight update — patch changed nodes in existing DataSet, no rebuild
+        // Lightweight update — patch changed nodes
         console.log('Node update:', event.message);
         const changedNodes = event.changed_nodes || [];
         const deletedNodes = event.deleted_nodes || [];
 
+        if (!graph) return;
+        const currentData = graph.graphData();
+        const deletedSet = new Set(deletedNodes);
+
         // Delete removed nodes
-        deletedNodes.forEach(nid => {
-          if (nodesDS && nodesDS.get(nid)) {
-            nodesDS.remove(nid);
-          }
+        currentData.nodes = currentData.nodes.filter(n => !deletedSet.has(n.id));
+        currentData.links = currentData.links.filter(l => {
+          const ls = typeof l.source === 'object' ? l.source.id : l.source;
+          const lt = typeof l.target === 'object' ? l.target.id : l.target;
+          return !deletedSet.has(ls) && !deletedSet.has(lt);
         });
 
         // Update changed nodes with pulse
         changedNodes.forEach((n, i) => {
           setTimeout(() => {
-            if (nodesDS && nodesDS.get(n.id)) {
-              // Update label
-              nodesDS.update({ id: n.id, label: n.title });
-              // Select + zoom + flash
-              network.selectNodes([n.id]);
-              if (i === 0) {
-                network.focus(n.id, { scale: 1.5, animation: { duration: 800, easingFunction: 'easeInOutQuad' } });
-              }
-              // Save FULL original node for clean restore
-              const origNode = JSON.parse(JSON.stringify(nodesDS.get(n.id)));
-              // Flash: thick orange border + bigger
-              nodesDS.update({ id: n.id, size: 30, borderWidth: 6, color: { background: '#f0883e', border: '#f0883e', highlight: { background: '#f0883e', border: '#f0883e' } }, font: { color: '#ffffff', size: 14 } });
-              // Restore after 2.5s — remove + re-add to fully reset
+            const node = currentData.nodes.find(x => x.id === n.id);
+            if (node) {
+              node.name = n.title;
+              node._title = n.title;
+              const origColor = node.color;
+              const origVal = node.val;
+              node.color = COLORS.activated;
+              node.val = (origVal || 10) * 2;
+              graph.graphData(currentData);
               setTimeout(() => {
-                network.unselectAll();
-                nodesDS.remove(n.id);
-                nodesDS.add(origNode);
+                node.color = origColor;
+                node.val = origVal;
+                graph.graphData(currentData);
               }, 2500);
             }
           }, i * 300);
@@ -1796,59 +1846,70 @@ function connectWS() {
   ws.onerror = () => { ws.close(); };
 }
 
+// ============================================================================
 // Mobile tab switching
+// ============================================================================
 function switchTab(tabClass) {
   document.body.className = tabClass;
   document.querySelectorAll('#mobile-tabs .tab').forEach(t => t.classList.remove('active'));
   const labels = { 'graph-tab': 0, 'panel-tab': 1 };
   const tabs = document.querySelectorAll('#mobile-tabs .tab');
   if (tabs[labels[tabClass]]) tabs[labels[tabClass]].classList.add('active');
-  // Force vis.js to redraw when switching back to graph
-  if (tabClass === 'graph-tab' && network) setTimeout(() => network.redraw(), 50);
+  // force-graph auto-resizes, no redraw needed
 }
 
+// ============================================================================
 // Orphan nodes toggle
+// ============================================================================
 function toggleOrphans(show) {
-  if (!nodesDS || orphanNodeIds.length === 0) return;
+  showOrphans = show;
+  if (!graph) return;
+  const currentData = graph.graphData();
+  const currentIds = new Set(currentData.nodes.map(n => n.id));
+
   if (show) {
-    // Add orphan nodes to the graph
+    // Add orphan nodes
     orphanNodeIds.forEach(nid => {
-      if (!nodesDS.get(nid)) {
+      if (!currentIds.has(nid)) {
         const n = allGraphNodes.find(x => x.id === nid);
         if (n) {
-          nodesDS.add({
+          currentData.nodes.push({
             id: n.id,
-            label: n.title,
-            group: 'inactive',
-            color: { background: '#1c2128', border: '#30363d', highlight: { background: '#2d333b', border: '#444c56' } },
-            opacity: 0.5,
-            font: { size: 8, color: '#484f58' },
-            size: 8,
+            name: n.title,
+            color: '#1c2128',
+            val: 6,
+            _opacity: 0.5,
+            _shape: 'circle',
+            _dormant: false,
+            _tags: n.tags || '',
+            _title: n.title,
+            _path: n.path || '',
+            _text: n.text || '',
           });
-          allNodeIds.push(nid);
+          nodeTagColorMap[n.id] = '#1c2128';
         }
       }
     });
   } else {
-    // Remove orphan nodes from the graph
-    orphanNodeIds.forEach(nid => {
-      if (nodesDS.get(nid)) {
-        nodesDS.remove(nid);
-      }
-    });
-    allNodeIds = allNodeIds.filter(id => !orphanNodeIds.includes(id));
+    // Remove orphan nodes
+    const orphanSet = new Set(orphanNodeIds);
+    currentData.nodes = currentData.nodes.filter(n => !orphanSet.has(n.id));
   }
+
+  graph.graphData(currentData);
+
   // Update neuron count
   const el = document.getElementById('stat-neurons');
   if (el) el.textContent = show ? allGraphNodes.length : (allGraphNodes.length - orphanNodeIds.length);
 }
 
+// ============================================================================
 // Tag-based node coloring toggle
+// ============================================================================
 function toggleTagColors(enabled) {
   showTagColors = enabled;
   const legend = document.getElementById('tag-legend');
 
-  // Show/hide legend
   if (legend) {
     if (enabled && Object.keys(tagColorMap).length > 0) {
       const seen = new Set();
@@ -1862,11 +1923,9 @@ function toggleTagColors(enabled) {
             items.push('<span class="tag-item"><span class="tag-dot" style="background:' + color + '"></span>' + escapeHtml(tag) + '</span>');
           }
         });
-      // Preserve the collapse button
       const collapseBtn = '<button class="legend-collapse" onclick="toggleLegendCollapse()" title="Collapse legend">◀</button>';
       legend.innerHTML = collapseBtn + items.join('');
       legend.classList.remove('hidden');
-      // Restore collapsed state
       if (localStorage.getItem('bdh-legend-collapsed') === 'true') {
         legend.classList.add('collapsed');
       }
@@ -1875,31 +1934,37 @@ function toggleTagColors(enabled) {
     }
   }
 
-  if (!nodesDS || !allGraphNodes) return;
-  // Rebuild all node colors
-  allNodeIds.forEach(nid => {
-    const node = nodesDS.get(nid);
-    if (!node) return;
-    const n = allGraphNodes.find(x => x.id === nid);
-    if (!n) return;
-    let color = undefined;
+  if (!graph) return;
+  const currentData = graph.graphData();
+  currentData.nodes.forEach(node => {
+    const n = allGraphNodes.find(x => x.id === node.id);
+    if (!n || node._dormant) return;
     if (enabled && tagColorMap) {
-      const tags = (n.tags || '').replace(/^[\[\]]+|[\[\]]+$/g, '');
+      const rawTags = n.tags || '';
       let primaryTag = '';
-      if (Array.isArray(n.tags) && n.tags.length > 0) {
-        primaryTag = n.tags[0].replace(/^[\[\]]+|[\[\]]+$/g, '').trim();
-      } else if (typeof tags === 'string' && tags.trim()) {
-        primaryTag = tags.split(',')[0].trim();
+      if (Array.isArray(rawTags) && rawTags.length > 0) {
+        primaryTag = rawTags[0].replace(/^[\[\]]+|[\[\]]+$/g, '').trim();
+      } else if (typeof rawTags === 'string' && rawTags.trim()) {
+        primaryTag = rawTags.replace(/^[\[\]]+|[\[\]]+$/g, '').split(',')[0].trim();
       }
       if (primaryTag && tagColorMap[primaryTag]) {
-        color = { background: tagColorMap[primaryTag], border: tagColorMap[primaryTag], highlight: { background: tagColorMap[primaryTag], border: tagColorMap[primaryTag] } };
+        node.color = tagColorMap[primaryTag];
+        nodeTagColorMap[node.id] = tagColorMap[primaryTag];
+      } else {
+        node.color = COLORS.inactive;
+        nodeTagColorMap[node.id] = COLORS.inactive;
       }
+    } else {
+      node.color = COLORS.inactive;
+      nodeTagColorMap[node.id] = COLORS.inactive;
     }
-    nodesDS.update({ id: nid, color: color });
   });
+  graph.graphData(currentData);
 }
 
-// Direct-only toggle — hide Hebbian and phantom edges, show only wikilinks
+// ============================================================================
+// Edge filters — direct-only, Hebbian threshold, phantom toggle
+// ============================================================================
 function toggleDirectOnly(on) {
   directOnly = on;
   const thresholdCtrl = document.getElementById('threshold-control');
@@ -1907,27 +1972,24 @@ function toggleDirectOnly(on) {
   applyEdgeFilters();
 }
 
-// Hebbian weight threshold — hide edges below the threshold
 function updateHebbianThreshold(val) {
   hebbianThreshold = parseFloat(val);
   document.getElementById('threshold-val').textContent = val;
   applyEdgeFilters();
 }
 
-// Central edge filter — called by all toggles
 function applyEdgeFilters() {
-  if (!edgesDS) return;
-  allEdgeIds.forEach(eid => {
-    const edge = edgesDS.get(eid);
-    if (!edge) return;
-    const info = edgeInfoMap[eid] || {};
+  if (!graph) return;
+  const currentData = graph.graphData();
+  let visibleCount = 0;
+
+  currentData.links.forEach(link => {
+    const info = edgeInfoMap[link._id] || {};
     let visible = true;
 
     if (directOnly) {
-      // In direct-only mode, hide everything that isn't a wikilink
       visible = info.type === 'wikilink';
     } else {
-      // Filter by type
       if (info.type === 'hebbian') {
         visible = (info.weight || 0) >= hebbianThreshold;
       } else if (info.type === 'phantom') {
@@ -1935,107 +1997,72 @@ function applyEdgeFilters() {
       }
     }
 
-    edgesDS.update({ id: eid, hidden: !visible });
+    link._visible = visible;
+    if (visible) visibleCount++;
   });
 
+  graph.graphData(currentData);
+
   // Update visible synapse count
-  const visibleEdges = allEdgeIds.filter(eid => {
-    const e = edgesDS.get(eid);
-    return e && !e.hidden;
-  }).length;
   const synEl = document.getElementById('stat-synapses');
-  if (synEl) synEl.textContent = visibleEdges;
+  if (synEl) synEl.textContent = visibleCount;
 }
 
-// Phantom edges toggle
 function togglePhantom(on) {
   showPhantom = on;
   applyEdgeFilters();
 }
 
-// Console-tunable edge length multiplier — paste in browser console: setEdgeLengthMultiplier(20)
-let edgeLengthMultiplier = 10;  // default: 10px per degree unit
-const BASE_LENGTH = 80;
+// ============================================================================
+// Edge length multiplier — d3Force link distance
+// ============================================================================
 function setEdgeLengthMultiplier(m) {
   edgeLengthMultiplier = m;
-  // Sync slider UI
   const slider = document.getElementById('edge-length-slider');
   const valEl = document.getElementById('el-val');
   if (slider) slider.value = m;
   if (valEl) valEl.textContent = m;
 
-  // Scale node sizes proportionally to edge length
-  const maxDeg = Math.max(1, ...Object.values(degreeMap));
-  const nodeScale = 0.5 + (m / 50);  // m=0→0.5x, m=50→1.5x, m=100→2.5x
-  const MIN_SIZE = 10, MAX_SIZE = 40;
-  allNodeIds.forEach(nid => {
-    const deg = degreeMap[nid] || 0;
-    const baseSize = MIN_SIZE + (deg / maxDeg) * (MAX_SIZE - MIN_SIZE);
-    const scaledSize = Math.max(6, baseSize * nodeScale);
-    // Preserve tag color when updating size
-    const n = allGraphNodes.find(x => x.id === nid);
-    const color = nodeTagColorMap[nid] || null;
-    if (nodesDS.get(nid)) {
-      nodesDS.update({
-        id: nid,
-        size: scaledSize,
-        color: color || undefined,
-      });
-    }
-  });
+  if (graph) {
+    // Map 0-100 to link distance 50-500
+    const distance = 50 + m * 4.5;
+    graph.d3Force('link').distance(distance);
+    // Re-heat simulation
+    graph.d3ReheatSimulation();
+  }
 
-  if (!edgesDS || !degreeMap) return;
-  // Update all edge lengths live
-  allEdgeIds.forEach(eid => {
-    const parts = eid.replace('hebb_', '').replace('phantom_', '').split('→');
-    const degA = degreeMap[parts[0]] || 0;
-    const degB = degreeMap[parts[1]] || 0;
-    const newLen = BASE_LENGTH + ((degA + degB) / 2) * m;
-    if (edgesDS.get(eid)) {
-      edgesDS.update({ id: eid, length: newLen });
-    }
-  });
-  console.log(`Edge length: ${m}, node scale: ${nodeScale.toFixed(2)}x`);
+  // Scale node sizes proportionally
+  if (graph) {
+    const currentData = graph.graphData();
+    const maxDeg = Math.max(1, ...Object.values(degreeMap));
+    const nodeScale = 0.5 + (m / 50);
+    const MIN_VAL = 4, MAX_VAL = 40;
+    currentData.nodes.forEach(node => {
+      const deg = degreeMap[node.id] || 0;
+      node.val = Math.max(2, (MIN_VAL + (deg / maxDeg) * (MAX_VAL - MIN_VAL)) * nodeScale);
+    });
+    graph.graphData(currentData);
+  }
+
+  console.log(`Edge length: ${m}, node scale: ${(0.5 + m / 50).toFixed(2)}x`);
 }
 
-// Console command: setNodeSize(min, max) — change node size range live
-function setNodeSize(min, max) {
-  if (!nodesDS || !degreeMap) return;
-  const maxDeg = Math.max(1, ...Object.values(degreeMap));
-  const nodeScale = 0.5 + (edgeLengthMultiplier / 50);
-  allNodeIds.forEach(nid => {
-    const deg = degreeMap[nid] || 0;
-    const baseSize = min + (deg / maxDeg) * (max - min);
-    const scaledSize = Math.max(min * 0.6, baseSize * nodeScale);
-    const color = nodeTagColorMap[nid] || null;
-    if (nodesDS.get(nid)) {
-      nodesDS.update({ id: nid, size: scaledSize, color: color || undefined });
-    }
-  });
-  console.log(`Node size range: ${min}-${max}px, scale: ${nodeScale.toFixed(2)}x`);
-}
-
-// Network spacing slider — live-tune physics repulsion & spring length
+// ============================================================================
+// Network spacing — d3Force charge strength
+// ============================================================================
 function updateSpacing(val) {
   const t = parseInt(val) / 100; // 0..1
-  // Map: 0=dense (gravity -2000, spring 80) → 1=sparse (gravity -12000, spring 400)
-  const gravity = Math.round(-2000 - t * 10000);
-  const spring = Math.round(80 + t * 320);
-  const springK = Math.max(0.005, 0.04 - t * 0.035);
-  if (network) {
-    network.setOptions({
-      physics: {
-        barnesHut: {
-          gravitationalConstant: gravity,
-          springLength: spring,
-          springConstant: springK,
-        }
-      }
-    });
+  // Map: 0=dense (charge -200) → 1=sparse (charge -1200)
+  const chargeStrength = Math.round(-200 - t * 1000);
+  if (graph) {
+    graph.d3Force('charge').strength(chargeStrength);
+    graph.d3ReheatSimulation();
   }
 }
 
-// Legend collapse toggle (slide to left edge)
+// ============================================================================
+// Legend collapse toggle
+// ============================================================================
 function toggleLegendCollapse() {
   const legend = document.getElementById('tag-legend');
   if (!legend) return;
@@ -2043,92 +2070,99 @@ function toggleLegendCollapse() {
   localStorage.setItem('bdh-legend-collapsed', legend.classList.contains('collapsed'));
 }
 
-// Click on collapsed legend tab to expand
 document.getElementById('tag-legend').addEventListener('click', function(e) {
   if (this.classList.contains('collapsed') && e.target === this) {
     toggleLegendCollapse();
   }
 });
 
-// Enter key sends query
+// ============================================================================
+// Query input
+// ============================================================================
 document.getElementById('query-input').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') sendQuery();
 });
 
-// Clear button visibility + clearQuery
 const qInput = document.getElementById('query-input');
 const qClear = document.getElementById('query-clear');
 function updateClearBtn() { qClear.classList.toggle('visible', qInput.value.length > 0); }
 qInput.addEventListener('input', updateClearBtn);
 function clearQuery() { qInput.value = ''; updateClearBtn(); qInput.focus(); }
 
-// Full reset — clears results and restores graph to pre-query state
+// ============================================================================
+// Reset — clears results and restores graph to pre-query state
+// ============================================================================
 function resetQuery() {
-  // Clear input + UI
   qInput.value = '';
   updateClearBtn();
   document.getElementById('response-text').textContent = '—';
   document.getElementById('activated-list').innerHTML = '<div class="empty">No activations yet</div>';
 
-  // Restore all nodes to original tag colors + full opacity
-  if (nodesDS) {
-    allNodeIds.forEach(id => {
-      const node = nodesDS.get(id);
-      if (!node) return;
-      const tagColor = nodeTagColorMap[id];
-      nodesDS.update({ id, color: tagColor || undefined, opacity: 1.0, group: 'inactive' });
+  if (graph) {
+    const currentData = graph.graphData();
+    currentData.nodes.forEach(node => {
+      node._opacity = 1.0;
+      node.color = nodeTagColorMap[node.id] || COLORS.inactive;
     });
-  }
-
-  // Restore all edges to full opacity
-  if (edgesDS) {
-    allEdgeIds.forEach(eid => {
-      const edge = edgesDS.get(eid);
-      if (edge) edgesDS.update({ id: eid, opacity: 1.0 });
+    currentData.links.forEach(link => {
+      link._visible = true;
+      link.particles = 0;
     });
+    graph.graphData(currentData);
+    applyEdgeFilters();
   }
 }
 
-// ======== ZOOM CONTROLS ========
+// ============================================================================
+// Zoom controls
+// ============================================================================
 const ZOOM_MIN = 0.1;
 const ZOOM_MAX = 4;
 const zoomSlider = document.getElementById('zoom-slider');
 const zoomLabel = document.getElementById('zoom-value');
 
 function syncZoomUI() {
-  if (!network) return;
-  const s = network.getScale();
+  if (!graph) return;
+  const s = graph.zoom();
   zoomSlider.value = s;
   zoomLabel.textContent = Math.round(s * 100) + '%';
 }
 
 function zoomTo(val) {
-  if (!network) return;
+  if (!graph) return;
   const s = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, parseFloat(val)));
-  network.moveTo({ scale: s });
+  graph.zoom(s);
   syncZoomUI();
 }
 
 function zoomStep(delta) {
-  if (!network) return;
-  const cur = network.getScale();
-  zoomTo(cur + delta);
+  if (!graph) return;
+  zoomTo(graph.zoom() + delta);
 }
 
 function fitToScreen() {
-  if (!network) return;
-  network.fit({ animation: { duration: 300, easingFunction: 'easeInOutQuad' } });
+  if (!graph) return;
+  graph.zoomToFit(300, 60);
   setTimeout(syncZoomUI, 350);
 }
 
-// Keep slider in sync when user zooms via scroll wheel or pinch
-function watchZoom() {
-  if (!network) return;
-  network.on('zoom', syncZoomUI);
-  network.on('animationFinished', syncZoomUI);
+// Poll zoom value to keep slider in sync (force-graph has no zoom event)
+function startZoomPoll() {
+  if (zoomPollTimer) clearInterval(zoomPollTimer);
+  zoomPollTimer = setInterval(() => {
+    if (graph) {
+      const s = graph.zoom();
+      if (Math.abs(parseFloat(zoomSlider.value) - s) > 0.01) {
+        zoomSlider.value = s;
+        zoomLabel.textContent = Math.round(s * 100) + '%';
+      }
+    }
+  }, 200);
 }
 
-// ======== PANEL RESIZE & COLLAPSE ========
+// ============================================================================
+// Panel resize & collapse
+// ============================================================================
 const PANEL_WIDTH_KEY = 'bdh-panel-width';
 const PANEL_COLLAPSED_KEY = 'bdh-panel-collapsed';
 const sidePanel = document.getElementById('side-panel');
@@ -2155,14 +2189,12 @@ function restorePanelState() {
   }
 }
 
-// Drag to resize
 panelResize.addEventListener('mousedown', (e) => {
   e.preventDefault();
   isResizing = true;
   panelResize.classList.add('dragging');
   document.body.style.cursor = 'col-resize';
   document.body.style.userSelect = 'none';
-  document.getElementById('graph-container').style.pointerEvents = 'none';
 });
 
 document.addEventListener('mousemove', (e) => {
@@ -2170,7 +2202,6 @@ document.addEventListener('mousemove', (e) => {
   const mainRect = document.getElementById('main').getBoundingClientRect();
   const handleX = e.clientX - mainRect.left;
   const totalW = mainRect.width;
-  // sidePanel width = total - handleX
   let panelPct = ((totalW - handleX) / totalW) * 100;
   panelPct = Math.max(15, Math.min(60, panelPct));
   sidePanel.style.width = panelPct + '%';
@@ -2182,9 +2213,7 @@ document.addEventListener('mouseup', () => {
   panelResize.classList.remove('dragging');
   document.body.style.cursor = '';
   document.body.style.userSelect = '';
-  document.getElementById('graph-container').style.pointerEvents = '';
   savePanelWidth();
-  if (network) setTimeout(() => network.redraw(), 10);
 });
 
 function togglePanel() {
@@ -2192,13 +2221,19 @@ function togglePanel() {
   const collapsed = document.body.classList.contains('panel-collapsed');
   if (collapseBtn) collapseBtn.textContent = collapsed ? '◂' : '▸';
   localStorage.setItem(PANEL_COLLAPSED_KEY, collapsed);
-  if (network) setTimeout(() => network.redraw(), 10);
 }
 
+// ============================================================================
+// Window resize — force-graph auto-resizes to container
+// ============================================================================
+window.addEventListener('resize', () => {
+  // force-graph handles resize automatically via its container
+});
+
+// ============================================================================
 // Init
+// ============================================================================
 restorePanelWidth();
 restorePanelState();
 connectWS();
 </script>
-</body>
-</html>
