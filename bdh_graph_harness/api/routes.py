@@ -10,12 +10,13 @@ aiohttp ``Application``.
 
 import asyncio
 import json
+import os
 from datetime import datetime
 
 from aiohttp import web
 
 from bdh_graph_harness.config import CONFIG, logger
-from bdh_graph_harness.visualization import render_viz_html
+from bdh_graph_harness.visualization import render_viz_html, get_template_path
 from bdh_graph_harness.retrieval.attention import attention
 from bdh_graph_harness.memory import hebbian_update, save_state
 from bdh_graph_harness.memory.consolidation import consolidate, consolidation_stats
@@ -783,6 +784,11 @@ def setup_routes(app: web.Application, app_state: dict, ws_clients: set) -> None
 
     app.router.add_get('/', _index)
     app.router.add_get('/ws', _ws)
+
+    # Serve static files (CSS, JS) from the templates directory
+    templates_dir = os.path.dirname(get_template_path())
+    app.router.add_static('/static', templates_dir, show_index=False)
+
     app.router.add_get('/api/stats', _stats)
     app.router.add_get('/api/graph', _graph)
     app.router.add_get('/api/hebbian', _hebbian)
