@@ -1076,29 +1076,35 @@ function clearHoverEdge(redraw = true) {
 }
 
 function hoverAwareLinkColor(link) {
-  const actVisible = linkActivationVisible.get(linkKey(link));
+  const key = linkKey(link);
+  const actVisible = linkActivationVisible.get(key);
   if (actVisible === false) return 'rgba(0,0,0,0)';
+  const mapColor = linkActivationColor.get(key);
+  if (mapColor) return mapColor;
   if (isHoverEdge(link)) return COLORS.edgeHebbianPulse;
   if (!isHoverActive()) return link.color;
-  // Keep non-highlighted edges visible as a gray topology layer, not hidden.
   return isHoverLink(link) ? COLORS.edgeHebbianPulse : 'rgba(139,148,158,0.62)';
 }
 
 function hoverAwareLinkWidth(link) {
-  const actVisible = linkActivationVisible.get(linkKey(link));
+  const key = linkKey(link);
+  const actVisible = linkActivationVisible.get(key);
   if (actVisible === false) return 0;
-  const baseWidth = link.width || 1;
+  const mapWidth = linkWidthState.get(key);
+  const baseWidth = mapWidth != null ? mapWidth : (link.width || 1);
   if (isHoverEdge(link)) return Math.max(baseWidth * 2.4, 2.8);
   if (!isHoverActive()) return baseWidth;
   return isHoverLink(link) ? Math.max(baseWidth * 2.2, 2.5) : Math.max(baseWidth * 0.85, 0.75);
 }
 
 function hoverAwareParticles(link) {
+  const key = linkKey(link);
   if (link._visible === false) return 0;
-  if (linkActivationVisible.get(linkKey(link)) === false) return 0;
-  if (isHoverEdge(link)) return Math.max(link.particles || 0, 2);
-  if (isHoverLink(link) && hoverHighlight && link._id === hoverHighlight.hoverLinkId) return Math.max(link.particles || 0, 2);
-  return link.particles || 0;
+  if (linkActivationVisible.get(key) === false) return 0;
+  const mapParticles = linkParticlesState.get(key) || 0;
+  if (isHoverEdge(link)) return Math.max(mapParticles || link.particles || 0, 2);
+  if (isHoverLink(link) && hoverHighlight && link._id === hoverHighlight.hoverLinkId) return Math.max(mapParticles || link.particles || 0, 2);
+  return mapParticles || link.particles || 0;
 }
 
 // ============================================================================
@@ -1478,7 +1484,10 @@ function initNetwork(graphData) {
     .linkDirectionalParticles(hoverAwareParticles)
     .linkDirectionalParticleSpeed(0.006)
     .linkDirectionalParticleWidth(2)
-    .linkDirectionalParticleColor(link => link.particleColor || link.color)
+    .linkDirectionalParticleColor(link => {
+      const key = linkKey(link);
+      return linkParticleColorState.get(key) || link.particleColor || link.color;
+    })
     .warmupTicks(100)
     .cooldownTime(30000)
     .autoPauseRedraw(false)
@@ -1622,18 +1631,26 @@ function setGraphDataPreservingView(data, opts = {}) {
   if (!graph) return;
   const center = typeof graph.centerAt === 'function' ? graph.centerAt() : null;
   const zoom = typeof graph.zoom === 'function' ? graph.zoom() : null;
-  // force-graph mutates node/link objects internally (source/target become node
-  // objects, physics writes x/y/vx/vy). Re-submitting the live graph.graphData()
-  // objects after a query can crash WebKit/Safari with "Attempted to assign to
-  // readonly property" inside the simulation tick. Always hand force-graph a
-  // fresh, plain-object graph and normalize link endpoints back to ids.
+  // Build a fresh graph. NEVER spread force-graph internal objects — their
+  // properties may have non-writable descriptors that crash in Safari/WebKit.
   const safeData = {
-    nodes: (data.nodes || []).map(node => ({ ...node })),
-    links: (data.links || []).map(link => ({
-      ...link,
-      source: typeof link.source === 'object' ? link.source.id : link.source,
-      target: typeof link.target === 'object' ? link.target.id : link.target,
+    nodes: (data.nodes || []).map(node => ({
+      id: node.id, name: node.name, color: node.color, val: node.val,
+      _opacity: node._opacity, _shape: node._shape, _dormant: node._dormant,
+      _tags: node._tags, _title: node._title, _path: node._path, _text: node._text,
+      _hidden: node._hidden,
     })),
+    links: (data.links || []).map(link => {
+      const s = typeof link.source === 'object' ? link.source.id : link.source;
+      const t = typeof link.target === 'object' ? link.target.id : link.target;
+      return {
+        source: s, target: t,
+        color: link.color, width: link.width, type: link.type,
+        particles: link.particles, _id: link._id, _visible: link._visible,
+        _dashes: link._dashes, weight: link.weight, frequency: link.frequency,
+        particleColor: link.particleColor,
+      };
+    }),
   };
   graph.graphData(safeData);
   if (opts.reheat && typeof graph.d3ReheatSimulation === 'function') graph.d3ReheatSimulation();
@@ -1652,12 +1669,18 @@ const nodeActivationOpacity = new Map(); // nodeId → opacity
 const nodeActivationColor = new Map();   // nodeId → color string
 const linkActivationVisible = new Map(); // linkKey → bool
 const linkActivationColor = new Map();   // linkKey → color string
+const linkParticlesState = new Map();    // linkKey → number
+const linkParticleColorState = new Map();// linkKey → color string
+const linkWidthState = new Map();        // linkKey → number
 
 function clearActivationState() {
   nodeActivationOpacity.clear();
   nodeActivationColor.clear();
   linkActivationVisible.clear();
   linkActivationColor.clear();
+  linkParticlesState.clear();
+  linkParticleColorState.clear();
+  linkWidthState.clear();
 }
 
 // ============================================================================
@@ -1705,8 +1728,6 @@ function handleActivation(event) {
 
   // Pulse Hebbian synapses that were strengthened in this query
   const hebbianUpdates = event.hebbian_updates || [];
-  // Collect new Hebbian links to add in a single batch
-  const newHebbLinks = [];
 
   hebbianUpdates.forEach((h, idx) => {
     const parts = h.pair.split('|');
@@ -1714,7 +1735,7 @@ function handleActivation(event) {
     const [a, b] = parts;
     hebbianMap[h.pair] = h.weight;
 
-    // Find the Hebbian link
+    // Find the Hebbian link in current graph data
     const targetLink = currentData.links.find(l => {
       const ls = linkEndpointId(l.source);
       const lt = linkEndpointId(l.target);
@@ -1724,87 +1745,87 @@ function handleActivation(event) {
     const delay = idx * 120;
     const newWidth = Math.min(1 + h.weight * 3, 5);
 
-    if (targetLink) {
-      // Pulse: set particles, widen, brighten, then settle
-      setTimeout(() => {
-        targetLink.particles = 4;
-        targetLink.particleColor = COLORS.edgeHebbianPulse;
-        targetLink.color = COLORS.edgeHebbianPulse;
-        targetLink.width = newWidth + 5;
-        const key = linkKey(targetLink);
-        linkActivationVisible.set(key, true);
-        requestGraphRedraw();
-      }, delay);
-
-      setTimeout(() => {
-        targetLink.width = newWidth + 3;
-        requestGraphRedraw();
-      }, delay + 600);
-
-      setTimeout(() => {
-        targetLink.width = newWidth + 1.5;
-        targetLink.color = weightColor(h.weight);
-        requestGraphRedraw();
-      }, delay + 1400);
-
-      setTimeout(() => {
-        targetLink.width = newWidth;
-        targetLink.particles = 0;
-        targetLink.color = weightColor(h.weight);
-        // Re-apply edge filters
-        applyEdgeFilters();
-      }, delay + 2500);
-    } else if (activatedIds.has(a) || activatedIds.has(b)) {
-      // New Hebbian synapse — collect for batch add
+    // New Hebbian link that doesn't exist yet — add via graph data rebuild
+    if (!targetLink && (activatedIds.has(a) || activatedIds.has(b))) {
       const eid = 'hebb_' + a + '→' + b;
       const srcTitle = (nodeDataMap[a] || {}).title || a;
       const tgtTitle = (nodeDataMap[b] || {}).title || b;
       edgeInfoMap[eid] = { source_title: srcTitle, target_title: tgtTitle, type: 'hebbian', weight: h.weight, frequency: h.frequency };
-      newHebbLinks.push({
-        source: a,
-        target: b,
-        color: COLORS.edgeHebbianPulse,
-        width: newWidth + 5,
-        type: 'hebbian',
-        weight: h.weight,
-        frequency: h.frequency,
-        particles: 4,
-        particleColor: COLORS.edgeHebbianPulse,
-        _id: eid,
-        _visible: true,
-      });
 
-      // Settle animation
+      // Add via setGraphDataPreservingView (creates fresh link, no readonly issues)
+      const newData = {
+        nodes: currentData.nodes.map(n => ({ id: n.id, name: n.name, color: n.color, val: n.val, _opacity: n._opacity, _shape: n._shape, _dormant: n._dormant, _tags: n._tags, _title: n._title, _path: n._path, _text: n._text, _hidden: n._hidden })),
+        links: [...currentData.links.map(l => ({
+          source: linkEndpointId(l.source), target: linkEndpointId(l.target),
+          color: l.color, width: l.width, type: l.type, particles: l.particles,
+          _id: l._id, _visible: l._visible, _dashes: l._dashes,
+          weight: l.weight, frequency: l.frequency, particleColor: l.particleColor,
+        })), {
+          source: a, target: b,
+          color: COLORS.edgeHebbianPulse, width: newWidth + 5,
+          type: 'hebbian', weight: h.weight, frequency: h.frequency,
+          particles: 4, particleColor: COLORS.edgeHebbianPulse,
+          _id: eid, _visible: true,
+        }],
+      };
+      setGraphDataPreservingView(newData, { reheat: true });
+
+      // Settle animation via Maps
       setTimeout(() => {
-        const liveLink = currentData.links.find(l => l._id === eid);
-        if (!liveLink) return;
-        liveLink.width = newWidth + 3;
+        linkWidthState.set(eid, newWidth + 3);
+        linkActivationVisible.set(eid, true);
+        linkActivationColor.set(eid, COLORS.edgeHebbianPulse);
         requestGraphRedraw();
       }, delay + 600);
       setTimeout(() => {
-        const liveLink = currentData.links.find(l => l._id === eid);
-        if (!liveLink) return;
-        liveLink.width = newWidth + 1.5;
-        liveLink.color = weightColor(h.weight);
+        linkWidthState.set(eid, newWidth + 1.5);
+        linkActivationColor.set(eid, weightColor(h.weight));
         requestGraphRedraw();
       }, delay + 1400);
       setTimeout(() => {
-        const liveLink = currentData.links.find(l => l._id === eid);
-        if (!liveLink) return;
-        liveLink.width = newWidth;
-        liveLink.particles = 0;
-        liveLink.color = weightColor(h.weight);
+        linkWidthState.delete(eid);
+        linkParticlesState.delete(eid);
+        linkParticleColorState.delete(eid);
+        linkActivationColor.delete(eid);
         applyEdgeFilters();
       }, delay + 2500);
+      return;
     }
-  });
 
-  // Batch-add new Hebbian links to live graph data
-  if (newHebbLinks.length > 0) {
-    const liveData = graph.graphData();
-    newHebbLinks.forEach(link => liveData.links.push(link));
-    requestGraphRedraw();
-  }
+    if (!targetLink) return;
+
+    const key = linkKey(targetLink);
+
+    // Pulse: use Maps for particles/width/color
+    setTimeout(() => {
+      linkParticlesState.set(key, 4);
+      linkParticleColorState.set(key, COLORS.edgeHebbianPulse);
+      linkActivationColor.set(key, COLORS.edgeHebbianPulse);
+      linkWidthState.set(key, newWidth + 5);
+      linkActivationVisible.set(key, true);
+      requestGraphRedraw();
+    }, delay);
+
+    setTimeout(() => {
+      linkWidthState.set(key, newWidth + 3);
+      requestGraphRedraw();
+    }, delay + 600);
+
+    setTimeout(() => {
+      linkWidthState.set(key, newWidth + 1.5);
+      linkActivationColor.set(key, weightColor(h.weight));
+      requestGraphRedraw();
+    }, delay + 1400);
+
+    setTimeout(() => {
+      linkWidthState.delete(key);
+      linkParticlesState.delete(key);
+      linkParticleColorState.delete(key);
+      linkActivationColor.delete(key);
+      // Re-apply edge filters
+      applyEdgeFilters();
+    }, delay + 2500);
+  });
 
   // Reset activation state after all Hebbian settle animations finish
   const activationTimeoutMs = Math.max(5000, (hebbianUpdates.length - 1) * 120 + 3000);
@@ -1828,80 +1849,98 @@ function handleActivation(event) {
   }
 
   // Add new concept nodes (neurogenesis) with birth animation
+  // Build fresh graph with new nodes — never mutate live data.
   const newConcepts = event.new_concepts || [];
-  newConcepts.forEach((nc, ncIdx) => {
-    if (nc.id && !nodeDataMap[nc.id]) {
-      const ncNode = { id: nc.id, title: nc.title || nc.id, tags: 'neurogenesis', text: nc.definition || '', path: '' };
-      nodeDataMap[nc.id] = ncNode;
-      nodeTagColorMap[nc.id] = COLORS.neurogenesis;
-      neurogenesisNodes[nc.id] = { title: nc.title || nc.id };
-      totalConcepts++;
+  if (newConcepts.length > 0) {
+    // Clone current graph
+    const freshNodes = currentData.nodes.map(n => ({
+      id: n.id, name: n.name, color: n.color, val: n.val,
+      _opacity: n._opacity, _shape: n._shape, _dormant: n._dormant,
+      _tags: n._tags, _title: n._title, _path: n._path, _text: n._text,
+      _hidden: n._hidden,
+    }));
+    const freshLinks = currentData.links.map(l => ({
+      source: linkEndpointId(l.source), target: linkEndpointId(l.target),
+      color: l.color, width: l.width, type: l.type,
+      particles: l.particles, _id: l._id, _visible: l._visible,
+      _dashes: l._dashes, weight: l.weight, frequency: l.frequency,
+      particleColor: l.particleColor,
+    }));
+    const nodeMap = new Map(freshNodes.map(n => [n.id, n]));
 
-      // Add to graph data
-      const newNode = {
-        id: nc.id,
-        name: nc.title || nc.id.split('/').pop(),
-        color: COLORS.neurogenesis,
-        val: 20,
-        _opacity: 1.0,
-        _shape: 'diamond',
-        _dormant: false,
-        _tags: 'neurogenesis',
-        _title: nc.title || nc.id,
-        _path: '',
-        _text: nc.definition || '',
-      };
-      currentData.nodes.push(newNode);
+    newConcepts.forEach((nc, ncIdx) => {
+      if (nc.id && !nodeDataMap[nc.id]) {
+        const ncNode = { id: nc.id, title: nc.title || nc.id, tags: 'neurogenesis', text: nc.definition || '', path: '' };
+        nodeDataMap[nc.id] = ncNode;
+        nodeTagColorMap[nc.id] = COLORS.neurogenesis;
+        neurogenesisNodes[nc.id] = { title: nc.title || nc.id };
+        totalConcepts++;
 
-      // Birth pulse animation
-      const birthDelay = ncIdx * 200;
-      setTimeout(() => {
-        const liveNode = currentData.nodes.find(n => n.id === nc.id) || newNode;
-        liveNode.val = 40;
-        currentData = setGraphDataPreservingView(currentData, { reheat: true }) || currentData;
-      }, birthDelay);
-      setTimeout(() => {
-        const liveNode = currentData.nodes.find(n => n.id === nc.id);
-        if (!liveNode) return;
-        liveNode.val = 30;
-        requestGraphRedraw();
-      }, birthDelay + 300);
-      setTimeout(() => {
-        const liveNode = currentData.nodes.find(n => n.id === nc.id);
-        if (!liveNode) return;
-        liveNode.val = 20;
-        requestGraphRedraw();
-      }, birthDelay + 600);
+        // Add node and edges to fresh graph (not live data)
+        const birthDelay = ncIdx * 200;
+        const newNode = {
+          id: nc.id,
+          name: nc.title || nc.id.split('/').pop(),
+          color: COLORS.neurogenesis,
+          val: 40,  // start large for birth pulse
+          _opacity: 1.0,
+          _shape: 'diamond',
+          _dormant: false,
+          _tags: 'neurogenesis',
+          _title: nc.title || nc.id,
+          _path: '',
+          _text: nc.definition || '',
+        };
+        nodeMap.set(nc.id, newNode);
+        freshNodes.push(newNode);
 
-      // Add edges to source notes
-      const sources = nc.source_notes || [];
-      sources.forEach((srcTitle, srcIdx) => {
-        const srcNode = allGraphNodes.find(n => n.title === srcTitle);
-        if (srcNode) {
-          const eid = nc.id + '→' + srcNode.id;
-          const newLink = {
-            source: nc.id,
-            target: srcNode.id,
-            color: COLORS.edgeNeurogenesis,
-            width: 2,
-            type: 'neurogenesis',
-            particles: 0,
-            _id: eid,
-            _visible: true,
-            _dashes: true,
+        // Add edges to source notes
+        const sources = nc.source_notes || [];
+        sources.forEach((srcTitle, srcIdx) => {
+          const srcNode = allGraphNodes.find(n => n.title === srcTitle);
+          if (srcNode) {
+            const eid = nc.id + '→' + srcNode.id;
+            edgeInfoMap[eid] = { source_title: nc.title || nc.id, target_title: srcTitle, type: 'neurogenesis' };
+            freshLinks.push({
+              source: nc.id,
+              target: srcNode.id,
+              color: COLORS.edgeNeurogenesis,
+              width: 2,
+              type: 'neurogenesis',
+              particles: 0,
+              _id: eid,
+              _visible: true,
+              _dashes: true,
+            });
+          }
+        });
+
+        // Birth pulse animation: shrink node via Maps
+        setTimeout(() => {
+          const liveNode = nodeMap.get(nc.id);
+          if (liveNode) liveNode.val = 30;
+          // Rebuild with the smaller val
+          const updated = {
+            nodes: freshNodes.map(n => ({...n})),
+            links: freshLinks.map(l => ({...l})),
           };
-          edgeInfoMap[eid] = { source_title: nc.title || nc.id, target_title: srcTitle, type: 'neurogenesis' };
-          setTimeout(() => {
-            currentData.links.push(newLink);
-            currentData = setGraphDataPreservingView(currentData, { reheat: true }) || currentData;
-          }, birthDelay + 400 + srcIdx * 150);
-        }
-      });
+          setGraphDataPreservingView(updated, { reheat: true });
+        }, birthDelay + 300);
 
-      const cEl = document.getElementById('stat-concepts');
-      if (cEl) { cEl.textContent = totalConcepts; cEl.style.color = '#3fb950'; setTimeout(() => { cEl.style.color = ''; }, 1500); }
-    }
-  });
+        setTimeout(() => {
+          const liveNode = nodeMap.get(nc.id);
+          if (liveNode) liveNode.val = 20;
+          requestGraphRedraw();
+        }, birthDelay + 600);
+
+        const cEl = document.getElementById('stat-concepts');
+        if (cEl) { cEl.textContent = totalConcepts; cEl.style.color = '#3fb950'; setTimeout(() => { cEl.style.color = ''; }, 1500); }
+      }
+    });
+
+    // Submit all new nodes/links at once
+    setGraphDataPreservingView({ nodes: freshNodes, links: freshLinks }, { reheat: true });
+  }
 
   // Update stats
   document.getElementById('stat-last').textContent = event.query || '—';
@@ -2034,7 +2073,9 @@ function connectWS() {
       } else if (event.type === 'activation') {
         handleActivation(event);
       } else if (event.type === 'graph_refresh') {
-        // Delta update: add/remove nodes and links immutably
+        // Delta update: build a fresh graph and submit all at once.
+        // NEVER mutate live graph.graphData() objects — force-graph marks
+        // internal properties as non-writable and mutations crash in Safari.
         console.log('Graph refresh (delta):', event.message);
         const changedNodes = event.changed_nodes || [];
         const newConcepts = event.new_concepts || [];
@@ -2045,12 +2086,25 @@ function connectWS() {
         const currentData = graph.graphData();
         const deletedSet = new Set(deletedNodes);
 
-        // 1. Remove deleted nodes and their links
-        currentData.nodes = currentData.nodes.filter(n => !deletedSet.has(n.id));
-        currentData.links = currentData.links.filter(l => {
-          const ls = typeof l.source === 'object' ? l.source.id : l.source;
-          const lt = typeof l.target === 'object' ? l.target.id : l.target;
-          if (deletedSet.has(ls) || deletedSet.has(lt)) {
+        // Build a fresh, independent copy of the current graph
+        const freshNodes = currentData.nodes.map(n => ({
+          id: n.id, name: n.name, color: n.color, val: n.val,
+          _opacity: n._opacity, _shape: n._shape, _dormant: n._dormant,
+          _tags: n._tags, _title: n._title, _path: n._path, _text: n._text,
+          _hidden: n._hidden,
+        }));
+        const freshLinks = currentData.links.map(l => ({
+          source: linkEndpointId(l.source), target: linkEndpointId(l.target),
+          color: l.color, width: l.width, type: l.type,
+          particles: l.particles, _id: l._id, _visible: l._visible,
+          _dashes: l._dashes, weight: l.weight, frequency: l.frequency,
+          particleColor: l.particleColor,
+        }));
+
+        // 1. Remove deleted nodes and their links from fresh copies
+        const keepNodes = freshNodes.filter(n => !deletedSet.has(n.id));
+        const keepLinks = freshLinks.filter(l => {
+          if (deletedSet.has(l.source) || deletedSet.has(l.target)) {
             delete edgeInfoMap[l._id];
             return false;
           }
@@ -2069,7 +2123,7 @@ function connectWS() {
             const color = isNeurogenesis ? COLORS.neurogenesis : COLORS.inactive;
             nodeDataMap[nd.id] = nd;
             nodeTagColorMap[nd.id] = color;
-            currentData.nodes.push({
+            keepNodes.push({
               id: nd.id,
               name: nd.title || nd.id.split('/').pop(),
               color: color,
@@ -2090,7 +2144,7 @@ function connectWS() {
             const srcTitle = (nodeDataMap[e.source] || {}).title || e.source;
             const tgtTitle = (nodeDataMap[e.target] || {}).title || e.target;
             edgeInfoMap[eid] = { source_title: srcTitle, target_title: tgtTitle, type: 'wikilink' };
-            currentData.links.push({
+            keepLinks.push({
               source: e.source, target: e.target,
               color: COLORS.edgeWikilink, width: 0.5, type: 'wikilink',
               particles: 0, _id: eid, _visible: true,
@@ -2102,7 +2156,7 @@ function connectWS() {
             const srcTitle = (nodeDataMap[h.note_a] || {}).title || h.note_a;
             const tgtTitle = (nodeDataMap[h.note_b] || {}).title || h.note_b;
             edgeInfoMap[eid] = { source_title: srcTitle, target_title: tgtTitle, type: 'hebbian', weight: h.weight, frequency: h.frequency };
-            currentData.links.push({
+            keepLinks.push({
               source: h.note_a, target: h.note_b,
               color: weightColor(h.weight), width: Math.min(1 + h.weight * 3, 5),
               type: 'hebbian', weight: h.weight, frequency: h.frequency,
@@ -2113,7 +2167,7 @@ function connectWS() {
 
         // 3. Update changed node labels
         changedNodes.forEach(n => {
-          const existing = currentData.nodes.find(x => x.id === n.id);
+          const existing = keepNodes.find(x => x.id === n.id);
           if (existing) {
             existing.name = n.title;
             existing._title = n.title;
@@ -2121,8 +2175,8 @@ function connectWS() {
           if (nodeDataMap[n.id]) nodeDataMap[n.id].title = n.title;
         });
 
-        // 4. Apply structural delta without losing the current viewport
-        setGraphDataPreservingView(currentData, { reheat: true });
+        // 4. Submit the fresh, complete graph
+        setGraphDataPreservingView({ nodes: keepNodes, links: keepLinks }, { reheat: true });
 
         // 5. Update stats
         if (event.neurons != null) document.getElementById('stat-neurons').textContent = event.neurons;
@@ -2134,8 +2188,6 @@ function connectWS() {
         } else if (newConcepts.length > 0) {
           // Subtle birth pulse without wiping query activation
           newConcepts.forEach((nc, i) => {
-            const node = currentData.nodes.find(n => n.id === nc.id);
-            if (!node) return;
             setTimeout(() => {
               nodeActivationOpacity.set(nc.id, 1.0);
               nodeActivationColor.set(nc.id, COLORS.neurogenesis);
@@ -2151,29 +2203,25 @@ function connectWS() {
           });
         }
 
-        // 7. Pulse changed nodes
+        // 7. Pulse changed nodes — use activation Maps
         if (changedNodes.length > 0) {
           changedNodes.forEach((n, i) => {
             setTimeout(() => {
-              const node = currentData.nodes.find(x => x.id === n.id);
-              if (node) {
-                const origColor = node.color;
-                const origVal = node.val;
-                node.color = COLORS.activated;
-                node.val = (origVal || 10) * 2;
+              nodeActivationColor.set(n.id, COLORS.activated);
+              nodeActivationOpacity.set(n.id, 1.0);
+              requestGraphRedraw();
+              setTimeout(() => {
+                nodeActivationColor.delete(n.id);
+                const hasQuery = nodeActivationOpacity.size > 0 && [...nodeActivationOpacity.values()].some(o => o < 1);
+                nodeActivationOpacity.set(n.id, hasQuery ? 0.3 : 1.0);
                 requestGraphRedraw();
-                setTimeout(() => {
-                  node.color = origColor;
-                  node.val = origVal;
-                  requestGraphRedraw();
-                }, 2500);
-              }
+              }, 2500);
             }, i * 300 + 1500);
           });
         }
 
       } else if (event.type === 'node_update') {
-        // Lightweight update — patch changed nodes
+        // Lightweight update — build fresh graph, no mutation of live data
         console.log('Node update:', event.message);
         const changedNodes = event.changed_nodes || [];
         const deletedNodes = event.deleted_nodes || [];
@@ -2182,36 +2230,52 @@ function connectWS() {
         const currentData = graph.graphData();
         const deletedSet = new Set(deletedNodes);
 
-        // Delete removed nodes
-        currentData.nodes = currentData.nodes.filter(n => !deletedSet.has(n.id));
-        currentData.links = currentData.links.filter(l => {
-          const ls = typeof l.source === 'object' ? l.source.id : l.source;
-          const lt = typeof l.target === 'object' ? l.target.id : l.target;
-          return !deletedSet.has(ls) && !deletedSet.has(lt);
+        // Build fresh copies
+        const freshNodes = currentData.nodes.map(n => ({
+          id: n.id, name: n.name, color: n.color, val: n.val,
+          _opacity: n._opacity, _shape: n._shape, _dormant: n._dormant,
+          _tags: n._tags, _title: n._title, _path: n._path, _text: n._text,
+          _hidden: n._hidden,
+        }));
+        const freshLinks = currentData.links.map(l => ({
+          source: linkEndpointId(l.source), target: linkEndpointId(l.target),
+          color: l.color, width: l.width, type: l.type,
+          particles: l.particles, _id: l._id, _visible: l._visible,
+          _dashes: l._dashes, weight: l.weight, frequency: l.frequency,
+          particleColor: l.particleColor,
+        }));
+
+        // Filter deleted nodes
+        const keepNodes = freshNodes.filter(n => !deletedSet.has(n.id));
+        const keepLinks = freshLinks.filter(l => {
+          return !deletedSet.has(l.source) && !deletedSet.has(l.target);
         });
 
         if (deletedNodes.length > 0) {
-          setGraphDataPreservingView(currentData, { reheat: true });
+          setGraphDataPreservingView({ nodes: keepNodes, links: keepLinks }, { reheat: true });
         }
 
-        // Update changed nodes with pulse
+        // Update changed nodes with pulse via activation Maps
         changedNodes.forEach((n, i) => {
           setTimeout(() => {
-            const node = currentData.nodes.find(x => x.id === n.id);
-            if (node) {
-              node.name = n.title;
-              node._title = n.title;
-              const origColor = node.color;
-              const origVal = node.val;
-              node.color = COLORS.activated;
-              node.val = (origVal || 10) * 2;
-              requestGraphRedraw();
-              setTimeout(() => {
-                node.color = origColor;
-                node.val = origVal;
-                requestGraphRedraw();
-              }, 2500);
+            // Update name in fresh data (will be reflected on next graph refresh)
+            const existing = keepNodes.find(x => x.id === n.id);
+            if (existing) {
+              existing.name = n.title;
+              existing._title = n.title;
             }
+            if (nodeDataMap[n.id]) nodeDataMap[n.id].title = n.title;
+
+            // Pulse via Maps
+            nodeActivationColor.set(n.id, COLORS.activated);
+            nodeActivationOpacity.set(n.id, 1.0);
+            requestGraphRedraw();
+            setTimeout(() => {
+              nodeActivationColor.delete(n.id);
+              const hasQuery = nodeActivationOpacity.size > 0 && [...nodeActivationOpacity.values()].some(o => o < 1);
+              nodeActivationOpacity.set(n.id, hasQuery ? 0.3 : 1.0);
+              requestGraphRedraw();
+            }, 2500);
           }, i * 300);
         });
       }
@@ -2247,13 +2311,28 @@ function toggleOrphans(show) {
   const currentData = graph.graphData();
   const currentIds = new Set(currentData.nodes.map(n => n.id));
 
+  // Build fresh copies — never mutate live force-graph data
+  const freshNodes = currentData.nodes.map(n => ({
+    id: n.id, name: n.name, color: n.color, val: n.val,
+    _opacity: n._opacity, _shape: n._shape, _dormant: n._dormant,
+    _tags: n._tags, _title: n._title, _path: n._path, _text: n._text,
+    _hidden: n._hidden,
+  }));
+  const freshLinks = currentData.links.map(l => ({
+    source: linkEndpointId(l.source), target: linkEndpointId(l.target),
+    color: l.color, width: l.width, type: l.type,
+    particles: l.particles, _id: l._id, _visible: l._visible,
+    _dashes: l._dashes, weight: l.weight, frequency: l.frequency,
+    particleColor: l.particleColor,
+  }));
+
   if (show) {
     // Add orphan nodes
     orphanNodeIds.forEach(nid => {
       if (!currentIds.has(nid)) {
         const n = allGraphNodes.find(x => x.id === nid);
         if (n) {
-          currentData.nodes.push({
+          freshNodes.push({
             id: n.id,
             name: n.title,
             color: '#1c2128',
@@ -2273,10 +2352,12 @@ function toggleOrphans(show) {
   } else {
     // Remove orphan nodes
     const orphanSet = new Set(orphanNodeIds);
-    currentData.nodes = currentData.nodes.filter(n => !orphanSet.has(n.id));
+    const filtered = freshNodes.filter(n => !orphanSet.has(n.id));
+    freshNodes.length = 0;
+    freshNodes.push(...filtered);
   }
 
-  setGraphDataPreservingView(currentData, { reheat: true });
+  setGraphDataPreservingView({ nodes: freshNodes, links: freshLinks }, { reheat: true });
 
   // Update neuron count
   const el = document.getElementById('stat-neurons');
@@ -2407,10 +2488,16 @@ function applyEdgeFilters() {
   const currentData = graph.graphData();
   let visibleCount = 0;
 
-  currentData.links.forEach(link => {
-    const info = edgeInfoMap[link._id] || {};
+  // Build a fresh graph with updated _visible flags
+  const freshNodes = currentData.nodes.map(n => ({
+    id: n.id, name: n.name, color: n.color, val: n.val,
+    _opacity: n._opacity, _shape: n._shape, _dormant: n._dormant,
+    _tags: n._tags, _title: n._title, _path: n._path, _text: n._text,
+    _hidden: n._hidden,
+  }));
+  const freshLinks = currentData.links.map(l => {
+    const info = edgeInfoMap[l._id] || {};
     let visible = true;
-
     if (directOnly) {
       visible = info.type === 'wikilink';
     } else {
@@ -2420,12 +2507,17 @@ function applyEdgeFilters() {
         visible = showPhantom;
       }
     }
-
-    link._visible = visible;
     if (visible) visibleCount++;
+    return {
+      source: linkEndpointId(l.source), target: linkEndpointId(l.target),
+      color: l.color, width: l.width, type: l.type,
+      particles: l.particles, _id: l._id, _visible: visible,
+      _dashes: l._dashes, weight: l.weight, frequency: l.frequency,
+      particleColor: l.particleColor,
+    };
   });
 
-  requestGraphRedraw();
+  setGraphDataPreservingView({ nodes: freshNodes, links: freshLinks });
 
   // Update visible synapse count
   const synEl = document.getElementById('stat-synapses');
@@ -2531,11 +2623,6 @@ function resetQuery() {
 
   if (graph) {
     clearActivationState();
-    // Reset Hebbian pulse particles on live links
-    const currentData = graph.graphData();
-    currentData.links.forEach(link => {
-      if (link.particles) link.particles = 0;
-    });
     requestGraphRedraw();
     applyEdgeFilters();
   }
