@@ -786,6 +786,34 @@ const TAG_COLORS = [
   '#85e89d', // mint
 ];
 
+const STORAGE_KEYS = {
+  hebbianThreshold: 'bdh-graph-hebbian-threshold',
+  spacing: 'bdh-graph-spacing',
+  edgeLength: 'bdh-graph-edge-length',
+  zoom: 'bdh-graph-zoom',
+};
+
+function clampNumber(value, min, max, fallback) {
+  if (value == null || value === '') return fallback;
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(min, Math.min(max, n));
+}
+
+function saveControlValue(key, value) {
+  try { localStorage.setItem(key, String(value)); }
+  catch(e) { /* Storage can be blocked; controls still work for this session. */ }
+}
+
+function loadControlValue(key, fallback) {
+  try {
+    const value = localStorage.getItem(key);
+    return value == null ? fallback : value;
+  } catch(e) {
+    return fallback;
+  }
+}
+
 // ============================================================================
 // Global state
 // ============================================================================
@@ -808,10 +836,16 @@ let edgeInfoMap = {};         // edge_id -> {source_title, target_title, type, w
 let nodeTagColorMap = {};     // node_id -> color string (preserves tag color across dim/restore)
 let totalConcepts = 0;        // cumulative neurogenesis counter
 let edgeLengthMultiplier = 10; // default: 10px per degree unit
+let spacingValue = 50;        // default: balanced graph spacing
+let restoredZoom = null;      // saved zoom slider value, applied after graph init
 let showOrphans = true;
 let zoomPollTimer = null;
 let lastMouseEvent = { clientX: 0, clientY: 0 }; // tracked for tooltip positioning
 let mouseTrackingInstalled = false;
+let hoverHighlight = null;       // { nodeIds:Set, linkIds:Set, hoverNodeId?, hoverLinkId? }
+let hoverHighlightKey = null;
+let hoverClearFrame = null;
+let hoverEdgeId = null;           // edge-only hover cue; does not dim/highlight the graph
 
 // ============================================================================
 // Custom HTML tooltip
@@ -939,13 +973,133 @@ function hideTooltip() {
   if (tooltipEl) tooltipEl.style.display = 'none';
 }
 
+function linkEndpointId(endpoint) {
+  return typeof endpoint === 'object' ? endpoint.id : endpoint;
+}
+
+function isHoverActive() {
+  return !!(hoverHighlight && (hoverHighlight.nodeIds.size || hoverHighlight.linkIds.size));
+}
+
+function isHoverNode(node) {
+  return isHoverActive() && hoverHighlight.nodeIds.has(node.id);
+}
+
+function isHoverLink(link) {
+  return isHoverActive() && hoverHighlight.linkIds.has(link._id);
+}
+
+function isHoverEdge(link) {
+  return hoverEdgeId && link && link._id === hoverEdgeId;
+}
+
+function hoverKey(seedNodeIds = [], seedLinkId = null) {
+  return seedNodeIds.slice().sort().join('|') + '::' + (seedLinkId || '');
+}
+
+function setHoverHighlight(seedNodeIds = [], seedLinkId = null) {
+  if (!graph) return;
+  cancelScheduledHoverClear();
+  clearHoverEdge(false);
+  const nextKey = hoverKey(seedNodeIds, seedLinkId);
+  if (hoverHighlightKey === nextKey) return;
+  const data = graph.graphData();
+  const seedSet = new Set(seedNodeIds.filter(Boolean));
+  const nodeIds = new Set(seedSet);
+  const linkIds = new Set(seedLinkId ? [seedLinkId] : []);
+
+  data.links.forEach(link => {
+    if (link._visible === false) return;
+    const sourceId = linkEndpointId(link.source);
+    const targetId = linkEndpointId(link.target);
+    if (seedSet.has(sourceId) || seedSet.has(targetId) || link._id === seedLinkId) {
+      linkIds.add(link._id);
+      nodeIds.add(sourceId);
+      nodeIds.add(targetId);
+    }
+  });
+
+  hoverHighlight = {
+    nodeIds,
+    linkIds,
+    hoverNodeId: seedNodeIds.length === 1 ? seedNodeIds[0] : null,
+    hoverLinkId: seedLinkId,
+  };
+  hoverHighlightKey = nextKey;
+  requestGraphRedraw();
+}
+
+function cancelScheduledHoverClear() {
+  if (hoverClearFrame == null) return;
+  cancelAnimationFrame(hoverClearFrame);
+  hoverClearFrame = null;
+}
+
+function scheduleClearHoverHighlight() {
+  cancelScheduledHoverClear();
+  hoverClearFrame = requestAnimationFrame(() => {
+    hoverClearFrame = null;
+    clearHoverHighlight();
+    hideTooltip();
+  });
+}
+
+function clearHoverHighlight() {
+  cancelScheduledHoverClear();
+  if (!hoverHighlight) return;
+  hoverHighlight = null;
+  hoverHighlightKey = null;
+  requestGraphRedraw();
+}
+
+function setHoverEdge(linkId) {
+  if (!graph || !linkId) return;
+  cancelScheduledHoverClear();
+  clearHoverHighlight();
+  if (hoverEdgeId === linkId) return;
+  hoverEdgeId = linkId;
+  requestGraphRedraw();
+}
+
+function clearHoverEdge(redraw = true) {
+  if (!hoverEdgeId) return;
+  hoverEdgeId = null;
+  if (redraw) requestGraphRedraw();
+}
+
+function hoverAwareLinkColor(link) {
+  if (link._visible === false) return 'rgba(0,0,0,0)';
+  if (isHoverEdge(link)) return COLORS.edgeHebbianPulse;
+  if (!isHoverActive()) return link.color;
+  // Keep non-highlighted edges visible as a gray topology layer, not hidden.
+  return isHoverLink(link) ? COLORS.edgeHebbianPulse : 'rgba(139,148,158,0.62)';
+}
+
+function hoverAwareLinkWidth(link) {
+  if (link._visible === false) return 0;
+  const baseWidth = link.width || 1;
+  if (isHoverEdge(link)) return Math.max(baseWidth * 2.4, 2.8);
+  if (!isHoverActive()) return baseWidth;
+  return isHoverLink(link) ? Math.max(baseWidth * 2.2, 2.5) : Math.max(baseWidth * 0.85, 0.75);
+}
+
+function hoverAwareParticles(link) {
+  if (link._visible === false) return 0;
+  if (isHoverEdge(link)) return Math.max(link.particles || 0, 2);
+  if (isHoverLink(link) && hoverHighlight && link._id === hoverHighlight.hoverLinkId) return Math.max(link.particles || 0, 2);
+  return link.particles || 0;
+}
+
 // ============================================================================
 // Node canvas rendering — custom shapes, colors, opacity, 💤 text
 // ============================================================================
 function drawNode(node, ctx, globalScale) {
   const val = node.val || 4;
   const color = node.color || COLORS.inactive;
-  const opacity = node._opacity != null ? node._opacity : 1.0;
+  const baseOpacity = node._opacity != null ? node._opacity : 1.0;
+  const hoverActive = isHoverActive();
+  const hoverMatch = isHoverNode(node);
+  const opacity = hoverActive ? (hoverMatch ? Math.max(baseOpacity, 0.95) : Math.min(baseOpacity, 0.38)) : baseOpacity;
   const x = node.x;
   const y = node.y;
 
@@ -965,8 +1119,8 @@ function drawNode(node, ctx, globalScale) {
     ctx.closePath();
     ctx.fillStyle = color;
     ctx.fill();
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 1;
+    ctx.strokeStyle = hoverMatch ? COLORS.edgeHebbianPulse : color;
+    ctx.lineWidth = hoverMatch ? (3 / globalScale) : 1;
     ctx.stroke();
   } else if (shape === 'triangleDown') {
     // Dormant — triangle pointing down
@@ -977,6 +1131,9 @@ function drawNode(node, ctx, globalScale) {
     ctx.closePath();
     ctx.fillStyle = color;
     ctx.fill();
+    ctx.strokeStyle = hoverMatch ? COLORS.edgeHebbianPulse : color;
+    ctx.lineWidth = hoverMatch ? (3 / globalScale) : 1;
+    ctx.stroke();
     // Draw 💤 text above
     if (globalScale >= 1.5) {
       ctx.font = (10 / globalScale) + 'px sans-serif';
@@ -998,8 +1155,8 @@ function drawNode(node, ctx, globalScale) {
     ctx.closePath();
     ctx.fillStyle = color;
     ctx.fill();
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 1;
+    ctx.strokeStyle = hoverMatch ? COLORS.edgeHebbianPulse : color;
+    ctx.lineWidth = hoverMatch ? (3 / globalScale) : 1;
     ctx.stroke();
   } else {
     // Default — circle
@@ -1007,9 +1164,19 @@ function drawNode(node, ctx, globalScale) {
     ctx.arc(x, y, r, 0, 2 * Math.PI);
     ctx.fillStyle = color;
     ctx.fill();
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 1;
+    ctx.strokeStyle = hoverMatch ? COLORS.edgeHebbianPulse : color;
+    ctx.lineWidth = hoverMatch ? (3 / globalScale) : 1;
     ctx.stroke();
+  }
+
+  if (hoverMatch && node.id === hoverHighlight.hoverNodeId) {
+    ctx.beginPath();
+    ctx.arc(x, y, r + (5 / globalScale), 0, 2 * Math.PI);
+    ctx.strokeStyle = COLORS.edgeHebbianPulse;
+    ctx.lineWidth = 1.5 / globalScale;
+    ctx.globalAlpha = 0.9;
+    ctx.stroke();
+    ctx.globalAlpha = opacity;
   }
 
   // Node label (visible when zoomed in)
@@ -1255,36 +1422,42 @@ function initNetwork(graphData) {
     .linkSource('source')
     .linkTarget('target')
     .linkVisibility(link => link._visible !== false)
-    .linkColor(link => link._visible !== false ? link.color : 'rgba(0,0,0,0)')
-    .linkWidth(link => link._visible !== false ? link.width : 0)
+    .linkColor(hoverAwareLinkColor)
+    .linkWidth(hoverAwareLinkWidth)
     .linkCurvature(0.15)
     .linkLineDash(link => link._dashes ? [5, 5] : null)
-    .linkDirectionalParticles(link => link.particles || 0)
+    .linkDirectionalParticles(hoverAwareParticles)
     .linkDirectionalParticleSpeed(0.006)
     .linkDirectionalParticleWidth(2)
     .linkDirectionalParticleColor(link => link.particleColor || link.color)
     .warmupTicks(100)
     .cooldownTime(30000)
+    .autoPauseRedraw(false)
     .enableNodeDrag(false)
     .onNodeHover((node, prevNode) => {
       if (node) {
+        clearHoverEdge(false);
+        setHoverHighlight([node.id]);
         const evt = lastMouseEvent || { clientX: 0, clientY: 0 };
         showTooltip(node, evt);
       } else {
-        hideTooltip();
+        scheduleClearHoverHighlight();
       }
     })
     .onLinkHover((link, prevLink) => {
       if (link) {
+        // Edge hover highlights only the hovered edge. Full graph highlighting stays
+        // tied to nodes; edges are too easy to brush accidentally.
+        setHoverEdge(link._id);
         const evt = lastMouseEvent || { clientX: 0, clientY: 0 };
         showEdgeTooltip(link, evt);
       } else {
+        clearHoverEdge();
         hideTooltip();
       }
     })
-    .onZoom(({ k }) => {
-      zoomSlider.value = k;
-      zoomLabel.textContent = Math.round(k * 100) + '%';
+    .onZoom(() => {
+      syncZoomUI(true);
     });
 
   // Physics — tuned for readable graph layout
@@ -1297,6 +1470,7 @@ function initNetwork(graphData) {
   if (window.d3 && typeof window.d3.forceCollide === 'function') {
     graph.d3Force('collide', window.d3.forceCollide().radius(node => Math.sqrt((node.val || 4) * 20) + 3));
   }
+  applyRestoredGraphControls();
   // Let simulation settle before rendering
   graph.d3ReheatSimulation();
 
@@ -1350,6 +1524,7 @@ function initNetwork(graphData) {
 // recalculate bounds/transform and the graph appears to jump out of the window.
 function requestGraphRedraw() {
   if (!graph) return;
+  if (typeof graph.autoPauseRedraw === 'function') graph.autoPauseRedraw(false);
   if (typeof graph.resumeAnimation === 'function') graph.resumeAnimation();
 }
 
@@ -2048,6 +2223,37 @@ function toggleTagColors(enabled) {
 // ============================================================================
 // Edge filters — direct-only, Hebbian threshold, phantom toggle
 // ============================================================================
+function restoreGraphControlState() {
+  hebbianThreshold = clampNumber(loadControlValue(STORAGE_KEYS.hebbianThreshold, hebbianThreshold), 0, 1, hebbianThreshold);
+  spacingValue = clampNumber(loadControlValue(STORAGE_KEYS.spacing, spacingValue), 0, 100, spacingValue);
+  edgeLengthMultiplier = clampNumber(loadControlValue(STORAGE_KEYS.edgeLength, edgeLengthMultiplier), 0, 100, edgeLengthMultiplier);
+  restoredZoom = clampNumber(loadControlValue(STORAGE_KEYS.zoom, ''), ZOOM_MIN, ZOOM_MAX, null);
+
+  const thresholdSlider = document.getElementById('hebbian-threshold');
+  const thresholdVal = document.getElementById('threshold-val');
+  const spacingSlider = document.getElementById('spacing-slider');
+  const edgeLengthSlider = document.getElementById('edge-length-slider');
+  const edgeLengthVal = document.getElementById('el-val');
+  if (thresholdSlider) thresholdSlider.value = hebbianThreshold;
+  if (thresholdVal) thresholdVal.textContent = hebbianThreshold;
+  if (spacingSlider) spacingSlider.value = spacingValue;
+  if (edgeLengthSlider) edgeLengthSlider.value = edgeLengthMultiplier;
+  if (edgeLengthVal) edgeLengthVal.textContent = edgeLengthMultiplier;
+}
+
+function applyRestoredGraphControls() {
+  if (!graph) return;
+  setEdgeLengthMultiplier(edgeLengthMultiplier, false);
+  updateSpacing(spacingValue, false);
+  if (restoredZoom != null) {
+    requestAnimationFrame(() => {
+      if (!graph) return;
+      graph.zoom(restoredZoom);
+      syncZoomUI(false);
+    });
+  }
+}
+
 function toggleDirectOnly(on) {
   directOnly = on;
   const thresholdCtrl = document.getElementById('threshold-control');
@@ -2055,9 +2261,12 @@ function toggleDirectOnly(on) {
   applyEdgeFilters();
 }
 
-function updateHebbianThreshold(val) {
-  hebbianThreshold = parseFloat(val);
-  document.getElementById('threshold-val').textContent = val;
+function updateHebbianThreshold(val, persist = true) {
+  hebbianThreshold = clampNumber(val, 0, 1, 0.3);
+  const slider = document.getElementById('hebbian-threshold');
+  if (slider) slider.value = hebbianThreshold;
+  document.getElementById('threshold-val').textContent = hebbianThreshold;
+  if (persist) saveControlValue(STORAGE_KEYS.hebbianThreshold, hebbianThreshold);
   applyEdgeFilters();
 }
 
@@ -2099,16 +2308,17 @@ function togglePhantom(on) {
 // ============================================================================
 // Edge length multiplier — d3Force link distance
 // ============================================================================
-function setEdgeLengthMultiplier(m) {
-  edgeLengthMultiplier = m;
+function setEdgeLengthMultiplier(m, persist = true) {
+  edgeLengthMultiplier = clampNumber(m, 0, 100, 10);
   const slider = document.getElementById('edge-length-slider');
   const valEl = document.getElementById('el-val');
-  if (slider) slider.value = m;
-  if (valEl) valEl.textContent = m;
+  if (slider) slider.value = edgeLengthMultiplier;
+  if (valEl) valEl.textContent = edgeLengthMultiplier;
+  if (persist) saveControlValue(STORAGE_KEYS.edgeLength, edgeLengthMultiplier);
 
   if (graph) {
     // Map 0-100 to link distance 40-300
-    const distance = 40 + m * 2.6;
+    const distance = 40 + edgeLengthMultiplier * 2.6;
     graph.d3Force('link').distance(distance);
     // Re-heat simulation so nodes react to new distance
     graph.d3ReheatSimulation();
@@ -2118,7 +2328,7 @@ function setEdgeLengthMultiplier(m) {
   if (graph) {
     const currentData = graph.graphData();
     const maxDeg = Math.max(1, ...Object.values(degreeMap));
-    const nodeScale = 0.5 + (m / 50);
+    const nodeScale = 0.5 + (edgeLengthMultiplier / 50);
     const MIN_VAL = 4, MAX_VAL = 40;
     currentData.nodes.forEach(node => {
       const deg = degreeMap[node.id] || 0;
@@ -2128,14 +2338,19 @@ function setEdgeLengthMultiplier(m) {
     // Do NOT call graph.graphData() — that would reset positions and cause a jump
   }
 
-  console.log('Edge length: ' + m + ', node scale: ' + (0.5 + m / 50).toFixed(2) + 'x');
+  console.log('Edge length: ' + edgeLengthMultiplier + ', node scale: ' + (0.5 + edgeLengthMultiplier / 50).toFixed(2) + 'x');
 }
 
 // ============================================================================
 // Network spacing — d3Force charge strength
 // ============================================================================
-function updateSpacing(val) {
-  const t = parseInt(val) / 100; // 0..1
+function updateSpacing(val, persist = true) {
+  spacingValue = clampNumber(val, 0, 100, 50);
+  const slider = document.getElementById('spacing-slider');
+  if (slider) slider.value = spacingValue;
+  if (persist) saveControlValue(STORAGE_KEYS.spacing, spacingValue);
+
+  const t = spacingValue / 100; // 0..1
   // Map: 0=dense (charge -150) → 1=sparse (charge -800)
   const chargeStrength = Math.round(-150 - t * 650);
   if (graph) {
@@ -2205,29 +2420,30 @@ const ZOOM_MAX = 4;
 const zoomSlider = document.getElementById('zoom-slider');
 const zoomLabel = document.getElementById('zoom-value');
 
-function syncZoomUI() {
+function syncZoomUI(persist = false) {
   if (!graph) return;
   const s = graph.zoom();
   zoomSlider.value = s;
   zoomLabel.textContent = Math.round(s * 100) + '%';
+  if (persist) saveControlValue(STORAGE_KEYS.zoom, s);
 }
 
-function zoomTo(val) {
+function zoomTo(val, persist = true) {
   if (!graph) return;
   const s = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, parseFloat(val)));
   graph.zoom(s);
-  syncZoomUI();
+  syncZoomUI(persist);
 }
 
 function zoomStep(delta) {
   if (!graph) return;
-  zoomTo(graph.zoom() + delta);
+  zoomTo(graph.zoom() + delta, true);
 }
 
 function fitToScreen() {
   if (!graph) return;
   graph.zoomToFit(300, 60);
-  setTimeout(syncZoomUI, 350);
+  setTimeout(() => syncZoomUI(true), 350);
 }
 
 // Poll zoom value to keep slider in sync (force-graph has no zoom event)
@@ -2317,6 +2533,7 @@ window.addEventListener('resize', () => {
 // ============================================================================
 // Init
 // ============================================================================
+restoreGraphControlState();
 restorePanelWidth();
 restorePanelState();
 connectWS();
