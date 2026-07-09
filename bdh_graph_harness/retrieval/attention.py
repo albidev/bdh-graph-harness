@@ -51,21 +51,27 @@ def compute_adaptive_threshold(scores, floor=0.05, min_activations=3):
 # Attention: Embedding seed + Graph traversal
 # ---------------------------------------------------------------------------
 
-def _compute_hebbian_boost(candidate_id, hebbian_state, recently_active, max_boost=0.5):
+def _compute_hebbian_boost(candidate_id, hebbian_state, recently_active):
     """Compute Hebbian boost for a candidate note.
 
-    Looks at the candidate's Hebbian synapses and sums the weights of synapses
-    that connect to notes activated in recent queries. The boost is capped
-    to prevent runaway amplification.
+    Looks at the candidate's Hebbian synapses towards recently active notes.
+    Instead of summing ALL synapse weights (which dilutes the signal), it takes
+    only the top-N strongest synapses — this ensures the boost is selective:
+    a candidate needs a *strong* connection to *specific* recent notes, not
+    weak connections to many.
 
     Args:
         candidate_id: The note ID being evaluated as a seed.
         hebbian_state: The Hebbian state dict with 'synapses'.
         recently_active: Set of note IDs activated in recent queries.
-        max_boost: Maximum boost factor (0.5 = up to +50% of original score).
+
+    Config params:
+        hebbian_boost_max: Maximum boost factor (0.5 = up to +50%).
+        hebbian_boost_top_n: Only consider the N strongest synapses.
+        hebbian_boost_weight_factor: Multiplier applied to summed weight.
 
     Returns:
-        Float boost factor in [0, max_boost].
+        Float boost factor in [0, hebbian_boost_max].
     """
     if not hebbian_state or not recently_active:
         return 0.0
@@ -74,11 +80,15 @@ def _compute_hebbian_boost(candidate_id, hebbian_state, recently_active, max_boo
     if not synapses:
         return 0.0
 
-    total_weight = 0.0
+    top_n = CONFIG.get('hebbian_boost_top_n', 3)
+    max_boost = CONFIG.get('hebbian_boost_max', 0.5)
+    weight_factor = CONFIG.get('hebbian_boost_weight_factor', 0.3)
+
+    # Collect synapse weights from candidate to recently active notes
+    weights = []
     for other_id in recently_active:
         if other_id == candidate_id:
             continue
-        # Synapse keys are sorted: "{a|b}" where a < b alphabetically
         if candidate_id < other_id:
             key = f"{candidate_id}|{other_id}"
         else:
@@ -86,21 +96,34 @@ def _compute_hebbian_boost(candidate_id, hebbian_state, recently_active, max_boo
 
         syn = synapses.get(key)
         if syn:
-            total_weight += syn.get('weight', 0.0)
+            weights.append(syn.get('weight', 0.0))
 
-    # Normalize: cap at max_boost
-    return min(total_weight * 0.3, max_boost)
+    if not weights:
+        return 0.0
+
+    # Take only the top-N strongest synapses (selectivity)
+    weights.sort(reverse=True)
+    top_weights = weights[:top_n]
+
+    total_weight = sum(top_weights)
+    return min(total_weight * weight_factor, max_boost)
 
 
-def _get_recently_active_notes(hebbian_state, window_queries=10):
+def _get_recently_active_notes(hebbian_state):
     """Get notes activated in recent queries from Hebbian state.
 
     Uses last_coactivated timestamps on synapses to determine which notes
-    have been active recently. Falls back to notes with high-frequency synapses.
+    have been active recently. The time window is configurable.
+
+    Also filters out synapses to notes that no longer exist in the vault
+    (dead synapses from deleted notes).
 
     Args:
         hebbian_state: The Hebbian state dict.
-        window_queries: How many recent queries to consider.
+
+    Config params:
+        hebbian_boost_window_minutes: How far back to look for recent activity.
+        hebbian_boost_min_weight: Minimum synapse weight to consider "active".
 
     Returns:
         Set of note IDs that were recently active.
@@ -112,24 +135,32 @@ def _get_recently_active_notes(hebbian_state, window_queries=10):
     if not synapses:
         return set()
 
-    # Collect all notes that appear in synapses with significant weight
-    # and recent co-activation
     from datetime import datetime, timedelta
     now = datetime.now()
-    recent_cutoff = now - timedelta(hours=1)  # notes activated in the last hour
+    window_minutes = CONFIG.get('hebbian_boost_window_minutes', 10)
+    recent_cutoff = now - timedelta(minutes=window_minutes)
+    min_weight = CONFIG.get('hebbian_boost_min_weight', 0.15)
+
+    # Get the set of valid note IDs (to filter dead synapses)
+    # This is passed via hebbian_state if available, else we skip the check
+    valid_node_ids = hebbian_state.get('_valid_node_ids', None)
 
     recent_notes = set()
     for key, syn in synapses.items():
         weight = syn.get('weight', 0.0)
-        if weight < 0.15:  # below hebbian_min_score threshold
+        if weight < min_weight:
             continue
-        # Check recency
         last_co = syn.get('last_coactivated')
         if last_co:
             try:
                 co_time = datetime.fromisoformat(last_co)
                 if co_time > recent_cutoff:
                     parts = key.split('|')
+                    # Filter dead synapses if we have the valid node set
+                    if valid_node_ids is not None:
+                        parts = [p for p in parts if p in valid_node_ids]
+                        if not parts:
+                            continue
                     recent_notes.update(parts)
             except (ValueError, TypeError):
                 pass
@@ -229,11 +260,18 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
     # This makes the graph "remember" what you're working on and prefer seeds
     # in the same context, even if their pure cosine similarity is slightly lower.
     if hebbian_state and CONFIG.get('hebbian_seed_boost', True):
+        # Inject valid node IDs so dead synapses (to deleted notes) are filtered
+        hebbian_state['_valid_node_ids'] = set(nodes.keys())
         recently_active = _get_recently_active_notes(hebbian_state)
+        # Clean up the temporary key
+        hebbian_state.pop('_valid_node_ids', None)
         if recently_active:
+            logger.info(f"Phase 5: {len(recently_active)} recently active notes, boosting seeds")
             boosted = {}
             for nid, score in scores.items():
                 boost = _compute_hebbian_boost(nid, hebbian_state, recently_active)
+                if boost > 0:
+                    logger.debug(f"  boost {nid}: +{boost:.3f}")
                 boosted[nid] = score * (1.0 + boost)
             scores = boosted
 
