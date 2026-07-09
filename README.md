@@ -24,7 +24,7 @@ Turns an Obsidian vault into a living knowledge graph where:
 - **Sleep-cycle consolidation** — periodic synaptic downscaling (×0.9), structural pruning below weight floor, and stale dormant node removal — mirrors biological sleep consolidation
 - **Server-side file watcher** — mtime-based polling detects vault changes from any source (Obsidian, LLM, scripts) and triggers incremental graph updates
 - **LLM responses** — any OpenAI-compatible provider (OpenRouter, Ollama Cloud, local Ollama), with citations back to source notes
-- **Real-time visualization** — vis.js network showing nodes activating, edges pulsing as Hebbian weights update during queries
+- **Real-time visualization** — WebGL force-graph showing nodes activating, edges pulsing as Hebbian weights update during queries
 
 For the theory behind these choices — why Hebbian plasticity, why Obsidian, why not just RAG — see [`docs/philosophy.md`](docs/philosophy.md).
 
@@ -47,7 +47,7 @@ Query → Vector Search → Attention Spread (max_hop=2)
                                     ↓
 Hebbian Update (co-activation strengthening) → LLM Response (OpenAI-compatible)
                                     ↓
-WebSocket → vis.js visualization (nodes light up, synapses pulse)
+WebSocket → force-graph (WebGL) (nodes light up, synapses pulse)
 
 Sleep Cycle (periodic):
   Synaptic Downscaling (×0.9) → Prune (< floor) → Quality Re-eval → Stale Removal
@@ -89,7 +89,7 @@ bdh_graph_harness/
 │   ├── ws.py                # WebSocket handlers
 │   └── watcher.py           # Server-side vault file watcher (mtime polling)
 └── visualization/
-    └── templates/index.html # vis.js real-time graph UI
+    └── templates/index.html # force-graph (WebGL) real-time graph UI
 ```
 
 `harness.py` is a compatibility shim that re-exports from the package — tests use `import harness`.
@@ -178,12 +178,16 @@ pytest tests/ -v
 
 ## Visualization
 
-The web UI at `:8643` shows a real-time vis.js graph with:
+The web UI at `:8643` shows a real-time force-graph (WebGL) with:
 - **Nodes** colored by activation state or by Obsidian tags (toggle)
-- **Wikilink edges** + **Hebbian synapses** with hover tooltips (weight, type, connected notes)
+- **Wikilink edges** + **Hebbian synapses** + **Phantom links** with hover tooltips (weight, type, connected notes)
 - **Live neurogenesis** — new edges appear in real-time as concepts are created
+- **Hover highlighting** — node hover shows 1-hop subgraph, edge hover highlights the edge
+- **Node drag**, **viewport-preserving updates**, **manual collision force**
+- **Z-order** — wikilinks (bottom) → phantom (middle) → hebbian (top)
 - **Orphan nodes toggle**, **tag legend overlay**, **dark theme**, **mobile responsive** (iPhone safe area, touch dismiss)
 - **Node quality** — dormant nodes dimmed (gray, 30% opacity) with 💤 tooltip; stats bar shows dormant count
+- **Persisted controls** — slider values saved in localStorage, restored on refresh
 
 See [`docs/visualization.md`](docs/visualization.md) for full details on controls, tooltips, and mobile support.
 
@@ -256,7 +260,7 @@ Obsidian edit → Plugin detects → Debounce 1s → POST /api/node-update
 - Ignores non-`.md` files and `.obsidian/` directory
 - Configurable server URL, debounce delay, enable/disable
 
-**Pulse animation:** updated nodes pulse orange for 2.5s then restore to original appearance via remove + re-add (vis.js cannot reset explicit color overrides via `update()` — the remove+re-add trick restores group defaults cleanly).
+**Pulse animation:** Hebbian edges get animated particles during query — color transitions from green through blue, particle count scales with weight gain. Activation state is managed via external Maps to avoid mutating force-graph's live objects.
 
 ## Sleep-Cycle Consolidation
 
