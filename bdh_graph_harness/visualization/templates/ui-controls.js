@@ -209,7 +209,10 @@ function applyEdgeFilters() {
     if (directOnly) {
       visible = info.type === 'wikilink';
     } else {
-      if (info.type === 'hebbian') {
+      // Check edge type toggle first
+      if (!edgeTypeVisible[info.type]) {
+        visible = false;
+      } else if (info.type === 'hebbian') {
         visible = (info.weight || 0) >= hebbianThreshold;
       } else if (info.type === 'phantom') {
         visible = showPhantom;
@@ -239,7 +242,9 @@ function initEdgeVisibility() {
     if (directOnly) {
       visible = info.type === 'wikilink';
     } else {
-      if (info.type === 'hebbian') {
+      if (!edgeTypeVisible[info.type]) {
+        visible = false;
+      } else if (info.type === 'hebbian') {
         visible = (info.weight || 0) >= hebbianThreshold;
       } else if (info.type === 'phantom') {
         visible = showPhantom;
@@ -478,3 +483,61 @@ restoreGraphControlState();
 restorePanelWidth();
 restorePanelState();
 connectWS();
+
+// ============================================================================
+// Search + focus — find node by name, center viewport and zoom in
+// ============================================================================
+function searchNode(query) {
+  if (!query || !graph) return;
+  const q = query.trim().toLowerCase();
+  if (!q) return;
+
+  const data = graph.graphData();
+  // Find first node whose name contains the query
+  const match = data.nodes.find(n => (n.name || '').toLowerCase().includes(q));
+  if (!match) {
+    // Flash the search input red briefly
+    const el = document.getElementById('search-input');
+    if (el) { el.style.borderColor = '#f97583'; setTimeout(() => { el.style.borderColor = ''; }, 800); }
+    return;
+  }
+
+  // Center on the node and zoom in
+  graph.centerAt(match.x, match.y, 600);
+  graph.zoom(2.5, 600);
+
+  // Highlight the found node
+  setHoverHighlight([match.id]);
+  showTooltip(match, lastMouseEvent || { clientX: 200, clientY: 200 });
+}
+
+// ============================================================================
+// Edge type filtering — toggle visibility by edge type (wikilink/hebbian/phantom)
+// ============================================================================
+const edgeTypeVisible = { wikilink: true, hebbian: true, phantom: true };
+
+function toggleEdgeType(type, btn) {
+  edgeTypeVisible[type] = !edgeTypeVisible[type];
+  if (btn) btn.classList.toggle('active', edgeTypeVisible[type]);
+  applyEdgeFilters();
+}
+
+// ============================================================================
+// Stats dashboard — sync bottom-left mini-dashboard with top-bar stats
+// ============================================================================
+function updateStatsDashboard() {
+  const neurons = document.getElementById('stat-neurons')?.textContent || '—';
+  const synapses = document.getElementById('stat-synapses')?.textContent || '—';
+  const hebbian = document.getElementById('stat-hebbian')?.textContent || '—';
+  const queries = document.getElementById('stat-queries')?.textContent || '—';
+  const dashN = document.getElementById('dash-neurons');
+  const dashS = document.getElementById('dash-synapses');
+  const dashH = document.getElementById('dash-hebbian');
+  const dashQ = document.getElementById('dash-queries');
+  if (dashN) dashN.textContent = neurons;
+  if (dashS) dashS.textContent = synapses;
+  if (dashH) dashH.textContent = hebbian;
+  if (dashQ) dashQ.textContent = queries;
+}
+// Periodic sync — dashboard mirrors the top-bar stats
+setInterval(updateStatsDashboard, 1000);

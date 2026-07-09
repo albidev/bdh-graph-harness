@@ -19,6 +19,29 @@ const COLORS = {
   bg: '#0d1117',
 };
 
+// Logarithmic node radius — compresses high-degree hubs so they don't dominate.
+// val=4 → r≈5.6, val=20 → r≈9.3, val=40 → r≈10.7 (vs old sqrt: 4→8.9, 20→20, 40→28.3)
+function nodeRadius(val) {
+  return Math.log2((val || 4) + 1) * 4 + 2;
+}
+
+// Convert hex color to rgba with alpha (for edge opacity by type)
+function withAlpha(hex, alpha) {
+  if (!hex || hex[0] !== '#') return hex;
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+// Edge opacity by type — reduces visual noise from 3500+ Hebbian edges
+const EDGE_OPACITY = {
+  wikilink: 0.45,
+  hebbian: 0.22,
+  phantom: 0.35,
+  neurogenesis: 0.7,
+};
+
 // Hebbian edge color by weight (dim → bright green)
 function weightColor(weight) {
   if (weight < 0.3) return COLORS.edgeHebbianLow;
@@ -349,8 +372,15 @@ function hoverAwareLinkColor(link) {
   const mapColor = linkActivationColor.get(key);
   if (mapColor) return mapColor;
   if (isHoverEdge(link)) return COLORS.edgeHebbianPulse;
-  if (!isHoverActive()) return link.color;
-  return isHoverLink(link) ? COLORS.edgeHebbianPulse : 'rgba(139,148,158,0.62)';
+  if (!isHoverActive()) {
+    // Apply type-based opacity to reduce visual noise
+    // LOD: at low zoom, further reduce opacity
+    const zoom = graph ? graph.zoom() : 1;
+    const lodFactor = zoom < 0.5 ? 0.5 : 1.0;
+    const opacity = (EDGE_OPACITY[link.type] || 0.5) * lodFactor;
+    return withAlpha(link.color, opacity);
+  }
+  return isHoverLink(link) ? COLORS.edgeHebbianPulse : 'rgba(139,148,158,0.1)';
 }
 
 function hoverAwareLinkWidth(link) {
@@ -396,8 +426,21 @@ function drawNode(node, ctx, globalScale) {
   ctx.globalAlpha = opacity;
 
   const shape = node._shape || 'circle';
-  // force-graph: r = sqrt(val * nodeRelSize), with nodeRelSize=20
-  const r = Math.sqrt(val * 20);
+  // Logarithmic radius — hubs stay readable without dominating
+  const r = nodeRadius(val);
+
+  // LOD: at low zoom, simplify to plain dots — skip shapes, rings, labels
+  const lod = globalScale < 0.5;
+
+  if (lod) {
+    // Minimal rendering: plain circle, no shapes/rings/labels
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, 2 * Math.PI);
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.globalAlpha = 1.0;
+    return;
+  }
 
   if (shape === 'diamond') {
     // Neurogenesis — diamond shape
