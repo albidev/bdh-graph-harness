@@ -72,6 +72,8 @@ CONFIG = {
     'threshold_floor': 0.15,
     # Online plasticity (Phase 3.2)
     'online_plasticity': True,
+    # Hebbian-aware seed ranking (Phase 5)
+    'hebbian_seed_boost': True,
     # Node quality (Phase 3.5)
     'quality_threshold': 0.25,           # below this → dormant
     'quality_reactivation_score': 0.50,  # activation to re-awaken
