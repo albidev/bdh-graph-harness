@@ -58,9 +58,11 @@ def is_semantic_duplicate(title, definition, threshold=0.65):
         vault_root = CONFIG['vault_path']
         chroma_path = os.path.join(vault_root, CONFIG.get('chroma_path', '.bdh-chroma'))
         client = chromadb.PersistentClient(path=chroma_path)
+        from bdh_graph_harness.retrieval.chroma_store import _get_ollama_embedding_function
         collection = client.get_or_create_collection(
             CONFIG.get('chroma_collection', 'bdh_notes'),
             metadata={'hnsw:space': 'cosine'},
+            embedding_function=_get_ollama_embedding_function(),
         )
 
         if collection.count() == 0:
