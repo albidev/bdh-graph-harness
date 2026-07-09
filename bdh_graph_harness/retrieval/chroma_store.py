@@ -11,6 +11,25 @@ from bdh_graph_harness.config import CONFIG
 from bdh_graph_harness.retrieval.embeddings import get_embeddings
 
 
+def _get_ollama_embedding_function():
+    """Create an OllamaEmbeddingFunction configured from CONFIG.
+    
+    This allows ChromaDB to use nomic-embed-text-v2-moe (768d) for query_texts
+    auto-embedding, instead of the default all-MiniLM-L6-v2 (384d) which
+    causes dimension mismatch errors.
+    
+    Returns None if the ollama python package is not installed (graceful fallback).
+    """
+    try:
+        from chromadb.utils.embedding_functions import OllamaEmbeddingFunction
+        return OllamaEmbeddingFunction(
+            url=CONFIG.get('ollama_url', 'http://127.0.0.1:11434'),
+            model_name=CONFIG.get('embedding_model', 'nomic-embed-text-v2-moe'),
+        )
+    except (ImportError, ValueError):
+        return None
+
+
 def compute_all_embeddings(nodes, vault_root, force_refresh=False):
     """Compute and store embeddings in ChromaDB, with incremental refresh.
 
@@ -24,6 +43,7 @@ def compute_all_embeddings(nodes, vault_root, force_refresh=False):
     collection = client.get_or_create_collection(
         CONFIG['chroma_collection'],
         metadata={'hnsw:space': 'cosine'},
+        embedding_function=_get_ollama_embedding_function(),
     )
 
     # Compute content hashes for all notes
