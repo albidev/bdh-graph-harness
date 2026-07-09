@@ -8,6 +8,7 @@ function sendQuery() {
   if (!query) return;
   btn.disabled = true;
   btn.textContent = 'Processing...';
+  beginQueryParticles();
   document.getElementById('response-text').textContent = 'Thinking...';
 
   const controller = new AbortController();
@@ -25,6 +26,7 @@ function sendQuery() {
   }).then(data => {
     if (data.error) {
       document.getElementById('response-text').textContent = 'Error: ' + data.error;
+      endQueryParticles();
     } else {
       if (data.response) {
         document.getElementById('response-text').textContent = data.response;
@@ -41,12 +43,15 @@ function sendQuery() {
           neuron_count: data.neuron_count,
           synapse_count: data.synapse_count,
         });
+      } else {
+        endQueryParticles();
       }
     }
     btn.disabled = false;
     btn.textContent = 'Query';
   }).catch(err => {
     clearTimeout(timeoutId);
+    endQueryParticles();
     btn.disabled = false;
     btn.textContent = 'Query';
     if (err.name === 'AbortError') {

@@ -23,6 +23,7 @@ function toggleOrphans(show) {
   const freshNodes = currentData.nodes.map(n => ({
     id: n.id, name: n.name, color: n.color, val: n.val,
     _opacity: n._opacity, _shape: n._shape, _dormant: n._dormant,
+    _mass: n._mass,
     _tags: n._tags, _title: n._title, _path: n._path, _text: n._text,
     _hidden: n._hidden,
   }));
@@ -45,6 +46,7 @@ function toggleOrphans(show) {
             name: n.title,
             color: '#1c2128',
             val: 6,
+            _mass: computeNodeMass(n, 0, Math.max(1, ...Object.values(degreeMap))),
             _opacity: 0.5,
             _shape: 'circle',
             _dormant: false,
@@ -271,9 +273,9 @@ function setEdgeLengthMultiplier(m, persist = true) {
   if (persist) saveControlValue(STORAGE_KEYS.edgeLength, edgeLengthMultiplier);
 
   if (graph) {
-    // Map 0-100 to link distance 40-300
+    // Map 0-100 to link distance 40-300, then adjust per edge type/mass.
     const distance = 40 + edgeLengthMultiplier * 2.6;
-    graph.d3Force('link').distance(distance);
+    graph.d3Force('link').distance(link => massAwareLinkDistance(link, distance));
     // Re-heat simulation so nodes react to new distance
     graph.d3ReheatSimulation();
   }
@@ -305,10 +307,10 @@ function updateSpacing(val, persist = true) {
   if (persist) saveControlValue(STORAGE_KEYS.spacing, spacingValue);
 
   const t = spacingValue / 100; // 0..1
-  // Map: 0=dense (charge -300) → 1=sparse (charge -1200)
+  // Map: 0=dense (charge -300) → 1=sparse (charge -1200), then scale by node mass
   const chargeStrength = Math.round(-300 - t * 900);
   if (graph) {
-    graph.d3Force('charge').strength(chargeStrength);
+    graph.d3Force('charge').strength(node => massAwareChargeStrength(node, chargeStrength));
     graph.d3ReheatSimulation();
   }
 }
@@ -353,6 +355,7 @@ function resetQuery() {
 
   if (graph) {
     clearActivationState();
+    endQueryParticles();
     requestGraphRedraw();
     applyEdgeFilters();
   }
