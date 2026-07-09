@@ -1597,8 +1597,9 @@ function initNetwork(graphData) {
 
   // NOTE: applyEdgeFilters() is NOT called here — it calls setGraphDataPreservingView
   // which calls graph.graphData() again, breaking all interactions (drag/zoom/click).
-  // All links are visible by default (linkVisibilityState Map is empty → fallback = show).
-  // applyEdgeFilters will be called on first user interaction with the controls.
+  // Instead, initEdgeVisibility() populates the visibility Map without rebuilding the graph.
+  // This applies saved hebbian threshold/phantom/directOnly from localStorage.
+  initEdgeVisibility();
 
   // Center viewport on graph — must be last
   graph.zoomToFit(400);
@@ -2532,6 +2533,28 @@ function applyEdgeFilters() {
 
   // Force force-graph to re-evaluate linkVisibility by passing fresh data
   setGraphDataPreservingView({ nodes: currentData.nodes, links: currentData.links });
+}
+
+// Populate linkVisibilityState Map WITHOUT triggering a graph rebuild.
+// Used during init to apply saved filter state without breaking interactions.
+function initEdgeVisibility() {
+  if (!graph) return;
+  const currentData = graph.graphData();
+  linkVisibilityState.clear();
+  currentData.links.forEach(l => {
+    const info = edgeInfoMap[l._id] || {};
+    let visible = true;
+    if (directOnly) {
+      visible = info.type === 'wikilink';
+    } else {
+      if (info.type === 'hebbian') {
+        visible = (info.weight || 0) >= hebbianThreshold;
+      } else if (info.type === 'phantom') {
+        visible = showPhantom;
+      }
+    }
+    linkVisibilityState.set(linkKey(l), visible);
+  });
 }
 
 function togglePhantom(on) {
