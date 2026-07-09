@@ -87,7 +87,7 @@ function handleActivation(event) {
 
       // Add via setGraphDataPreservingView (creates fresh link, no readonly issues)
       const newData = {
-        nodes: currentData.nodes.map(n => ({ id: n.id, name: n.name, color: n.color, val: n.val, _opacity: n._opacity, _shape: n._shape, _dormant: n._dormant, _mass: n._mass, _tags: n._tags, _title: n._title, _path: n._path, _text: n._text, _hidden: n._hidden })),
+        nodes: currentData.nodes.map(n => ({ id: n.id, name: n.name, color: n.color, val: n.val, _opacity: n._opacity, _shape: n._shape, _dormant: n._dormant, _mass: n._mass, _synapticGlow: n._synapticGlow, _tags: n._tags, _title: n._title, _path: n._path, _text: n._text, _hidden: n._hidden })),
         links: [...currentData.links.map(l => ({
           source: linkEndpointId(l.source), target: linkEndpointId(l.target),
           color: l.color, width: l.width, type: l.type, particles: l.particles,
@@ -190,7 +190,7 @@ function handleActivation(event) {
     const freshNodes = currentData.nodes.map(n => ({
       id: n.id, name: n.name, color: n.color, val: n.val,
       _opacity: n._opacity, _shape: n._shape, _dormant: n._dormant,
-      _mass: n._mass,
+      _mass: n._mass, _synapticGlow: n._synapticGlow,
       _tags: n._tags, _title: n._title, _path: n._path, _text: n._text,
       _hidden: n._hidden,
     }));
@@ -219,6 +219,7 @@ function handleActivation(event) {
           color: COLORS.neurogenesis,
           val: 40,  // start large for birth pulse
           _mass: 2.2,
+          _synapticGlow: 0.85,
           _opacity: 1.0,
           _shape: 'diamond',
           _dormant: false,

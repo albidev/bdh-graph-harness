@@ -98,6 +98,7 @@ function connectWS() {
         const freshNodes = currentData.nodes.map(n => ({
           id: n.id, name: n.name, color: n.color, val: n.val,
           _opacity: n._opacity, _shape: n._shape, _dormant: n._dormant,
+          _mass: n._mass, _synapticGlow: n._synapticGlow,
           _tags: n._tags, _title: n._title, _path: n._path, _text: n._text,
           _hidden: n._hidden,
         }));
@@ -136,6 +137,8 @@ function connectWS() {
               name: nd.title || nd.id.split('/').pop(),
               color: color,
               val: 10,
+              _mass: 1,
+              _synapticGlow: isNeurogenesis ? 0.85 : 0,
               _opacity: 1.0,
               _shape: isNeurogenesis ? 'diamond' : 'circle',
               _dormant: false,
@@ -242,6 +245,7 @@ function connectWS() {
         const freshNodes = currentData.nodes.map(n => ({
           id: n.id, name: n.name, color: n.color, val: n.val,
           _opacity: n._opacity, _shape: n._shape, _dormant: n._dormant,
+          _mass: n._mass, _synapticGlow: n._synapticGlow,
           _tags: n._tags, _title: n._title, _path: n._path, _text: n._text,
           _hidden: n._hidden,
         }));

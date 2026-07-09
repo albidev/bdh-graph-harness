@@ -23,7 +23,7 @@ function toggleOrphans(show) {
   const freshNodes = currentData.nodes.map(n => ({
     id: n.id, name: n.name, color: n.color, val: n.val,
     _opacity: n._opacity, _shape: n._shape, _dormant: n._dormant,
-    _mass: n._mass,
+    _mass: n._mass, _synapticGlow: n._synapticGlow,
     _tags: n._tags, _title: n._title, _path: n._path, _text: n._text,
     _hidden: n._hidden,
   }));
@@ -47,6 +47,7 @@ function toggleOrphans(show) {
             color: '#1c2128',
             val: 6,
             _mass: computeNodeMass(n, 0, Math.max(1, ...Object.values(degreeMap))),
+            _synapticGlow: 0,
             _opacity: 0.5,
             _shape: 'circle',
             _dormant: false,
