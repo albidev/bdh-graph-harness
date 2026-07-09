@@ -8,6 +8,7 @@ accept ``app_state`` (and where needed ``ws_clients``) as explicit parameters.
 aiohttp ``Application``.
 """
 
+import asyncio
 import json
 from datetime import datetime
 
@@ -173,6 +174,11 @@ async def run_attention_and_plasticity(
       4. Build ``hebbian_updates`` from the current synaptic state.
       5. Broadcast an activation event to WebSocket clients.
 
+    All blocking operations (attention, hebbian_update, save_state) are
+    offloaded to ``asyncio.to_thread`` to avoid freezing the event loop.
+    An ``asyncio.Lock`` protects ``app_state['state']`` from concurrent
+    mutation by overlapping queries or the vault watcher.
+
     Args:
         source: When ``"assistant_response"``, Hebbian dampening is applied
                 to prevent echo-loop reinforcement.
@@ -184,10 +190,12 @@ async def run_attention_and_plasticity(
     e = app_state['edges']
     coll = app_state['collection']
     bm25 = app_state.get('bm25_index')
+    state_lock = app_state.get('state_lock')
 
-    # Attention (with hybrid search if enabled, and Hebbian-aware seed boost)
-    active = attention(query, n, e, coll, bm25_index=bm25,
-                       hebbian_state=app_state.get('state'))
+    # Attention — run blocking I/O (embeddings) in a thread
+    active = await asyncio.to_thread(
+        attention, query, n, e, coll, None, None, bm25, app_state.get('state')
+    )
 
     activated_notes = []
     if active:
@@ -203,10 +211,23 @@ async def run_attention_and_plasticity(
     updated_keys = set()
     pruned_count = 0
     if CONFIG.get('online_plasticity', True):
-        app_state['state'], updated_keys, pruned_count = hebbian_update(
-            active, app_state['state'], nodes=n, source=source
-        )
-        save_state(config['vault_path'], app_state['state'])
+        # Acquire lock, then run hebbian_update + save_state in a thread
+        if state_lock:
+            async with state_lock:
+                app_state['state'], updated_keys, pruned_count = await asyncio.to_thread(
+                    hebbian_update, active, app_state['state'], n, source
+                )
+                await asyncio.to_thread(
+                    save_state, config['vault_path'], app_state['state']
+                )
+        else:
+            # Fallback: no lock (e.g. MCP fallback path without server)
+            app_state['state'], updated_keys, pruned_count = await asyncio.to_thread(
+                hebbian_update, active, app_state['state'], n, source
+            )
+            await asyncio.to_thread(
+                save_state, config['vault_path'], app_state['state']
+            )
 
     # Collect ONLY hebbian synapses updated in this query (for pulse animation)
     hebbian_updates = []
@@ -305,9 +326,9 @@ async def api_query(request, app_state: dict, ws_clients: set) -> web.Response:
         query, app_state, ws_clients, source=source
     )
 
-    # LLM response — use combined query for richer context
+    # LLM response — use combined query for richer context (run in thread to avoid blocking)
     n = app_state['nodes']
-    response_text = llm_respond(llm_query, active, n)
+    response_text = await asyncio.to_thread(llm_respond, llm_query, active, n)
 
     # Neurogenesis on the full response
     new_concepts_list = run_neurogenesis(response_text, query, active, app_state)
@@ -376,15 +397,26 @@ async def api_stream(request, app_state: dict, ws_clients: set) -> web.StreamRes
     })
     await resp.write(f"data: {init_data}\n\n".encode())
 
-    # Stream tokens
+    # Stream tokens — run blocking generator in a thread, feed to SSE
     full_response = []
-    try:
-        for token in llm_stream(llm_query, active, n):
-            full_response.append(token)
-            token_data = json.dumps({'type': 'token', 'content': token})
-            await resp.write(f"data: {token_data}\n\n".encode())
-    except Exception as exc:
-        logger.warning(f"Stream interrupted: {exc}")
+    loop = asyncio.get_running_loop()
+
+    def _run_stream():
+        """Run the blocking LLM stream in a thread, collecting tokens."""
+        tokens = []
+        try:
+            for token in llm_stream(llm_query, active, n):
+                tokens.append(token)
+        except Exception as exc:
+            logger.warning(f"Stream interrupted: {exc}")
+        return tokens
+
+    # Execute the blocking stream call in a thread
+    tokens = await asyncio.to_thread(_run_stream)
+    for token in tokens:
+        full_response.append(token)
+        token_data = json.dumps({'type': 'token', 'content': token})
+        await resp.write(f"data: {token_data}\n\n".encode())
 
     # Neurogenesis on the full response
     response_text = ''.join(full_response)
@@ -434,7 +466,7 @@ async def api_refresh(request, app_state: dict) -> web.Response:
 
     # compute_all_embeddings lives in the retrieval module
     from bdh_graph_harness.retrieval import compute_all_embeddings
-    coll = compute_all_embeddings(n, vault_root, force_refresh=False)
+    coll = await asyncio.to_thread(compute_all_embeddings, n, vault_root, False)
     app_state['collection'] = coll
     return web.json_response({'status': 'ok', 'embeddings': coll.count()})
 
@@ -450,9 +482,9 @@ async def api_node_update(request, app_state: dict, ws_clients: set) -> web.Resp
     old_nodes = app_state['nodes'] or {}
     old_edges = app_state['edges'] or {}
 
-    # Rebuild graph from vault (fresh read)
+    # Rebuild graph from vault (fresh read) — in thread
     from bdh_graph_harness.graph.builder import build_graph
-    new_nodes, new_edges = build_graph(vault_root, use_cache=False)
+    new_nodes, new_edges = await asyncio.to_thread(build_graph, vault_root, False)
 
     old_ids = set(old_nodes.keys())
     new_ids = set(new_nodes.keys())
@@ -476,10 +508,12 @@ async def api_node_update(request, app_state: dict, ws_clients: set) -> web.Resp
     app_state['nodes'] = new_nodes
     app_state['edges'] = new_edges
 
-    # Re-embed if needed
+    # Re-embed if needed — in thread
     if added or changed:
         from bdh_graph_harness.retrieval import compute_all_embeddings
-        app_state['collection'] = compute_all_embeddings(new_nodes, vault_root, force_refresh=False)
+        app_state['collection'] = await asyncio.to_thread(
+            compute_all_embeddings, new_nodes, vault_root, False
+        )
 
     # Send targeted WS events
     from bdh_graph_harness.api.ws import broadcast_activation
@@ -549,9 +583,9 @@ async def api_refresh_graph(request, app_state: dict, ws_clients: set) -> web.Re
     old_node_ids = set(app_state['nodes'].keys()) if app_state['nodes'] else set()
     old_node_titles = {nid: n.get('title', '') for nid, n in (app_state['nodes'] or {}).items()}
 
-    # 2. Rebuild graph from vault (no cache — force fresh read)
+    # 2. Rebuild graph from vault (no cache — force fresh read) — in thread
     from bdh_graph_harness.graph.builder import build_graph
-    nodes, edges = build_graph(vault_root, use_cache=False)
+    nodes, edges = await asyncio.to_thread(build_graph, vault_root, False)
 
     app_state['nodes'] = nodes
     app_state['edges'] = edges
@@ -595,15 +629,15 @@ async def api_refresh_graph(request, app_state: dict, ws_clients: set) -> web.Re
             'edges': node_edges,
         })
 
-    # 4. Re-embed all notes
+    # 4. Re-embed all notes — in thread
     from bdh_graph_harness.retrieval import compute_all_embeddings
-    coll = compute_all_embeddings(nodes, vault_root, force_refresh=False)
+    coll = await asyncio.to_thread(compute_all_embeddings, nodes, vault_root, False)
     app_state['collection'] = coll
 
     # 5. Rebuild BM25 index if hybrid search is enabled
     if config.get('hybrid_search', False):
         from bdh_graph_harness.retrieval.bm25 import BM25Index
-        app_state['bm25'] = BM25Index(nodes)
+        app_state['bm25_index'] = BM25Index(nodes)
 
     new_count = len(nodes)
     delta = new_count - len(old_node_ids)
@@ -672,9 +706,15 @@ async def api_consolidate(request, app_state: dict, ws_clients: set) -> web.Resp
         results['dry_run'] = True
         return web.json_response(results)
 
-    # Real consolidation — mutate state in place
-    results = consolidate(app_state['state'], n, e)
-    save_state(config['vault_path'], app_state['state'])
+    # Real consolidation — mutate state in place (with lock for thread safety)
+    state_lock = app_state.get('state_lock')
+    if state_lock:
+        async with state_lock:
+            results = await asyncio.to_thread(consolidate, app_state['state'], n, e)
+            await asyncio.to_thread(save_state, config['vault_path'], app_state['state'])
+    else:
+        results = await asyncio.to_thread(consolidate, app_state['state'], n, e)
+        await asyncio.to_thread(save_state, config['vault_path'], app_state['state'])
 
     # Broadcast consolidation event to WebSocket clients
     from bdh_graph_harness.api.ws import broadcast_activation

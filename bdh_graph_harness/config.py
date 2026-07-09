@@ -52,6 +52,7 @@ CONFIG = {
     'hub_dampening': True,
     'hub_degree_threshold': 25,      # dampen only very high-degree hubs (e.g. wiki/index)
     'max_neighbors_per_hop': 10,
+    'hop_decay': 0.5,  # score decay per hop (single application, not compound)
     'alpha': 0.7,
     'beta': 0.3,
     'decay': 0.95,
@@ -60,6 +61,7 @@ CONFIG = {
     'neurogenesis_enabled': True,
     'api_host': '127.0.0.1',
     'api_port': 8642,
+    'api_auth_token': '',  # if set, requires Authorization: Bearer <token> on all API routes
     'python_exec': sys.executable,
     # Hybrid search (Phase 3.1)
     'hybrid_search': True,

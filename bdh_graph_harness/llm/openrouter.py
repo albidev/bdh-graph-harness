@@ -13,7 +13,7 @@ def build_openrouter_payload(messages, stream, config):
         "messages": messages,
         "stream": stream,
         "temperature": config['llm_temperature'],
-        "max_tokens": config['llm_max_ctx'],
+        "max_tokens": config.get('llm_max_tokens', min(config['llm_max_ctx'], 2048)),
     }
     headers = {
         'Content-Type': 'application/json',

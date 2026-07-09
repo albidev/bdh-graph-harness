@@ -116,7 +116,8 @@ async def broadcast_activation(event: dict, ws_clients: set = None) -> None:
     if ws_clients is not None:
         msg = json.dumps(event)
         dead = []
-        for ws in ws_clients:
+        # Copy the set to avoid RuntimeError: Set changed size during iteration
+        for ws in list(ws_clients):
             try:
                 await ws.send_str(msg)
             except Exception:
