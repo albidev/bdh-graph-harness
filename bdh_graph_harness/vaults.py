@@ -41,6 +41,7 @@ __all__ = [
 # Helpers
 # ---------------------------------------------------------------------------
 
+# Vault ID validation: must be URL-safe alphanumeric with hyphens/underscores
 _ID_RE = re.compile(r'^[a-zA-Z0-9_-]+$')
 
 

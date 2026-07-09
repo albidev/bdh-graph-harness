@@ -266,14 +266,12 @@ def test_chroma_collections_are_isolated_per_vault(tmp_path, monkeypatch):
     chroma_dir = str(tmp_path / "shared_chroma")
 
     # Vault A has one note
-    nodes_a = {"note_a": {"title": "Alpha Note", "content": "Alpha only content",
-                          "text": "Alpha only content", "tags": "test"}}
+    nodes_a = {"note_a": {"title": "Alpha Note", "text": "Alpha only content", "tags": "test"}}
     vault_a_root = str(tmp_path / "vault_a")
     (tmp_path / "vault_a").mkdir()
 
     # Vault B has one note with different ID
-    nodes_b = {"note_b": {"title": "Beta Note", "content": "Beta only content",
-                          "text": "Beta only content", "tags": "test"}}
+    nodes_b = {"note_b": {"title": "Beta Note", "text": "Beta only content", "tags": "test"}}
     vault_b_root = str(tmp_path / "vault_b")
     (tmp_path / "vault_b").mkdir()
 
