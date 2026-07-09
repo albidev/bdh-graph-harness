@@ -104,7 +104,7 @@ const TAG_COLORS = [
 ];
 
 const STORAGE_KEYS = {
-  hebbianThreshold: 'bdh-graph-hebbian-threshold',
+  hebbianThreshold: 'bdh-graph-hebbian-threshold-v2',
   spacing: 'bdh-graph-spacing',
   edgeLength: 'bdh-graph-edge-length',
   zoom: 'bdh-graph-zoom',
@@ -291,7 +291,7 @@ let orphanNodeIds = [];       // nodes with no connections (hidden by default)
 let tagColorMap = {};         // tag -> color for tag-based node coloring
 let showTagColors = true;     // toggle for tag-based coloring (on by default)
 let directOnly = false;       // toggle for showing only direct wikilink edges
-let hebbianThreshold = 0.3;    // minimum weight for Hebbian edges to show
+let hebbianThreshold = 0.15;   // minimum weight for Hebbian edges to show
 let showPhantom = true;       // toggle for phantom (semantic similarity) edges
 let degreeMap = {};           // node_id -> degree (computed from edges)
 let neighborMap = {};         // node_id -> [connected node titles]
