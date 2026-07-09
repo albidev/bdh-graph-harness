@@ -1496,7 +1496,6 @@ function initNetwork(graphData) {
     .warmupTicks(100)
     .cooldownTime(30000)
     .autoPauseRedraw(false)
-    .enableNodeDrag(true)
     .onNodeHover((node, prevNode) => {
       if (node) {
         clearHoverEdge(false);
@@ -1597,6 +1596,9 @@ function initNetwork(graphData) {
 
   // Apply edge filters on initial load
   applyEdgeFilters();
+
+  // Re-enable drag AFTER applyEdgeFilters (it calls graphData which resets drag state)
+  graph.enableNodeDrag(true);
 
   // Show dormant count if > 0
   const dormantEl = document.getElementById('stat-dormant');
