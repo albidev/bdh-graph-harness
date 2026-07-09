@@ -1018,6 +1018,7 @@ function setHoverHighlight(seedNodeIds = [], seedLinkId = null) {
   data.links.forEach(link => {
     if (link._visible === false) return;
     if (linkActivationVisible.get(linkKey(link)) === false) return;
+    if (link.type === 'phantom') return;  // skip phantom links — not structural connections
     const sourceId = linkEndpointId(link.source);
     const targetId = linkEndpointId(link.target);
     if (seedSet.has(sourceId) || seedSet.has(targetId) || link._id === seedLinkId) {
