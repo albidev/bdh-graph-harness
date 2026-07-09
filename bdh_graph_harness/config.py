@@ -74,6 +74,11 @@ CONFIG = {
     'online_plasticity': True,
     # Hebbian-aware seed ranking (Phase 5)
     'hebbian_seed_boost': True,
+    'hebbian_boost_max': 0.5,              # max boost factor (+50%)
+    'hebbian_boost_top_n': 3,              # only count top-N strongest synapses
+    'hebbian_boost_weight_factor': 0.3,    # multiplier on summed weight
+    'hebbian_boost_window_minutes': 10,    # recency window for "recently active"
+    'hebbian_boost_min_weight': 0.15,      # min synapse weight to consider active
     # Node quality (Phase 3.5)
     'quality_threshold': 0.25,           # below this → dormant
     'quality_reactivation_score': 0.50,  # activation to re-awaken
