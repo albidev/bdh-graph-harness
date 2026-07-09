@@ -1806,11 +1806,12 @@ function handleActivation(event) {
     requestGraphRedraw();
   }
 
-  // Reset activation state after 4s
+  // Reset activation state after all Hebbian settle animations finish
+  const activationTimeoutMs = Math.max(5000, (hebbianUpdates.length - 1) * 120 + 3000);
   setTimeout(() => {
     clearActivationState();
     requestGraphRedraw();
-  }, 4000);
+  }, activationTimeoutMs);
 
   // Update side panel
   const listEl = document.getElementById('activated-list');
