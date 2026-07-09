@@ -79,6 +79,7 @@ const EDGE_OPACITY = {
   phantom: 0.35,
   neurogenesis: 0.7,
 };
+const HEBBIAN_MIN_RENDER_WEIGHT = 0.15;
 
 // Hebbian edge color by weight (dim → bright green)
 function weightColor(weight) {
@@ -606,8 +607,89 @@ function hoverAwareParticleWidth(link) {
 }
 
 // ============================================================================
-// Node canvas rendering — custom shapes, colors, opacity, 💤 text
+// Node canvas rendering — custom shapes, neural bloom, 💤 text
 // ============================================================================
+function hashNodeId(id) {
+  const s = String(id || '');
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+function nodeGlowBoost(node, hoverMatch, isDirectHover) {
+  const active = nodeActivationColor.has(node.id);
+  const synGlow = Math.max(0, Math.min(1, node._synapticGlow || 0));
+  let boost = 0.85 + synGlow * 1.1;
+  if (node._dormant) boost *= 0.35;
+  if (node._shape === 'hexagon') boost *= 1.28;
+  if (node._shape === 'diamond') boost *= 1.55;
+  if (active) boost *= 2.75;
+  if (hoverMatch) boost *= 1.8;
+  if (isDirectHover) boost *= 1.45;
+  return Math.max(0.15, Math.min(5.0, boost));
+}
+
+function drawNodeGlow(node, ctx, globalScale, color, opacity, radius, boost) {
+  const x = node.x;
+  const y = node.y;
+  const t = performance.now() * 0.001;
+  const phase = (hashNodeId(node.id) % 628) / 100;
+  const pulse = 0.9 + Math.sin(t * 0.72 + phase) * 0.1;
+  const scaleDamp = Math.max(0.72, Math.min(1.28, 1 / Math.sqrt(globalScale || 1)));
+  const glowR = radius * (2.7 + boost * 0.72) * pulse * scaleDamp;
+  const alpha = Math.min(0.55, (0.045 + boost * 0.045) * opacity);
+
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  const grad = ctx.createRadialGradient(x, y, 0, x, y, glowR);
+  grad.addColorStop(0, withAlpha(color, alpha * 1.45));
+  grad.addColorStop(0.33, withAlpha(color, alpha * 0.52));
+  grad.addColorStop(0.72, withAlpha(color, alpha * 0.16));
+  grad.addColorStop(1, withAlpha(color, 0));
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.arc(x, y, glowR, 0, 2 * Math.PI);
+  ctx.fill();
+  ctx.restore();
+}
+
+function nodeBodyGradient(ctx, x, y, r, color, opacity) {
+  const grad = ctx.createRadialGradient(x - r * 0.32, y - r * 0.42, 0, x, y, r * 1.25);
+  grad.addColorStop(0, withAlpha('#ffffff', Math.min(0.5, 0.3 * opacity)));
+  grad.addColorStop(0.24, withAlpha(color, Math.min(1, 0.96 * opacity)));
+  grad.addColorStop(0.7, withAlpha(color, Math.min(0.84, 0.72 * opacity)));
+  grad.addColorStop(1, withAlpha(color, Math.min(0.5, 0.42 * opacity)));
+  return grad;
+}
+
+function pathNodeShape(ctx, shape, x, y, r) {
+  ctx.beginPath();
+  if (shape === 'diamond') {
+    ctx.moveTo(x, y - r);
+    ctx.lineTo(x + r, y);
+    ctx.lineTo(x, y + r);
+    ctx.lineTo(x - r, y);
+  } else if (shape === 'triangleDown') {
+    ctx.moveTo(x, y + r);
+    ctx.lineTo(x + r, y - r * 0.7);
+    ctx.lineTo(x - r, y - r * 0.7);
+  } else if (shape === 'hexagon') {
+    for (let i = 0; i < 6; i++) {
+      const angle = (Math.PI / 3) * i;
+      const px = x + r * Math.cos(angle);
+      const py = y + r * Math.sin(angle);
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+  } else {
+    ctx.arc(x, y, r, 0, 2 * Math.PI);
+  }
+  ctx.closePath();
+}
+
 function drawNode(node, ctx, globalScale) {
   const val = node.val || 4;
   const actColor = nodeActivationColor.get(node.id);
@@ -616,6 +698,7 @@ function drawNode(node, ctx, globalScale) {
   const baseOpacity = actOpacity != null ? actOpacity : 1.0;
   const hoverActive = isHoverActive();
   const hoverMatch = isHoverNode(node);
+  const isDirectHover = hoverMatch && hoverHighlight && node.id === hoverHighlight.hoverNodeId;
   // Ensure baseOpacity is a valid number — Math.min(undefined, 0.38) === NaN
   // which makes ctx.globalAlpha default to 1.0, so non-query nodes appear
   // full-bright during hover and look "highlighted" when they shouldn't be.
@@ -623,107 +706,77 @@ function drawNode(node, ctx, globalScale) {
   const opacity = hoverActive ? (hoverMatch ? Math.max(safeBase, 0.95) : Math.min(safeBase, 0.38)) : safeBase;
   const x = node.x;
   const y = node.y;
-
-  ctx.globalAlpha = opacity;
-
   const shape = node._shape || 'circle';
   // Logarithmic radius — hubs stay readable without dominating
   const r = nodeRadius(val);
+  const boost = nodeGlowBoost(node, hoverMatch, isDirectHover);
 
-  // LOD: at low zoom, simplify to plain dots — skip shapes, rings, labels
+  // Ambient aura first: nodes become condensations of light inside the synaptic web.
+  drawNodeGlow(node, ctx, globalScale, color, opacity, r, boost);
+  if (actColor || isDirectHover) {
+    drawNodeGlow(node, ctx, globalScale, actColor || COLORS.edgeHebbianPulse, opacity, r * 1.18, boost * 1.15);
+  }
+
+  // LOD: at low zoom, simplify body to dots but keep a tiny aura so the graph
+  // still feels alive instead of turning into dust.
   const lod = globalScale < 0.5;
-
   if (lod) {
-    // Minimal rendering: plain circle, no shapes/rings/labels
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = opacity;
     ctx.beginPath();
-    ctx.arc(x, y, r, 0, 2 * Math.PI);
-    ctx.fillStyle = color;
+    ctx.arc(x, y, Math.max(1.6, r * 0.72), 0, 2 * Math.PI);
+    ctx.fillStyle = withAlpha(color, node._dormant ? 0.48 : 0.82);
     ctx.fill();
-    ctx.globalAlpha = 1.0;
+    ctx.restore();
     return;
   }
 
-  if (shape === 'diamond') {
-    // Neurogenesis — diamond shape
-    ctx.beginPath();
-    ctx.moveTo(x, y - r);
-    ctx.lineTo(x + r, y);
-    ctx.lineTo(x, y + r);
-    ctx.lineTo(x - r, y);
-    ctx.closePath();
-    ctx.fillStyle = color;
-    ctx.fill();
-    if (hoverMatch) {
-      ctx.strokeStyle = COLORS.edgeHebbianPulse;
-      ctx.lineWidth = 3 / globalScale;
-      ctx.stroke();
-    }
-  } else if (shape === 'triangleDown') {
-    // Dormant — triangle pointing down
-    ctx.beginPath();
-    ctx.moveTo(x, y + r);
-    ctx.lineTo(x + r, y - r * 0.7);
-    ctx.lineTo(x - r, y - r * 0.7);
-    ctx.closePath();
-    ctx.fillStyle = color;
-    ctx.fill();
-    if (hoverMatch) {
-      ctx.strokeStyle = COLORS.edgeHebbianPulse;
-      ctx.lineWidth = 3 / globalScale;
-      ctx.stroke();
-    }
-    // Draw 💤 text above
-    if (globalScale >= 1.5) {
-      ctx.font = (10 / globalScale) + 'px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'bottom';
-      ctx.fillStyle = '#6e7681';
-      ctx.fillText('\u{1F4A4}', x, y - r - 2);
-    }
-  } else if (shape === 'hexagon') {
-    // Hub — hexagon
-    ctx.beginPath();
-    for (let i = 0; i < 6; i++) {
-      const angle = (Math.PI / 3) * i;
-      const px = x + r * Math.cos(angle);
-      const py = y + r * Math.sin(angle);
-      if (i === 0) ctx.moveTo(px, py);
-      else ctx.lineTo(px, py);
-    }
-    ctx.closePath();
-    ctx.fillStyle = color;
-    ctx.fill();
-    if (hoverMatch) {
-      ctx.strokeStyle = COLORS.edgeHebbianPulse;
-      ctx.lineWidth = 3 / globalScale;
-      ctx.stroke();
-    }
-  } else {
-    // Default — circle
-    ctx.beginPath();
-    ctx.arc(x, y, r, 0, 2 * Math.PI);
-    ctx.fillStyle = color;
-    ctx.fill();
-    if (hoverMatch) {
-      ctx.strokeStyle = COLORS.edgeHebbianPulse;
-      ctx.lineWidth = 3 / globalScale;
-      ctx.stroke();
-    }
+  ctx.save();
+  ctx.globalAlpha = opacity;
+  pathNodeShape(ctx, shape, x, y, r);
+  ctx.fillStyle = nodeBodyGradient(ctx, x, y, r, color, opacity);
+  ctx.fill();
+
+  // Thin inner rim, not a hard cartoon border. Keeps shapes readable without
+  // breaking the bloom aesthetic.
+  ctx.globalAlpha = Math.min(0.9, opacity * (hoverMatch ? 0.75 : 0.38));
+  ctx.strokeStyle = withAlpha('#ffffff', hoverMatch ? 0.55 : 0.22);
+  ctx.lineWidth = Math.max(0.7, 1.1 / globalScale);
+  ctx.stroke();
+
+  if (hoverMatch) {
+    pathNodeShape(ctx, shape, x, y, r + (2.4 / globalScale));
+    ctx.strokeStyle = COLORS.edgeHebbianPulse;
+    ctx.lineWidth = 2.4 / globalScale;
+    ctx.globalAlpha = 0.82;
+    ctx.stroke();
+  }
+
+  // Draw 💤 text above dormant nodes
+  if (shape === 'triangleDown' && globalScale >= 1.5) {
+    ctx.font = (10 / globalScale) + 'px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    ctx.fillStyle = '#6e7681';
+    ctx.globalAlpha = opacity * 0.85;
+    ctx.fillText('\u{1F4A4}', x, y - r - 2);
   }
 
   // Highlight ring around the directly hovered node only
-  if (hoverMatch && node.id === hoverHighlight.hoverNodeId) {
+  if (isDirectHover) {
     ctx.beginPath();
     ctx.arc(x, y, r + (5 / globalScale), 0, 2 * Math.PI);
     ctx.strokeStyle = COLORS.edgeHebbianPulse;
     ctx.lineWidth = 1.5 / globalScale;
     ctx.globalAlpha = 0.9;
     ctx.stroke();
-    ctx.globalAlpha = opacity;
   }
+  ctx.restore();
 
   // Node label (visible when zoomed in)
   if (globalScale >= 1.2 && node.name) {
+    ctx.save();
     ctx.font = (10 / globalScale) + 'px system-ui, sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'top';
@@ -731,9 +784,8 @@ function drawNode(node, ctx, globalScale) {
     ctx.globalAlpha = opacity * 0.8;
     const label = node.name.length > 25 ? node.name.substring(0, 22) + '\u2026' : node.name;
     ctx.fillText(label, x, y + r + 2);
+    ctx.restore();
   }
-
-  ctx.globalAlpha = 1.0;
 }
 
 

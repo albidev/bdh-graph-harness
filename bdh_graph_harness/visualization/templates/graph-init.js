@@ -86,6 +86,19 @@ function initNetwork(graphData) {
     ? graphData.nodes.map(n => n.id)
     : graphData.nodes.filter(n => connectedSet.has(n.id)).map(n => n.id);
 
+  // Synaptic aura score: nodes attached to strong rendered Hebbian edges glow a
+  // little more, so the visual density follows learned plasticity instead of
+  // looking like isolated colored pins on top of the links.
+  const activeNodeSet = new Set(activeNodeIds);
+  const synapticGlowRaw = {};
+  graphData.hebbian.forEach(h => {
+    if (!activeNodeSet.has(h.note_a) || !activeNodeSet.has(h.note_b)) return;
+    if (h.weight < HEBBIAN_MIN_RENDER_WEIGHT) return;
+    synapticGlowRaw[h.note_a] = (synapticGlowRaw[h.note_a] || 0) + h.weight;
+    synapticGlowRaw[h.note_b] = (synapticGlowRaw[h.note_b] || 0) + h.weight;
+  });
+  const maxSynapticGlow = Math.max(1, ...Object.values(synapticGlowRaw));
+
   activeNodeIds.forEach(id => {
     const n = graphData.nodes.find(x => x.id === id);
     if (!n) return;
@@ -129,6 +142,7 @@ function initNetwork(graphData) {
       color: color,
       val: val,
       _mass: mass,
+      _synapticGlow: Math.min(1, (synapticGlowRaw[n.id] || 0) / maxSynapticGlow),
       // Random initial positions to prevent all-at-origin collapse
       x: (Math.random() - 0.5) * 1000,
       y: (Math.random() - 0.5) * 1000,
@@ -230,7 +244,6 @@ function initNetwork(graphData) {
   // Filter: only render hebbian edges above a weight threshold to avoid
   // rendering 3000+ thin edges that turn the graph into an unreadable blob.
   // The threshold is configurable via the HEBBIAN_MIN_RENDER_WEIGHT constant.
-  const HEBBIAN_MIN_RENDER_WEIGHT = 0.15;
   let hebbianRendered = 0;
   let hebbianSkipped = 0;
   graphData.hebbian.forEach(h => {
@@ -560,7 +573,7 @@ function setGraphDataPreservingView(data, opts = {}) {
       fx: finiteOrUndefined(node.fx) ?? finiteOrUndefined(liveNode.fx),
       fy: finiteOrUndefined(node.fy) ?? finiteOrUndefined(liveNode.fy),
       _opacity: node._opacity, _shape: node._shape, _dormant: node._dormant,
-      _mass: node._mass,
+      _mass: node._mass, _synapticGlow: node._synapticGlow,
       _tags: node._tags, _title: node._title, _path: node._path, _text: node._text,
       _hidden: node._hidden,
     };
