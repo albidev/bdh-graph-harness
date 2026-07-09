@@ -1476,7 +1476,11 @@ function initNetwork(graphData) {
     .nodeVisibility(node => !node._hidden)
     .linkSource('source')
     .linkTarget('target')
-    .linkVisibility(link => linkActivationVisible.get(linkKey(link)) !== false)
+    .linkVisibility(link => {
+      if (linkActivationVisible.get(linkKey(link)) === false) return false;
+      const vis = linkVisibilityState.get(linkKey(link));
+      return vis !== false; // undefined = visible (default)
+    })
     .linkColor(hoverAwareLinkColor)
     .linkWidth(hoverAwareLinkWidth)
     .linkCurvature(0.15)
@@ -1672,6 +1676,7 @@ const linkActivationColor = new Map();   // linkKey → color string
 const linkParticlesState = new Map();    // linkKey → number
 const linkParticleColorState = new Map();// linkKey → color string
 const linkWidthState = new Map();        // linkKey → number
+const linkVisibilityState = new Map();  // linkKey → bool (threshold/direct filter)
 
 function clearActivationState() {
   nodeActivationOpacity.clear();
@@ -1787,7 +1792,7 @@ function handleActivation(event) {
         linkParticlesState.delete(eid);
         linkParticleColorState.delete(eid);
         linkActivationColor.delete(eid);
-        applyEdgeFilters();
+        // No applyEdgeFilters here — would rebuild graph and cause flash
       }, delay + 2500);
       return;
     }
@@ -1822,8 +1827,7 @@ function handleActivation(event) {
       linkParticlesState.delete(key);
       linkParticleColorState.delete(key);
       linkActivationColor.delete(key);
-      // Re-apply edge filters
-      applyEdgeFilters();
+      // No applyEdgeFilters here — would rebuild graph and cause flash
     }, delay + 2500);
   });
 
@@ -2480,22 +2484,22 @@ function updateHebbianThreshold(val, persist = true) {
   if (slider) slider.value = hebbianThreshold;
   document.getElementById('threshold-val').textContent = hebbianThreshold;
   if (persist) saveControlValue(STORAGE_KEYS.hebbianThreshold, hebbianThreshold);
-  applyEdgeFilters();
+  applyEdgeFiltersDebounced();
+}
+
+let _applyEdgeFiltersTimer = null;
+function applyEdgeFiltersDebounced() {
+  clearTimeout(_applyEdgeFiltersTimer);
+  _applyEdgeFiltersTimer = setTimeout(applyEdgeFilters, 30);
 }
 
 function applyEdgeFilters() {
   if (!graph) return;
+  // Update visibility Map — no graph rebuild needed
   const currentData = graph.graphData();
   let visibleCount = 0;
-
-  // Build a fresh graph with updated _visible flags
-  const freshNodes = currentData.nodes.map(n => ({
-    id: n.id, name: n.name, color: n.color, val: n.val,
-    _opacity: n._opacity, _shape: n._shape, _dormant: n._dormant,
-    _tags: n._tags, _title: n._title, _path: n._path, _text: n._text,
-    _hidden: n._hidden,
-  }));
-  const freshLinks = currentData.links.map(l => {
+  linkVisibilityState.clear();
+  currentData.links.forEach(l => {
     const info = edgeInfoMap[l._id] || {};
     let visible = true;
     if (directOnly) {
@@ -2508,20 +2512,15 @@ function applyEdgeFilters() {
       }
     }
     if (visible) visibleCount++;
-    return {
-      source: linkEndpointId(l.source), target: linkEndpointId(l.target),
-      color: l.color, width: l.width, type: l.type,
-      particles: l.particles, _id: l._id, _visible: visible,
-      _dashes: l._dashes, weight: l.weight, frequency: l.frequency,
-      particleColor: l.particleColor,
-    };
+    linkVisibilityState.set(linkKey(l), visible);
   });
-
-  setGraphDataPreservingView({ nodes: freshNodes, links: freshLinks });
 
   // Update visible synapse count
   const synEl = document.getElementById('stat-synapses');
   if (synEl) synEl.textContent = visibleCount;
+
+  // Force force-graph to re-evaluate linkVisibility by passing fresh data
+  setGraphDataPreservingView({ nodes: currentData.nodes, links: currentData.links });
 }
 
 function togglePhantom(on) {
