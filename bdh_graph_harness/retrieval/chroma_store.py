@@ -30,18 +30,54 @@ def _get_ollama_embedding_function():
         return None
 
 
-def compute_all_embeddings(nodes, vault_root, force_refresh=False):
+def compute_all_embeddings(
+    nodes,
+    vault_root,
+    force_refresh=False,
+    *,
+    chroma_path=None,
+    collection_name=None,
+    config=None,
+):
     """Compute and store embeddings in ChromaDB, with incremental refresh.
 
-    Uses ChromaDB PersistentClient — all vectors stored in .bdh-chroma/ inside the vault.
-    Content hash stored as metadata to detect note changes.
+    Uses ChromaDB PersistentClient — all vectors stored under *chroma_path*
+    (defaults to ``.bdh-chroma/`` inside the vault).  Content hash stored as
+    metadata to detect note changes.
+
+    Parameters
+    ----------
+    nodes:
+        Graph nodes dict ``{note_id: {...}}``.
+    vault_root:
+        Path to the vault (used as base for a relative *chroma_path*).
+    force_refresh:
+        Re-embed all notes even if the content hash is unchanged.
+    chroma_path:
+        Explicit Chroma persistence directory.  If omitted, resolved from
+        *config* (``chroma_path`` key) relative to *vault_root*.
+    collection_name:
+        Explicit collection name.  If omitted, falls back to *config* or
+        the global ``CONFIG``.
+    config:
+        Per-vault settings dict.  Merged with global ``CONFIG`` as fallback.
     """
     import chromadb
 
-    chroma_path = os.path.join(vault_root, CONFIG['chroma_path'])
+    cfg = config or CONFIG
+
+    if chroma_path is None:
+        raw_cp = cfg.get('chroma_path', '.bdh-chroma')
+        if os.path.isabs(raw_cp):
+            chroma_path = raw_cp
+        else:
+            chroma_path = os.path.join(vault_root, raw_cp)
+
+    resolved_collection = collection_name or cfg.get('chroma_collection', 'notes')
+
     client = chromadb.PersistentClient(path=chroma_path)
     collection = client.get_or_create_collection(
-        CONFIG['chroma_collection'],
+        resolved_collection,
         metadata={'hnsw:space': 'cosine'},
         embedding_function=_get_ollama_embedding_function(),
     )

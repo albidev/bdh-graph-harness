@@ -194,7 +194,14 @@ def prune_stale_dormant(state: dict, nodes: dict, persist_cycles: int | None = N
 # Full consolidation pass
 # ---------------------------------------------------------------------------
 
-def consolidate(state: dict, nodes: dict, edges: dict | None = None) -> dict:
+def consolidate(
+    state: dict,
+    nodes: dict,
+    edges: dict | None = None,
+    *,
+    config: dict | None = None,
+    collection=None,
+) -> dict:
     """Run a full consolidation cycle (sleep phase).
 
     Steps:
@@ -234,6 +241,8 @@ def consolidate(state: dict, nodes: dict, edges: dict | None = None) -> dict:
     """
     from bdh_graph_harness.memory.quality import prune_dormant
 
+    cfg = config or CONFIG
+
     synapses_before = len(state.get('synapses', {}))
     nq_before = state.get('node_quality', {})
     dormant_before = len(state.get('dormant_nodes', []))
@@ -243,11 +252,11 @@ def consolidate(state: dict, nodes: dict, edges: dict | None = None) -> dict:
     cycles = state['consolidation_cycles']
 
     # Step 1: Global downscaling
-    factor = CONFIG.get('consolidation_downscale_factor', DEFAULT_DOWNSCALE_FACTOR)
+    factor = cfg.get('consolidation_downscale_factor', DEFAULT_DOWNSCALE_FACTOR)
     state = synaptic_downscaling(state, factor)
 
     # Step 2: Structural pruning
-    floor = CONFIG.get('consolidation_prune_weight_floor', DEFAULT_PRUNE_WEIGHT_FLOOR)
+    floor = cfg.get('consolidation_prune_weight_floor', DEFAULT_PRUNE_WEIGHT_FLOOR)
     state = structural_pruning(state, floor)
 
     # Step 3: Quality re-evaluation from surviving synapses
@@ -263,19 +272,22 @@ def consolidate(state: dict, nodes: dict, edges: dict | None = None) -> dict:
             q['dormant_cycles'] = old_dormant_cycles[nid]
 
     # Step 4: Remove stale dormant nodes
-    if CONFIG.get('consolidation_prune_dormant_nodes', DEFAULT_PRUNE_DORMANT_NODES):
-        persist = CONFIG.get(
+    if cfg.get('consolidation_prune_dormant_nodes', DEFAULT_PRUNE_DORMANT_NODES):
+        persist = cfg.get(
             'consolidation_dormant_persist_cycles',
             DEFAULT_DORMANT_PERSIST_CYCLES,
         )
         state = prune_stale_dormant(state, nodes, persist)
 
     # Step 5: Phantom links — semantic similarity connections
-    if CONFIG.get('phantom_links_enabled', True):
+    if cfg.get('phantom_links_enabled', True):
         from bdh_graph_harness.memory.phantom import update_phantom_links
-        vault_root = CONFIG.get('vault_path', '')
+        vault_root = cfg.get('vault_path', '')
         if vault_root and edges:
-            state = update_phantom_links(state, nodes, edges or {}, vault_root)
+            state = update_phantom_links(
+                state, nodes, edges or {}, vault_root,
+                config=cfg, collection=collection,
+            )
 
     # Recompute dormant count after stale pruning
     dormant_after = len(state.get('dormant_nodes', []))
