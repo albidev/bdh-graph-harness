@@ -240,7 +240,7 @@ function initNetwork(graphData) {
     .nodeCanvasObjectMode(() => 'replace')
     .nodePointerAreaPaint((node, color, ctx, globalScale) => {
       // Generous hit area — larger than the visual node so hovering is forgiving
-      const r = Math.sqrt((node.val || 4) * 20) + 6 / globalScale;
+      const r = nodeRadius(node.val || 4) + 6 / globalScale;
       const shape = node._shape || 'circle';
       ctx.fillStyle = color;
       if (shape === 'diamond') {
@@ -330,8 +330,33 @@ function initNetwork(graphData) {
   // Add collision force via d3-force to prevent node overlap
   // This is more efficient than the manual O(N²) loop below
   if (graph.d3Force('collision')) {
-    graph.d3Force('collision').radius(node => Math.sqrt((node.val || 4) * 20) + 4);
+    graph.d3Force('collision').radius(node => nodeRadius(node.val || 4) + 4);
   }
+
+  // Tag-based clustering — assign each node a cluster centroid and gently
+  // pull it toward its cluster center. Creates visible super-clusters by tag.
+  const tagCentroids = {};
+  const tagCounts = {};
+  fgNodes.forEach(n => {
+    const tags = n._tags || '';
+    let primaryTag = '';
+    if (Array.isArray(tags) && tags.length > 0) {
+      primaryTag = tags[0].replace(/^[\[\]]+|[\[\]]+$/g, '').trim();
+    } else if (typeof tags === 'string' && tags.trim()) {
+      primaryTag = tags.replace(/^[\[\]]+|[\[\]]+$/g, '').split(',')[0].trim();
+    }
+    if (!primaryTag) primaryTag = '_unsorted';
+    n._cluster = primaryTag;
+    tagCounts[primaryTag] = (tagCounts[primaryTag] || 0) + 1;
+  });
+  // Assign random centroid angles in a circle layout for clusters
+  const tagList = Object.keys(tagCounts).sort((a, b) => tagCounts[b] - tagCounts[a]);
+  const clusterCenters = {};
+  tagList.forEach((tag, i) => {
+    const angle = (i / tagList.length) * 2 * Math.PI;
+    const radius = 400 + tagList.length * 20;
+    clusterCenters[tag] = { x: Math.cos(angle) * radius, y: Math.sin(angle) * radius };
+  });
   // Manual collision force — grid-based spatial hash for O(N) performance.
   // With 584 nodes, the old O(N²) loop did 170k comparisons per tick.
   // This grid approach bins nodes into cells and only checks neighbors.
@@ -350,6 +375,18 @@ function initNetwork(graphData) {
         const nodes = data.nodes;
         const N = nodes.length;
 
+        // Cluster force — gently pull nodes toward their tag cluster center
+        const CLUSTER_STRENGTH = 0.015;
+        for (let i = 0; i < N; i++) {
+          const n = nodes[i];
+          if (n.x == null || n.y == null) continue;
+          const center = clusterCenters[n._cluster];
+          if (center) {
+            n.x += (center.x - n.x) * CLUSTER_STRENGTH;
+            n.y += (center.y - n.y) * CLUSTER_STRENGTH;
+          }
+        }
+
         // Compute bounding box and cell size
         let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
         for (let i = 0; i < N; i++) {
@@ -363,7 +400,7 @@ function initNetwork(graphData) {
         if (minX === Infinity) { requestAnimationFrame(tick); return; }
 
         // Cell size = max node radius + MIN_GAP (ensures neighbors are in adjacent cells)
-        const CELL_SIZE = 80; // ~sqrt(20*5) + MIN_GAP + slack
+        const CELL_SIZE = 40; // ~nodeRadius(40) + MIN_GAP + slack = 10.7 + 8 + 21
         const cols = Math.max(1, Math.ceil((maxX - minX) / CELL_SIZE) + 2);
         const rows = Math.max(1, Math.ceil((maxY - minY) / CELL_SIZE) + 2);
 
@@ -393,11 +430,11 @@ function initNetwork(graphData) {
                 if (!nCell) continue;
                 for (const i of cell) {
                   const a = nodes[i];
-                  const ra = Math.sqrt((a.val || 4) * 20);
+                  const ra = nodeRadius(a.val || 4);
                   for (const j of nCell) {
                     if (j <= i) continue; // avoid double-checking pairs
                     const b = nodes[j];
-                    const rb = Math.sqrt((b.val || 4) * 20);
+                    const rb = nodeRadius(b.val || 4);
                     const ddx = b.x - a.x;
                     const ddy = b.y - a.y;
                     const dist = Math.sqrt(ddx * ddx + ddy * ddy);

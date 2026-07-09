@@ -35,8 +35,16 @@ function handleActivation(event) {
     const bothActive = activatedIds.has(sourceId) && activatedIds.has(targetId);
     if (hasActivation) {
       linkActivationVisible.set(key, bothActive);
+      // Live particle animation on active edges — visible immediately, not just at settle
+      if (bothActive && link.type !== 'wikilink') {
+        linkParticlesState.set(key, 3);
+        linkParticleColorState.set(key, COLORS.edgeHebbianPulse);
+        linkActivationColor.set(key, COLORS.edgeHebbianPulse);
+      }
     } else {
       linkActivationVisible.delete(key);
+      linkParticlesState.delete(key);
+      linkParticleColorState.delete(key);
     }
   });
 

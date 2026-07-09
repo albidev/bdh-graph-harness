@@ -41,6 +41,15 @@
       <input type="checkbox" id="phantom-toggle" checked onchange="togglePhantom(this.checked)">
       <span class="toggle-text">👻</span>
     </label>
+    <div class="edge-filter-group" id="edge-filter-group">
+      <button class="edge-filter-btn active" data-type="wikilink" onclick="toggleEdgeType('wikilink', this)" title="Toggle wikilink edges">🔗</button>
+      <button class="edge-filter-btn active" data-type="hebbian" onclick="toggleEdgeType('hebbian', this)" title="Toggle Hebbian edges">⚡</button>
+      <button class="edge-filter-btn active" data-type="phantom" onclick="toggleEdgeType('phantom', this)" title="Toggle phantom edges">👻</button>
+    </div>
+    <div class="search-control">
+      <input type="text" id="search-input" placeholder="🔍 Find node…" autocomplete="off"
+             onkeydown="if(event.key==='Enter') searchNode(this.value)">
+    </div>
     <div class="stats">
       Neurons: <span id="stat-neurons">{neuron_count}</span>
       · Synapses: <span id="stat-synapses">{synapse_count}</span>
@@ -77,6 +86,12 @@
   </div>
   <div id="tag-legend" class="tag-legend hidden">
     <button class="legend-collapse" onclick="toggleLegendCollapse()" title="Collapse legend">◀</button>
+  </div>
+  <div id="stats-dashboard">
+    <div class="stat-cell"><span class="stat-icon">🧠</span><span class="stat-num" id="dash-neurons">—</span><span class="stat-label">Neurons</span></div>
+    <div class="stat-cell"><span class="stat-icon">🔗</span><span class="stat-num" id="dash-synapses">—</span><span class="stat-label">Synapses</span></div>
+    <div class="stat-cell"><span class="stat-icon">⚡</span><span class="stat-num" id="dash-hebbian">—</span><span class="stat-label">Hebbian</span></div>
+    <div class="stat-cell"><span class="stat-icon">🔍</span><span class="stat-num" id="dash-queries">—</span><span class="stat-label">Queries</span></div>
   </div>
   <div id="panel-resize"></div>
   <div id="side-panel">
