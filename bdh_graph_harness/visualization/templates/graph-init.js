@@ -117,6 +117,7 @@ function initNetwork(graphData) {
       }
     }
     nodeTagColorMap[n.id] = color;
+    const mass = computeNodeMass(n, deg, maxDeg);
 
     // val = node size (area), scaled by degree
     const MIN_VAL = 4, MAX_VAL = 40;
@@ -127,6 +128,7 @@ function initNetwork(graphData) {
       name: n.title || n.id,
       color: color,
       val: val,
+      _mass: mass,
       // Random initial positions to prevent all-at-origin collapse
       x: (Math.random() - 0.5) * 1000,
       y: (Math.random() - 0.5) * 1000,
@@ -139,6 +141,45 @@ function initNetwork(graphData) {
       _path: n.path || '',
       _text: n.text || '',
     });
+  });
+
+  // One-time tag/community layout seeding. This is deliberately NOT a perpetual
+  // force: an endless centroid pull keeps shrinking each color/tag cluster after
+  // d3 cools down. Dragging a node reheats d3, so it briefly expands, then the
+  // centroid pull collapses it again. Seed clusters once, then let charge/link/
+  // collision own the physics.
+  const tagCounts = {};
+  fgNodes.forEach(n => {
+    const tags = n._tags || '';
+    let primaryTag = '';
+    if (Array.isArray(tags) && tags.length > 0) {
+      primaryTag = tags[0].replace(/^[\[\]]+|[\[\]]+$/g, '').trim();
+    } else if (typeof tags === 'string' && tags.trim()) {
+      primaryTag = tags.replace(/^[\[\]]+|[\[\]]+$/g, '').split(',')[0].trim();
+    }
+    if (!primaryTag) primaryTag = '_unsorted';
+    n._cluster = primaryTag;
+    tagCounts[primaryTag] = (tagCounts[primaryTag] || 0) + 1;
+  });
+
+  const tagList = Object.keys(tagCounts).sort((a, b) => tagCounts[b] - tagCounts[a]);
+  const clusterCenters = {};
+  const clusterRadius = 900 + tagList.length * 45;
+  tagList.forEach((tag, i) => {
+    const angle = (i / Math.max(1, tagList.length)) * 2 * Math.PI;
+    clusterCenters[tag] = { x: Math.cos(angle) * clusterRadius, y: Math.sin(angle) * clusterRadius };
+  });
+
+  const clusterSeen = {};
+  fgNodes.forEach(n => {
+    const center = clusterCenters[n._cluster] || { x: 0, y: 0 };
+    const idx = clusterSeen[n._cluster] || 0;
+    clusterSeen[n._cluster] = idx + 1;
+    const count = Math.max(1, tagCounts[n._cluster] || 1);
+    const angle = idx * Math.PI * (3 - Math.sqrt(5));
+    const radius = 30 + Math.sqrt(idx / count) * Math.max(160, Math.sqrt(count) * 42);
+    n.x = center.x + Math.cos(angle) * radius + (Math.random() - 0.5) * 35;
+    n.y = center.y + Math.sin(angle) * radius + (Math.random() - 0.5) * 35;
   });
 
   // Build force-graph links
@@ -287,12 +328,13 @@ function initNetwork(graphData) {
     .linkCurvature(0.15)
     .linkLineDash(link => link._dashes ? [5, 5] : null)
     .linkDirectionalParticles(hoverAwareParticles)
-    .linkDirectionalParticleSpeed(0.006)
-    .linkDirectionalParticleWidth(2)
+    .linkDirectionalParticleSpeed(particleSpeed)
+    .linkDirectionalParticleWidth(hoverAwareParticleWidth)
     .linkDirectionalParticleColor(link => {
       const key = linkKey(link);
       return linkParticleColorState.get(key) || link.particleColor || link.color;
     })
+    .linkDirectionalParticleCanvasObject(drawNeuralParticle)
     .warmupTicks(100)
     .cooldownTime(30000)
     .autoPauseRedraw(false)
@@ -324,8 +366,8 @@ function initNetwork(graphData) {
     });
 
   // Physics — tuned for readable graph layout with 500+ nodes
-  graph.d3Force('charge').strength(-800);
-  graph.d3Force('link').distance(80);
+  graph.d3Force('charge').strength(node => massAwareChargeStrength(node, -800));
+  graph.d3Force('link').distance(link => massAwareLinkDistance(link, 80));
   graph.d3Force('center').strength(0.05);
   // Add collision force via d3-force to prevent node overlap
   // This is more efficient than the manual O(N²) loop below
@@ -333,31 +375,8 @@ function initNetwork(graphData) {
     graph.d3Force('collision').radius(node => nodeRadius(node.val || 4) + 4);
   }
 
-  // Tag-based clustering — assign each node a cluster centroid and gently
-  // pull it toward its cluster center. Creates visible super-clusters by tag.
-  const tagCentroids = {};
-  const tagCounts = {};
-  fgNodes.forEach(n => {
-    const tags = n._tags || '';
-    let primaryTag = '';
-    if (Array.isArray(tags) && tags.length > 0) {
-      primaryTag = tags[0].replace(/^[\[\]]+|[\[\]]+$/g, '').trim();
-    } else if (typeof tags === 'string' && tags.trim()) {
-      primaryTag = tags.replace(/^[\[\]]+|[\[\]]+$/g, '').split(',')[0].trim();
-    }
-    if (!primaryTag) primaryTag = '_unsorted';
-    n._cluster = primaryTag;
-    tagCounts[primaryTag] = (tagCounts[primaryTag] || 0) + 1;
-  });
-  // Assign centroid angles in a circle layout for clusters
-  // Large radius so clusters are well-separated and don't collapse to center
-  const tagList = Object.keys(tagCounts).sort((a, b) => tagCounts[b] - tagCounts[a]);
-  const clusterCenters = {};
-  const clusterRadius = 800 + tagList.length * 40;
-  tagList.forEach((tag, i) => {
-    const angle = (i / tagList.length) * 2 * Math.PI;
-    clusterCenters[tag] = { x: Math.cos(angle) * clusterRadius, y: Math.sin(angle) * clusterRadius };
-  });
+  // Cluster positions were seeded before graph creation. Do not run a live
+  // centroid force here: it causes slow collapse after the simulation cools.
   // Manual collision force — grid-based spatial hash for O(N) performance.
   // With 584 nodes, the old O(N²) loop did 170k comparisons per tick.
   // This grid approach bins nodes into cells and only checks neighbors.
@@ -375,19 +394,6 @@ function initNetwork(graphData) {
         if (!data || !data.nodes) { requestAnimationFrame(tick); return; }
         const nodes = data.nodes;
         const N = nodes.length;
-
-        // Cluster force — very gentle pull toward tag cluster center
-        // Low strength so it doesn't overpower the charge repulsion
-        const CLUSTER_STRENGTH = 0.003;
-        for (let i = 0; i < N; i++) {
-          const n = nodes[i];
-          if (n.x == null || n.y == null) continue;
-          const center = clusterCenters[n._cluster];
-          if (center) {
-            n.x += (center.x - n.x) * CLUSTER_STRENGTH;
-            n.y += (center.y - n.y) * CLUSTER_STRENGTH;
-          }
-        }
 
         // Compute bounding box and cell size
         let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -445,10 +451,13 @@ function initNetwork(graphData) {
                       const push = (minDist - dist) * 0.15;
                       const nx = ddx / dist;
                       const ny = ddy / dist;
-                      a.x -= nx * push;
-                      a.y -= ny * push;
-                      b.x += nx * push;
-                      b.y += ny * push;
+                      const ma = Math.max(0.35, a._mass || 1);
+                      const mb = Math.max(0.35, b._mass || 1);
+                      const totalMass = ma + mb;
+                      a.x -= nx * push * (mb / totalMass);
+                      a.y -= ny * push * (mb / totalMass);
+                      b.x += nx * push * (ma / totalMass);
+                      b.y += ny * push * (ma / totalMass);
                     }
                   }
                 }
@@ -531,15 +540,31 @@ function setGraphDataPreservingView(data, opts = {}) {
   if (!graph) return;
   const center = typeof graph.centerAt === 'function' ? graph.centerAt() : null;
   const zoom = typeof graph.zoom === 'function' ? graph.zoom() : null;
+  const liveData = graph.graphData ? graph.graphData() : { nodes: [] };
+  const liveNodeById = new Map((liveData.nodes || []).map(n => [n.id, n]));
+  const finiteOrUndefined = value => Number.isFinite(value) ? value : undefined;
   // Build a fresh graph. NEVER spread force-graph internal objects — their
   // properties may have non-writable descriptors that crash in Safari/WebKit.
+  // Preserve live coordinates across structural updates; otherwise any query that
+  // adds a Hebbian/neurogenesis edge makes d3 reinitialize nodes into phyllotaxis
+  // packing — the “perfect turtle shell” collapse.
   const safeData = {
-    nodes: (data.nodes || []).map(node => ({
+    nodes: (data.nodes || []).map(node => {
+      const liveNode = liveNodeById.get(node.id) || {};
+      return {
       id: node.id, name: node.name, color: node.color, val: node.val,
+      x: finiteOrUndefined(node.x) ?? finiteOrUndefined(liveNode.x),
+      y: finiteOrUndefined(node.y) ?? finiteOrUndefined(liveNode.y),
+      vx: finiteOrUndefined(node.vx) ?? finiteOrUndefined(liveNode.vx),
+      vy: finiteOrUndefined(node.vy) ?? finiteOrUndefined(liveNode.vy),
+      fx: finiteOrUndefined(node.fx) ?? finiteOrUndefined(liveNode.fx),
+      fy: finiteOrUndefined(node.fy) ?? finiteOrUndefined(liveNode.fy),
       _opacity: node._opacity, _shape: node._shape, _dormant: node._dormant,
+      _mass: node._mass,
       _tags: node._tags, _title: node._title, _path: node._path, _text: node._text,
       _hidden: node._hidden,
-    })),
+    };
+    }),
     links: (data.links || []).map(link => {
       const s = typeof link.source === 'object' ? link.source.id : link.source;
       const t = typeof link.target === 'object' ? link.target.id : link.target;

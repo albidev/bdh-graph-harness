@@ -25,6 +25,44 @@ function nodeRadius(val) {
   return Math.log2((val || 4) + 1) * 4 + 2;
 }
 
+// Semantic/structural mass used by the physics layer. d3-force itself has no
+// real per-node mass, so we emulate it consistently: heavier nodes repel more,
+// drift less toward tag centroids, and move less when collision resolution runs.
+function computeNodeMass(node, degree, maxDegree) {
+  const degNorm = maxDegree > 0 ? Math.max(0, Math.min(1, degree / maxDegree)) : 0;
+  let mass = degree <= 0 ? 0.45 : 0.7 + Math.sqrt(degNorm) * 2.4;
+  const tags = (node && node.tags ? String(node.tags) : '').toLowerCase();
+  if (node && node.dormant) mass *= 0.65;
+  if (tags.includes('neurogenesis')) mass *= 1.15;
+  return Math.max(0.35, Math.min(3.4, mass));
+}
+
+function massAwareChargeStrength(node, baseStrength) {
+  const mass = node && node._mass ? node._mass : 1;
+  return baseStrength * (0.65 + Math.sqrt(mass) * 0.45);
+}
+
+function endpointMass(endpoint) {
+  return endpoint && typeof endpoint === 'object' && endpoint._mass ? endpoint._mass : 1;
+}
+
+function massAwareLinkDistance(link, baseDistance) {
+  const avgMass = (endpointMass(link.source) + endpointMass(link.target)) / 2;
+  let typeScale = 1.0;
+  if (link.type === 'hebbian') {
+    // Strong Hebbian links should be closer, but weak rendered Hebbian links
+    // should not act like rubber bands that collapse the whole graph.
+    const weight = typeof link.weight === 'number' ? link.weight : 0.3;
+    typeScale = 1.35 - Math.min(0.55, weight * 0.8);
+  } else if (link.type === 'phantom') {
+    typeScale = 1.35;
+  } else if (link.type === 'wikilink') {
+    typeScale = 1.05;
+  }
+  const massSpread = 1 + Math.max(0, avgMass - 1) * 0.12;
+  return baseDistance * typeScale * massSpread;
+}
+
 // Convert hex color to rgba with alpha (for edge opacity by type)
 function withAlpha(hex, alpha) {
   if (!hex || hex[0] !== '#') return hex;
@@ -92,6 +130,154 @@ function loadControlValue(key, fallback) {
     return fallback;
   }
 }
+
+// Console-tunable neural particle bloom. Default mode is subtle ambient flow:
+//   BDHParticles.preset('insane')   // manual temporary fireworks
+//   BDHParticles.preset('subtle')   // return to always-on calm synapses
+//   BDHParticles.get()
+const PARTICLE_CONFIG_KEY = 'bdh-particle-bloom-config';
+const PARTICLE_PRESETS = {
+  subtle: {
+    enabled: true, ambient: true,
+    activeBloom: 18, activeCore: 3.6, activeHalo: 13, activeParticles: 6,
+    ambientBloom: 6, ambientCore: 1.4, ambientHalo: 6, ambientAlpha: 0.28,
+    ambientParticles: 1, ambientThreshold: 0.78, speed: 0.01,
+    activeAlpha: 0.95, ambientColor: '#d2a8ff', activeColor: '#f0d2ff',
+  },
+  loud: {
+    enabled: true, ambient: true,
+    activeBloom: 38, activeCore: 5.8, activeHalo: 24, activeParticles: 11,
+    ambientBloom: 12, ambientCore: 2.2, ambientHalo: 10, ambientAlpha: 0.5,
+    ambientParticles: 1, ambientThreshold: 0.68, speed: 0.016,
+    activeAlpha: 0.95, ambientColor: '#d2a8ff', activeColor: '#f0d2ff',
+  },
+  insane: {
+    enabled: true, ambient: true,
+    activeBloom: 58, activeCore: 7, activeHalo: 32, activeParticles: 16,
+    ambientBloom: 18, ambientCore: 2.8, ambientHalo: 14, ambientAlpha: 0.65,
+    ambientParticles: 1, ambientThreshold: 0.6, speed: 0.02,
+    activeAlpha: 0.98, ambientColor: '#d2a8ff', activeColor: '#f0d2ff',
+  },
+  off: { enabled: false, ambient: false },
+  ambientOff: { enabled: true, ambient: false },
+};
+const DEFAULT_PARTICLE_CONFIG = { ...PARTICLE_PRESETS.subtle };
+let particleConfig = { ...DEFAULT_PARTICLE_CONFIG };
+let queryParticleMode = false;
+let queryParticleTimer = null;
+
+function loadParticleConfig() {
+  // The app default is intentionally subtle. Old localStorage values (especially
+  // a manually saved `insane`) must not make the graph rave forever after reload.
+  particleConfig = { ...DEFAULT_PARTICLE_CONFIG };
+}
+
+function saveParticleConfig() {
+  try { localStorage.setItem(PARTICLE_CONFIG_KEY, JSON.stringify(particleConfig)); }
+  catch(e) { /* Ignore storage failures; console controls still work in-session. */ }
+}
+
+function applyParticlePreset(name, { persist = true } = {}) {
+  const preset = PARTICLE_PRESETS[name];
+  if (!preset) return { error: 'Unknown preset', presets: Object.keys(PARTICLE_PRESETS) };
+  particleConfig = { ...particleConfig, ...preset };
+  if (persist) saveParticleConfig();
+  requestGraphRedraw();
+  return { ...particleConfig, preset: name };
+}
+
+function beginQueryParticles() {
+  queryParticleMode = true;
+  if (queryParticleTimer) clearTimeout(queryParticleTimer);
+  applyParticlePreset('insane', { persist: false });
+}
+
+function endQueryParticles(delayMs = 0) {
+  if (queryParticleTimer) clearTimeout(queryParticleTimer);
+  queryParticleTimer = setTimeout(() => {
+    queryParticleMode = false;
+    applyParticlePreset('subtle', { persist: false });
+    queryParticleTimer = null;
+  }, Math.max(0, delayMs));
+}
+
+function isActiveFlowLink(link) {
+  return linkParticlesState.has(linkKey(link));
+}
+
+function isAmbientFlowLink(link) {
+  return particleConfig.enabled && particleConfig.ambient && link.type === 'hebbian' && (link.weight || 0) >= particleConfig.ambientThreshold;
+}
+
+function particleSpeed(link) {
+  return isActiveFlowLink(link) ? particleConfig.speed * 1.35 : particleConfig.speed;
+}
+
+function drawNeuralParticle(x, y, link, ctx, globalScale) {
+  if (!particleConfig.enabled) return;
+  const active = isActiveFlowLink(link);
+  const core = active ? particleConfig.activeCore : particleConfig.ambientCore;
+  const halo = active ? particleConfig.activeHalo : particleConfig.ambientHalo;
+  const bloom = active ? particleConfig.activeBloom : particleConfig.ambientBloom;
+  const alpha = active ? particleConfig.activeAlpha : particleConfig.ambientAlpha;
+  const color = active
+    ? (linkParticleColorState.get(linkKey(link)) || particleConfig.activeColor)
+    : (particleConfig.ambientColor || link.color || COLORS.edgeHebbianHigh);
+  const scaleDamp = Math.max(0.6, Math.min(1.4, 1 / Math.sqrt(globalScale || 1)));
+  const coreR = Math.max(0.8, core * scaleDamp);
+  const haloR = Math.max(coreR + 1, halo * scaleDamp);
+
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.shadowColor = color;
+  ctx.shadowBlur = bloom * scaleDamp;
+
+  const grad = ctx.createRadialGradient(x, y, 0, x, y, haloR);
+  grad.addColorStop(0, withAlpha(color, alpha));
+  grad.addColorStop(0.35, withAlpha(color, alpha * 0.38));
+  grad.addColorStop(1, withAlpha(color, 0));
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.arc(x, y, haloR, 0, 2 * Math.PI);
+  ctx.fill();
+
+  ctx.shadowBlur = bloom * 0.45 * scaleDamp;
+  ctx.fillStyle = withAlpha('#ffffff', active ? 0.92 : 0.55);
+  ctx.beginPath();
+  ctx.arc(x, y, coreR, 0, 2 * Math.PI);
+  ctx.fill();
+
+  ctx.fillStyle = withAlpha(color, active ? 0.95 : 0.65);
+  ctx.beginPath();
+  ctx.arc(x, y, coreR * 1.55, 0, 2 * Math.PI);
+  ctx.fill();
+  ctx.restore();
+}
+
+function installParticleConsoleControls() {
+  loadParticleConfig();
+  window.BDHParticles = {
+    get() { return { ...particleConfig }; },
+    set(next = {}) {
+      particleConfig = { ...particleConfig, ...next };
+      saveParticleConfig();
+      requestGraphRedraw();
+      return { ...particleConfig };
+    },
+    reset() {
+      particleConfig = { ...DEFAULT_PARTICLE_CONFIG };
+      saveParticleConfig();
+      requestGraphRedraw();
+      return { ...particleConfig, preset: 'subtle' };
+    },
+    preset(name) {
+      return applyParticlePreset(name, { persist: true });
+    },
+    beginQuery() { beginQueryParticles(); return { ...particleConfig, mode: 'query' }; },
+    endQuery() { endQueryParticles(); return { ...particleConfig, mode: 'subtle' }; },
+  };
+}
+installParticleConsoleControls();
 
 // ============================================================================
 // Global state
@@ -398,10 +584,25 @@ function hoverAwareParticles(link) {
   const key = linkKey(link);
   if (link._visible === false) return 0;
   if (linkActivationVisible.get(key) === false) return 0;
+  if (linkVisibilityState.get(key) === false) return 0;
   const mapParticles = linkParticlesState.get(key) || 0;
-  if (isHoverEdge(link)) return Math.max(mapParticles || link.particles || 0, 2);
-  if (isHoverLink(link) && hoverHighlight && link._id === hoverHighlight.hoverLinkId) return Math.max(mapParticles || link.particles || 0, 2);
-  return mapParticles || link.particles || 0;
+  if (mapParticles) return particleConfig.enabled ? particleConfig.activeParticles : 0;
+  if (isHoverEdge(link)) return Math.max(link.particles || 0, 4);
+  if (isHoverLink(link) && hoverHighlight && link._id === hoverHighlight.hoverLinkId) return Math.max(link.particles || 0, 4);
+  // Ambient flow: always animate only strong Hebbian edges. Animating all 3k+
+  // Hebbian links turns the graph into Times Square and eats frames; a single
+  // particle on high-weight links gives a living synapse feel without soup.
+  if (isAmbientFlowLink(link)) return particleConfig.ambientParticles;
+  return link.particles || 0;
+}
+
+function hoverAwareParticleWidth(link) {
+  const key = linkKey(link);
+  if (linkActivationVisible.get(key) === false) return 0;
+  if (linkParticlesState.get(key)) return particleConfig.activeCore;
+  if (isHoverEdge(link) || (isHoverLink(link) && hoverHighlight && link._id === hoverHighlight.hoverLinkId)) return 4;
+  if (isAmbientFlowLink(link)) return particleConfig.ambientCore;
+  return 2;
 }
 
 // ============================================================================
