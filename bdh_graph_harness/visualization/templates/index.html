@@ -1015,18 +1015,25 @@ function setHoverHighlight(seedNodeIds = [], seedLinkId = null) {
   const nodeIds = new Set(seedSet);
   const linkIds = new Set(seedLinkId ? [seedLinkId] : []);
 
+  // DEBUG: log traversal for hovered node
+  const _debugLinks = { total: 0, phantomSkip: 0, invisSkip: 0, actSkip: 0, matched: 0 };
+  _debugLinks.total = data.links.length;
+
   data.links.forEach(link => {
-    if (link._visible === false) return;
-    if (linkActivationVisible.get(linkKey(link)) === false) return;
-    if (link.type === 'phantom') return;  // skip phantom links — not structural connections
+    if (link._visible === false) { _debugLinks.invisSkip++; return; }
+    if (linkActivationVisible.get(linkKey(link)) === false) { _debugLinks.actSkip++; return; }
+    if (link.type === 'phantom') { _debugLinks.phantomSkip++; return; }
     const sourceId = linkEndpointId(link.source);
     const targetId = linkEndpointId(link.target);
     if (seedSet.has(sourceId) || seedSet.has(targetId) || link._id === seedLinkId) {
+      _debugLinks.matched++;
       linkIds.add(link._id);
       nodeIds.add(sourceId);
       nodeIds.add(targetId);
     }
   });
+  // Expose for console debugging
+  window._hoverDebug = { seed: seedNodeIds[0], nodeIds: [...nodeIds], links: _debugLinks, totalNodes: data.nodes.length };
 
   hoverHighlight = {
     nodeIds,
@@ -1143,9 +1150,11 @@ function drawNode(node, ctx, globalScale) {
     ctx.closePath();
     ctx.fillStyle = color;
     ctx.fill();
-    ctx.strokeStyle = hoverMatch ? COLORS.edgeHebbianPulse : color;
-    ctx.lineWidth = hoverMatch ? (3 / globalScale) : 1;
-    ctx.stroke();
+    if (hoverMatch) {
+      ctx.strokeStyle = COLORS.edgeHebbianPulse;
+      ctx.lineWidth = 3 / globalScale;
+      ctx.stroke();
+    }
   } else if (shape === 'triangleDown') {
     // Dormant — triangle pointing down
     ctx.beginPath();
@@ -1155,9 +1164,11 @@ function drawNode(node, ctx, globalScale) {
     ctx.closePath();
     ctx.fillStyle = color;
     ctx.fill();
-    ctx.strokeStyle = hoverMatch ? COLORS.edgeHebbianPulse : color;
-    ctx.lineWidth = hoverMatch ? (3 / globalScale) : 1;
-    ctx.stroke();
+    if (hoverMatch) {
+      ctx.strokeStyle = COLORS.edgeHebbianPulse;
+      ctx.lineWidth = 3 / globalScale;
+      ctx.stroke();
+    }
     // Draw 💤 text above
     if (globalScale >= 1.5) {
       ctx.font = (10 / globalScale) + 'px sans-serif';
@@ -1179,20 +1190,25 @@ function drawNode(node, ctx, globalScale) {
     ctx.closePath();
     ctx.fillStyle = color;
     ctx.fill();
-    ctx.strokeStyle = hoverMatch ? COLORS.edgeHebbianPulse : color;
-    ctx.lineWidth = hoverMatch ? (3 / globalScale) : 1;
-    ctx.stroke();
+    if (hoverMatch) {
+      ctx.strokeStyle = COLORS.edgeHebbianPulse;
+      ctx.lineWidth = 3 / globalScale;
+      ctx.stroke();
+    }
   } else {
     // Default — circle
     ctx.beginPath();
     ctx.arc(x, y, r, 0, 2 * Math.PI);
     ctx.fillStyle = color;
     ctx.fill();
-    ctx.strokeStyle = hoverMatch ? COLORS.edgeHebbianPulse : color;
-    ctx.lineWidth = hoverMatch ? (3 / globalScale) : 1;
-    ctx.stroke();
+    if (hoverMatch) {
+      ctx.strokeStyle = COLORS.edgeHebbianPulse;
+      ctx.lineWidth = 3 / globalScale;
+      ctx.stroke();
+    }
   }
 
+  // Highlight ring around the directly hovered node only
   if (hoverMatch && node.id === hoverHighlight.hoverNodeId) {
     ctx.beginPath();
     ctx.arc(x, y, r + (5 / globalScale), 0, 2 * Math.PI);
