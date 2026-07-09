@@ -1418,6 +1418,42 @@ function initNetwork(graphData) {
     .nodeColor(node => node.color)
     .nodeCanvasObject(drawNode)
     .nodeCanvasObjectMode(() => 'replace')
+    .nodePointerAreaPaint((node, color, ctx, globalScale) => {
+      // Generous hit area — larger than the visual node so hovering is forgiving
+      const r = Math.sqrt((node.val || 4) * 20) + 6 / globalScale;
+      const shape = node._shape || 'circle';
+      ctx.fillStyle = color;
+      if (shape === 'diamond') {
+        ctx.beginPath();
+        ctx.moveTo(node.x, node.y - r);
+        ctx.lineTo(node.x + r, node.y);
+        ctx.lineTo(node.x, node.y + r);
+        ctx.lineTo(node.x - r, node.y);
+        ctx.closePath();
+        ctx.fill();
+      } else if (shape === 'triangleDown') {
+        ctx.beginPath();
+        ctx.moveTo(node.x, node.y + r);
+        ctx.lineTo(node.x + r, node.y - r * 0.7);
+        ctx.lineTo(node.x - r, node.y - r * 0.7);
+        ctx.closePath();
+        ctx.fill();
+      } else if (shape === 'hexagon') {
+        ctx.beginPath();
+        for (let i = 0; i < 6; i++) {
+          const angle = (Math.PI / 3) * i;
+          const px = node.x + r * Math.cos(angle);
+          const py = node.y + r * Math.sin(angle);
+          if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+        }
+        ctx.closePath();
+        ctx.fill();
+      } else {
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, r, 0, 2 * Math.PI);
+        ctx.fill();
+      }
+    })
     .nodeVisibility(node => !node._hidden)
     .linkSource('source')
     .linkTarget('target')
@@ -1464,11 +1500,50 @@ function initNetwork(graphData) {
   graph.d3Force('charge').strength(-400);
   graph.d3Force('link').distance(120);
   graph.d3Force('center').strength(0.1);
-  // Add collision force to prevent node overlap when d3-force is available.
-  // Keep a guard here because this page is CDN-backed: visualization should not die
-  // just because a secondary script failed to load.
-  if (window.d3 && typeof window.d3.forceCollide === 'function') {
-    graph.d3Force('collide', window.d3.forceCollide().radius(node => Math.sqrt((node.val || 4) * 20) + 3));
+  // Manual collision force — pushes overlapping nodes apart.
+  // Runs alongside d3's own physics to keep nearby nodes distinguishable.
+  // No d3 dependency needed: we just nudge nodes that are too close.
+  if (!window.__collisionForceInstalled) {
+    window.__collisionForceInstalled = true;
+    (function installCollisionForce() {
+      const MIN_GAP = 8; // minimum pixel gap between node edges
+      let lastTick = 0;
+      function tick() {
+        if (!graph) return;
+        const now = performance.now();
+        if (now - lastTick < 50) { requestAnimationFrame(tick); return; }
+        lastTick = now;
+        const data = graph.graphData();
+        if (!data || !data.nodes) { requestAnimationFrame(tick); return; }
+        const nodes = data.nodes;
+        const N = nodes.length;
+        for (let i = 0; i < N; i++) {
+          const a = nodes[i];
+          if (a.x == null || a.y == null) continue;
+          const ra = Math.sqrt((a.val || 4) * 20);
+          for (let j = i + 1; j < N; j++) {
+            const b = nodes[j];
+            if (b.x == null || b.y == null) continue;
+            const rb = Math.sqrt((b.val || 4) * 20);
+            const dx = b.x - a.x;
+            const dy = b.y - a.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            const minDist = ra + rb + MIN_GAP;
+            if (dist < minDist && dist > 0.01) {
+              const push = (minDist - dist) * 0.15; // soft 15% push per tick
+              const nx = dx / dist;
+              const ny = dy / dist;
+              a.x -= nx * push;
+              a.y -= ny * push;
+              b.x += nx * push;
+              b.y += ny * push;
+            }
+          }
+        }
+        requestAnimationFrame(tick);
+      }
+      requestAnimationFrame(tick);
+    })();
   }
   applyRestoredGraphControls();
   // Let simulation settle before rendering
