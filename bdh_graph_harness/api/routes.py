@@ -185,8 +185,9 @@ async def run_attention_and_plasticity(
     coll = app_state['collection']
     bm25 = app_state.get('bm25_index')
 
-    # Attention (with hybrid search if enabled)
-    active = attention(query, n, e, coll, bm25_index=bm25)
+    # Attention (with hybrid search if enabled, and Hebbian-aware seed boost)
+    active = attention(query, n, e, coll, bm25_index=bm25,
+                       hebbian_state=app_state.get('state'))
 
     activated_notes = []
     if active:
