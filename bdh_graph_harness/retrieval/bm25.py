@@ -67,8 +67,8 @@ class BM25Index:
 
     @staticmethod
     def _tokenize(text):
-        """Tokenize: lowercase, split on non-alphanumeric, filter stop words."""
-        tokens = re.findall(r'[a-z0-9]+', text.lower())
+        """Tokenize: lowercase, split on non-word chars (Unicode-aware), filter stop words."""
+        tokens = re.findall(r'\w+', text.lower(), re.UNICODE)
         return [t for t in tokens if t not in _IT_STOP_WORDS and len(t) > 1]
 
     def _build(self, nodes):

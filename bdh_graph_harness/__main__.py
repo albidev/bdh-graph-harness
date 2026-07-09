@@ -108,7 +108,7 @@ def interactive_mode(vault_root, nodes, edges, collection, state, bm25_index=Non
 
         # Online plasticity: Hebbian update right after attention (Phase 3.2)
         if CONFIG.get('online_plasticity', True):
-            state = hebbian_update(active, state)
+            state, _updated_keys, _pruned = hebbian_update(active, state)
             save_state(vault_root, state)
 
         # Show results
@@ -146,8 +146,8 @@ def interactive_mode(vault_root, nodes, edges, collection, state, bm25_index=Non
         else:
             print(f"\n  🧬 Neurogenesis: no new concepts")
 
-        # Hebbian update
-        state = hebbian_update(active, state)
+        # Hebbian update (post-response, with nodes for quality pruning)
+        state, _updated_keys, _pruned = hebbian_update(active, state, nodes=nodes)
         save_state(vault_root, state)
         print(f"  🔌 Hebbian update: {len(state['synapses'])} synapses\n")
 
@@ -262,7 +262,7 @@ def main():
 
     # Online plasticity: Hebbian update right after attention (Phase 3.2)
     if config.get('online_plasticity', True):
-        state = hebbian_update(active, state)
+        state, _updated_keys, _pruned = hebbian_update(active, state, nodes=nodes)
         save_state(vault_root, state)
         print(f"  🔌 Hebbian update (online): {len(state['synapses'])} synapses")
 

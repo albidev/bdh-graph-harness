@@ -82,6 +82,16 @@ def compute_all_embeddings(nodes, vault_root, force_refresh=False):
         texts = [nodes[nid]['text'][:2000] for nid in to_compute]
         embs = get_embeddings(texts)
 
+        # Verify we got the right number of embeddings (guard against Ollama
+        # returning fewer than requested, which would misalign IDs↔embeddings)
+        if embs is None:
+            print(f"  ⚠ No embeddings returned from Ollama, skipping")
+            return collection
+        if len(embs) < len(to_compute):
+            print(f"  ⚠ Ollama returned {len(embs)} embeddings for {len(to_compute)} notes "
+                  f"— truncating to avoid misalignment")
+            to_compute = to_compute[:len(embs)]
+
         # Upsert into ChromaDB
         for nid, emb in zip(to_compute, embs):
             if not emb:

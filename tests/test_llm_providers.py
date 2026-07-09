@@ -60,7 +60,7 @@ def test_build_payload_openrouter_format(mock_active_notes, mock_nodes, monkeypa
     assert payload['model'] == 'openrouter/free'
     assert payload['stream'] is True
     assert payload['temperature'] == 0.3
-    assert payload['max_tokens'] == 4096
+    assert payload['max_tokens'] == 2048  # defaults to min(llm_max_ctx, 2048)
     assert 'options' not in payload
     assert headers['Authorization'] == 'Bearer sk-test-key-123'
     assert headers['HTTP-Referer'] == 'https://github.com/bdh-graph-harness'

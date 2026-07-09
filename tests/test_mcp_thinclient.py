@@ -28,17 +28,18 @@ def test_merge_mem_only_synapse_preserved():
     assert merged['synapses']['x|y']['frequency'] == 7
 
 
-def test_merge_shared_synapse_higher_frequency_wins():
-    """When a synapse exists in both, the entry with higher frequency wins."""
+def test_merge_shared_synapse_memory_wins():
+    """When a synapse exists in both, the memory version wins (active writer)."""
     disk = {'synapses': {'a|b': {'weight': 0.5, 'frequency': 4, 'last_coactivated': '2026-01-01'}}, 'queries': 10}
-    mem = {'synapses': {'a|b': {'weight': 0.8, 'frequency': 2, 'last_coactivated': '2026-07-04'}}, 'queries': 5}
+    mem = {'synapses': {'a|b': {'weight': 0.8, 'frequency': 2, 'last_coactivated': '2026-07-04'}}, 'queries': 5, 'updated': '2026-07-04'}
     merged = bdh_state_store.merge_states(disk, mem)
-    assert merged['synapses']['a|b']['frequency'] == 4
-    assert merged['synapses']['a|b']['weight'] == 0.5
+    # Memory version wins (active writer has most recent state)
+    assert merged['synapses']['a|b']['frequency'] == 2
+    assert merged['synapses']['a|b']['weight'] == 0.8
 
 
-def test_merge_shared_synapse_frequency_tie_weight_breaks():
-    """When frequency ties, higher weight wins."""
+def test_merge_shared_synapse_no_updated_field():
+    """Without 'updated' field, shared key still uses memory version."""
     disk = {'synapses': {'a|b': {'weight': 0.3, 'frequency': 5, 'last_coactivated': '2026-01-01'}}, 'queries': 10}
     mem = {'synapses': {'a|b': {'weight': 0.9, 'frequency': 5, 'last_coactivated': '2026-07-04'}}, 'queries': 5}
     merged = bdh_state_store.merge_states(disk, mem)
@@ -80,6 +81,7 @@ def test_save_state_merges_with_disk(tmp_path):
         'synapses': {'x|y': {'weight': 0.9, 'frequency': 3, 'last_coactivated': '2026-07-04'}},
         'queries': 5,
         'created': '2026-07-04',
+        'updated': '',  # no updated timestamp → disk-only synapses preserved
     }
     bdh_state_store.save_state(str(tmp_path), mem_state)
 

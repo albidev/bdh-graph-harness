@@ -313,8 +313,8 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
         neighbors = neighbors[:CONFIG['max_neighbors_per_hop']]
 
         for target_id, n_sim in neighbors:
-            # Decay score by hop distance
-            new_score = score * (0.5 ** (hop + 1))
+            # Decay score by hop distance (single decay per hop)
+            new_score = score * CONFIG.get('hop_decay', 0.5)
 
             # Hub dampening for the target
             if CONFIG['hub_dampening'] and degree.get(target_id, 0) > CONFIG['hub_degree_threshold']:

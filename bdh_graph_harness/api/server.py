@@ -57,6 +57,7 @@ def start_api_server(config, nodes, edges, collection, state):
         'state': state,
         'config': config,
         'bm25_index': bm25_idx,
+        'state_lock': asyncio.Lock(),  # protects app_state['state'] from concurrent mutation
     }
 
     # Global set of connected WebSocket clients
@@ -64,6 +65,27 @@ def start_api_server(config, nodes, edges, collection, state):
 
     # Build the aiohttp app and register routes
     app = web.Application()
+
+    # Auth middleware: if api_auth_token is set, require Bearer token on /api/ routes
+    auth_token = config.get('api_auth_token', '')
+    if auth_token:
+        @web.middleware
+        async def auth_middleware(request, handler):
+            # Allow WebSocket upgrade without auth (token checked in WS handler)
+            if request.path == '/ws':
+                # WS auth via query param ?token=...
+                token = request.query.get('token', '')
+                if token != auth_token:
+                    return web.json_response({'error': 'Unauthorized'}, status=401)
+                return await handler(request)
+            # All /api/ routes require Bearer token
+            if request.path.startswith('/api/'):
+                auth = request.headers.get('Authorization', '')
+                if not auth.startswith('Bearer ') or auth[7:] != auth_token:
+                    return web.json_response({'error': 'Unauthorized'}, status=401)
+            return await handler(request)
+        app.middlewares.append(auth_middleware)
+
     setup_routes(app, app_state, ws_clients)
 
     # Start vault file watcher (auto-detect .md changes)
@@ -79,7 +101,12 @@ def start_api_server(config, nodes, edges, collection, state):
             from bdh_graph_harness.api.ws import broadcast_activation
 
             old_nodes = app_state['nodes'] or {}
-            new_nodes, new_edges = build_graph(vault_path, use_cache=False)
+            vault_path_local = vault_path
+
+            # Run blocking graph build in a thread to avoid freezing the event loop
+            new_nodes, new_edges = await asyncio.to_thread(
+                build_graph, vault_path_local, False
+            )
 
             old_ids = set(old_nodes.keys())
             new_ids = set(new_nodes.keys())
@@ -104,10 +131,10 @@ def start_api_server(config, nodes, edges, collection, state):
 
             if added or changed:
                 from bdh_graph_harness.retrieval import compute_all_embeddings
-                # Use force_refresh=False for incremental updates — only compute
-                # embeddings for new/changed notes, not all 400+ notes every time.
-                # force_refresh=True was causing server freezes during watcher updates.
-                app_state['collection'] = compute_all_embeddings(new_nodes, vault_path, force_refresh=False)
+                # Run blocking embedding computation in a thread
+                app_state['collection'] = await asyncio.to_thread(
+                    compute_all_embeddings, new_nodes, vault_path_local, False
+                )
 
             if added:
                 # Build full node data for delta update (no client-side fetch needed)

@@ -168,6 +168,29 @@ def slugify(title):
     return slug.strip('-')
 
 
+def _yaml_escape(value):
+    """Escape a string for safe YAML frontmatter value.
+    Wraps in double quotes and escapes special chars to prevent YAML injection."""
+    if not value:
+        return '""'
+    # Escape backslash and double quotes, then wrap in double quotes
+    escaped = value.replace('\\', '\\\\').replace('"', '\\"')
+    # Also escape newlines (shouldn't happen in titles, but safety first)
+    escaped = escaped.replace('\n', '\\n')
+    return f'"{escaped}"'
+
+
+def _sanitize_for_note(text, max_len=200):
+    """Sanitize text for inclusion in a vault note body.
+    Strips control chars and truncates. Prevents prompt injection from becoming
+    executable YAML or markdown frontmatter injection."""
+    if not text:
+        return ''
+    # Remove null bytes and other control chars (except newline/tab)
+    text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', text)
+    return text[:max_len]
+
+
 def create_note(vault_root, title, definition, source_notes, query):
     """Create a new atomic note in the vault (neurogenesis)."""
     from datetime import datetime
@@ -183,8 +206,12 @@ def create_note(vault_root, title, definition, source_notes, query):
     # Build wikilinks to source notes
     source_links = "\n".join(f"- [[concepts/{slugify(s)}|{s}]]" for s in source_notes[:3])
 
+    # Sanitize: escape YAML frontmatter values, truncate query in body
+    safe_title = _yaml_escape(title)
+    safe_query = _sanitize_for_note(query, max_len=200)
+
     content = f"""---
-title: {title}
+title: {safe_title}
 created: {now[:10]}
 updated: {now[:10]}
 type: concept
@@ -199,7 +226,7 @@ confidence: low
 
 ## Origin
 - **Created by:** BDH Graph Harness neurogenesis
-- **Query:** {query[:200]}
+- **Query:** {safe_query}
 - **Activated from:** {', '.join(source_notes[:3])}
 
 ## Links
