@@ -1163,9 +1163,11 @@ function initNetwork(graphData) {
   // Build force-graph links
   fgLinks = [];
   edgeInfoMap = {};
+  const nodeIdSet = new Set(activeNodeIds);
 
   // Wikilinks
   graphData.edges.forEach(e => {
+    if (!nodeIdSet.has(e.source) || !nodeIdSet.has(e.target)) return;
     const eid = e.source + '→' + e.target;
     const srcTitle = (graphData.nodes.find(n => n.id === e.source) || {}).title || e.source;
     const tgtTitle = (graphData.nodes.find(n => n.id === e.target) || {}).title || e.target;
@@ -1184,6 +1186,7 @@ function initNetwork(graphData) {
 
   // Hebbian synapses
   graphData.hebbian.forEach(h => {
+    if (!nodeIdSet.has(h.note_a) || !nodeIdSet.has(h.note_b)) return;
     const eid = 'hebb_' + h.note_a + '→' + h.note_b;
     const srcTitle = (graphData.nodes.find(n => n.id === h.note_a) || {}).title || h.note_a;
     const tgtTitle = (graphData.nodes.find(n => n.id === h.note_b) || {}).title || h.note_b;
@@ -1205,6 +1208,7 @@ function initNetwork(graphData) {
 
   // Phantom links
   (graphData.phantom || []).forEach(p => {
+    if (!nodeIdSet.has(p.source) || !nodeIdSet.has(p.target)) return;
     const eid = 'phantom_' + p.source + '→' + p.target;
     const srcTitle = (graphData.nodes.find(n => n.id === p.source) || {}).title || p.source;
     const tgtTitle = (graphData.nodes.find(n => n.id === p.target) || {}).title || p.target;
@@ -1236,7 +1240,6 @@ function initNetwork(graphData) {
     .nodeVal(node => node.val)
     .nodeLabel(node => node.name)
     .nodeColor(node => node.color)
-    .nodeOpacity(node => node._opacity != null ? node._opacity : 1.0)
     .nodeCanvasObject(drawNode)
     .nodeCanvasObjectMode(() => 'replace')
     .linkSource('source')
