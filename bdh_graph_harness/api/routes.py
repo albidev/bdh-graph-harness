@@ -675,9 +675,12 @@ async def api_refresh_graph(request, app_state: dict, ws_clients: set) -> web.Re
         for t in node_links:
             target_id = t['target'] if isinstance(t, dict) else t
             node_edges.append({'source': nid, 'target': target_id})
-            resolved = target_id if target_id in old_node_ids else (
-                'wiki/' + target_id if ('wiki/' + target_id) in old_node_ids else None
-            )
+            if target_id in old_node_ids:
+                resolved = target_id
+            elif ('wiki/' + target_id) in old_node_ids:
+                resolved = 'wiki/' + target_id
+            else:
+                resolved = None
             if resolved:
                 src_node = nodes.get(resolved, {})
                 source_notes.append(src_node.get('title', resolved.split('/')[-1]))
