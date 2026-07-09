@@ -2245,13 +2245,23 @@ function applyRestoredGraphControls() {
   if (!graph) return;
   setEdgeLengthMultiplier(edgeLengthMultiplier, false);
   updateSpacing(spacingValue, false);
-  if (restoredZoom != null) {
-    requestAnimationFrame(() => {
-      if (!graph) return;
-      graph.zoom(restoredZoom);
+  // Saved zoom alone is not enough to restore a view: force-graph layouts are
+  // re-simulated on every page load, so the previous camera center can point at
+  // empty space. First fit the freshly-laid-out graph, then optionally restore
+  // the user's zoom level while keeping the newly-correct center.
+  requestAnimationFrame(() => {
+    if (!graph) return;
+    graph.zoomToFit(0, 60);
+    if (restoredZoom != null) {
+      requestAnimationFrame(() => {
+        if (!graph) return;
+        graph.zoom(restoredZoom);
+        syncZoomUI(false);
+      });
+    } else {
       syncZoomUI(false);
-    });
-  }
+    }
+  });
 }
 
 function toggleDirectOnly(on) {
