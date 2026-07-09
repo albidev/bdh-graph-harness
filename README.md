@@ -14,12 +14,12 @@
 ## What it does
 
 Turns an Obsidian vault into a living knowledge graph where:
-- **Notes → neurons** — each note embedded with `nomic-embed-text-v2-moe` (Ollama, local)
+- **Notes → neurons** — each note embedded with `nomic-embed-text-v2-moe` (768d, via Ollama) and stored in ChromaDB with `OllamaEmbeddingFunction`
 - **Wikilinks → synapses** — graph edges from `[[wikilinks]]`
 - **Hebbian learning** — co-activated notes strengthen their synaptic weight over time (frequency + recency + activation correlation)
 - **Vector retrieval** — semantic search via embeddings (default). Optional BM25 hybrid mode for multilingual vaults (disabled by default — see `benchmarks/BM25_ANALYSIS.md`)
 - **Adaptive thresholding** — `max(Q75, mean+1std, 0.15)` to filter noise dynamically
-- **Neurogenesis** — LLM extracts new concepts from queries and creates notes in the vault
+- **Neurogenesis** — LLM extracts new concepts from queries and creates notes in the vault, filtered by a 3-layer signal system (prompt engineering + regex blocklist + semantic dedup) to prevent noise
 - **Node quality scoring** — composite score (strong edges + mean weight + frequency) auto-prunes dormant nodes from visualization; re-activates on strong re-encounter
 - **Sleep-cycle consolidation** — periodic synaptic downscaling (×0.9), structural pruning below weight floor, and stale dormant node removal — mirrors biological sleep consolidation
 - **Server-side file watcher** — mtime-based polling detects vault changes from any source (Obsidian, LLM, scripts) and triggers incremental graph updates
@@ -27,6 +27,16 @@ Turns an Obsidian vault into a living knowledge graph where:
 - **Real-time visualization** — vis.js network showing nodes activating, edges pulsing as Hebbian weights update during queries
 
 For the theory behind these choices — why Hebbian plasticity, why Obsidian, why not just RAG — see [`docs/philosophy.md`](docs/philosophy.md).
+
+## Neurogenesis Signal Filtering
+
+Neurogenesis creates new notes from concepts the LLM identifies in its response. Without filtering, this generates ~50% noise (model names, internal plumbing, generic process words). Three layers ensure signal-first neurogenesis:
+
+1. **Prompt engineering** — the system prompt explicitly instructs the LLM what to extract (algorithms, architectures, patterns, lessons) vs what to reject (model names, API providers, internal plumbing, generic words)
+2. **Regex blocklist** — deterministic post-LLM filter catches model names (`glm-*`, `gemma*`, `mistral-*`, etc.), BDH plumbing (`graph-refresh`, `hebbian-update`, etc.), generic process words, and too-short slugs
+3. **Semantic dedup** — ChromaDB cosine similarity (threshold 0.65) catches spelling variants and semantic duplicates that exact-string matching misses (e.g. `sleepcycle-consolidation` vs `sleep-cycle-consolidation`)
+
+See [`bdh_graph_harness/neurogenesis/creator.py`](bdh_graph_harness/neurogenesis/creator.py) and [`dedupe.py`](bdh_graph_harness/neurogenesis/dedupe.py) for implementation.
 
 ## Architecture
 
@@ -71,8 +81,8 @@ bdh_graph_harness/
 │   ├── openrouter.py        # OpenRouter backend (OpenAI-compatible)
 │   └── prompt.py            # System prompt + context formatting
 ├── neurogenesis/
-│   ├── creator.py           # Concept extraction + note creation
-│   └── dedupe.py            # Fuzzy duplicate detection
+│   ├── creator.py           # Concept extraction + note creation + noise filtering
+│   └── dedupe.py            # Exact + semantic duplicate detection (ChromaDB cosine similarity)
 ├── api/
 │   ├── server.py            # aiohttp app setup + WebSocket
 │   ├── routes.py            # REST endpoints
