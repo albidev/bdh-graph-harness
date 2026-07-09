@@ -1,0 +1,527 @@
+// ============================================================================
+// BDH Graph Harness — force-graph visualization
+// Replaces vis.js with WebGL-powered force-graph for 60 FPS on large vaults
+// ============================================================================
+
+const COLORS = {
+  inactive: '#6e7681',
+  activated: '#f0883e',
+  seed: '#58a6ff',
+  neurogenesis: '#3fb950',  // green — new born nodes
+  dormant: '#30363d',       // dark gray — dormant/low-quality nodes
+  edgeWikilink: '#484f58',
+  edgeHebbianLow: '#3b2066',
+  edgeHebbianMid: '#8957e5',
+  edgeHebbianHigh: '#d2a8ff',
+  edgeHebbianPulse: '#d2a8ff',
+  edgeNeurogenesis: '#3fb950',  // green dashed edges for new connections
+  edgePhantom: '#1f6feb',       // blue dashed edges for phantom links
+  bg: '#0d1117',
+};
+
+// Hebbian edge color by weight (dim → bright green)
+function weightColor(weight) {
+  if (weight < 0.3) return COLORS.edgeHebbianLow;
+  if (weight < 0.6) return COLORS.edgeHebbianMid;
+  return COLORS.edgeHebbianHigh;
+}
+
+// Tag-based color palette (distinct, readable on dark bg)
+const TAG_COLORS = [
+  '#f97583', // red (entities)
+  '#79c0ff', // blue (concepts)
+  '#7ee787', // green (lessons)
+  '#d2a8ff', // purple (comparisons)
+  '#ffa657', // orange (queries)
+  '#ff7b72', // coral
+  '#56d4dd', // cyan
+  '#e3b341', // yellow
+  '#db61a2', // pink
+  '#a5d6ff', // light blue
+  '#b392f0', // lavender
+  '#85e89d', // mint
+];
+
+const STORAGE_KEYS = {
+  hebbianThreshold: 'bdh-graph-hebbian-threshold',
+  spacing: 'bdh-graph-spacing',
+  edgeLength: 'bdh-graph-edge-length',
+  zoom: 'bdh-graph-zoom',
+};
+
+function clampNumber(value, min, max, fallback) {
+  if (value == null || value === '') return fallback;
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(min, Math.min(max, n));
+}
+
+function saveControlValue(key, value) {
+  try { localStorage.setItem(key, String(value)); }
+  catch(e) { /* Storage can be blocked; controls still work for this session. */ }
+}
+
+function loadControlValue(key, fallback) {
+  try {
+    const value = localStorage.getItem(key);
+    return value == null ? fallback : value;
+  } catch(e) {
+    return fallback;
+  }
+}
+
+// ============================================================================
+// Global state
+// ============================================================================
+let graph = null;             // force-graph instance
+let allGraphNodes = [];       // full node list from server
+let fgNodes = [];             // force-graph node objects
+let fgLinks = [];             // force-graph link objects
+let hebbianMap = {};          // "a|b" -> weight
+let orphanNodeIds = [];       // nodes with no connections (hidden by default)
+let tagColorMap = {};         // tag -> color for tag-based node coloring
+let showTagColors = true;     // toggle for tag-based coloring (on by default)
+let directOnly = false;       // toggle for showing only direct wikilink edges
+let hebbianThreshold = 0.3;    // minimum weight for Hebbian edges to show
+let showPhantom = true;       // toggle for phantom (semantic similarity) edges
+let degreeMap = {};           // node_id -> degree (computed from edges)
+let neighborMap = {};         // node_id -> [connected node titles]
+let neurogenesisNodes = {};   // node_id -> node data (preserved across graph refresh)
+let nodeDataMap = {};         // node_id -> full node data (fast tooltip lookup)
+let edgeInfoMap = {};         // edge_id -> {source_title, target_title, type, weight?, frequency?}
+let nodeTagColorMap = {};     // node_id -> color string (preserves tag color across dim/restore)
+let totalConcepts = 0;        // cumulative neurogenesis counter
+let edgeLengthMultiplier = 10; // default: 10px per degree unit
+let spacingValue = 50;        // default: balanced graph spacing
+let restoredZoom = null;      // saved zoom slider value, applied after graph init
+let showOrphans = true;
+let zoomPollTimer = null;
+let lastMouseEvent = { clientX: 0, clientY: 0 }; // tracked for tooltip positioning
+let mouseTrackingInstalled = false;
+let hoverHighlight = null;       // { nodeIds:Set, linkIds:Set, hoverNodeId?, hoverLinkId? }
+let hoverHighlightKey = null;
+let hoverClearFrame = null;
+let hoverEdgeId = null;           // edge-only hover cue; does not dim/highlight the graph
+
+// ============================================================================
+// Custom HTML tooltip
+// ============================================================================
+let tooltipEl = null;
+
+function ensureTooltip() {
+  if (tooltipEl) return;
+  tooltipEl = document.createElement('div');
+  tooltipEl.id = 'custom-tooltip';
+  tooltipEl.style.cssText = 'display:none;position:fixed;z-index:9999;background:#161b22;border:1px solid #30363d;border-radius:8px;padding:10px 14px;pointer-events:none;max-width:300px;font-size:12px;line-height:1.5;color:#c9d1d9;box-shadow:0 4px 12px rgba(0,0,0,0.4)';
+  document.body.appendChild(tooltipEl);
+}
+
+function showTooltip(node, evt) {
+  ensureTooltip();
+  const n = node ? nodeDataMap[node.id] : null;
+  if (!n) { hideTooltip(); return; }
+
+  const title = escapeHtml(n.title || n.id);
+  const path = n._path || n.path || '';
+  const shortPath = path.replace(/.*\/Documents\/Hermes\//, '').replace(/.*\/wiki\//, 'wiki/');
+  const text = (n._text || n.text || '').replace(/\n/g, ' ').substring(0, 150);
+  const deg = degreeMap[n.id] || 0;
+
+  // Tags
+  const rawTags = n._tags || n.tags || '';
+  let tagList = [];
+  if (Array.isArray(rawTags)) {
+    tagList = rawTags.map(t => t.replace(/^[\[\]]+|[\[\]]+$/g, '').trim()).filter(Boolean);
+  } else if (typeof rawTags === 'string' && rawTags.trim()) {
+    tagList = rawTags.replace(/^[\[\]]+|[\[\]]+$/g, '').split(',').map(t => t.trim()).filter(Boolean);
+  }
+  const tagHtml = tagList.map(t => {
+    const c = tagColorMap[t] || '#6e7681';
+    return '<span style="display:inline-flex;align-items:center;gap:3px;margin:1px 6px 1px 0;font-size:11px"><span style="width:7px;height:7px;border-radius:50%;background:' + c + ';display:inline-block"></span>' + escapeHtml(t) + '</span>';
+  }).join('');
+
+  // Connected nodes (first 6)
+  const neighbors = neighborMap[n.id] || [];
+  const neighborHtml = neighbors.slice(0, 6).map(nb => '<span style="color:#58a6ff">' + escapeHtml(nb) + '</span>').join(', ') + (neighbors.length > 6 ? ' <span style="color:#6e7681">+' + (neighbors.length - 6) + ' more</span>' : '');
+
+  let html = '<div style="font-weight:600;color:#f0883e;margin-bottom:4px;font-size:13px">' + title + '</div>';
+  if (tagHtml) html += '<div style="margin-bottom:6px">' + tagHtml + '</div>';
+  if (shortPath) html += '<div style="color:#8b949e;font-size:11px;margin-bottom:3px">📄 ' + escapeHtml(shortPath) + '</div>';
+  html += '<div style="color:#8b949e;font-size:11px;margin-bottom:3px">🔗 ' + deg + ' connection' + (deg !== 1 ? 's' : '') + '</div>';
+  if (neighborHtml) html += '<div style="color:#6e7681;font-size:11px;margin-bottom:4px;border-top:1px solid #30363d;padding-top:4px">→ ' + neighborHtml + '</div>';
+  if (text) html += '<div style="color:#6e7681;font-size:11px;border-top:1px solid #30363d;padding-top:4px">' + escapeHtml(text) + '…</div>';
+
+  tooltipEl.innerHTML = html;
+  tooltipEl.style.display = 'block';
+  positionTooltip(evt);
+}
+
+function showEdgeTooltip(link, evt) {
+  ensureTooltip();
+  const info = edgeInfoMap[link._id];
+  if (!info) { hideTooltip(); return; }
+
+  const isHebbian = info.type === 'hebbian';
+  const icon = isHebbian ? '⚡' : (info.type === 'phantom' ? '👻' : '🔗');
+  const typeLabel = isHebbian ? 'Hebbian Synapse' : (info.type === 'phantom' ? 'Phantom Link' : 'Wikilink');
+
+  let html = '<div style="max-width:280px">';
+  html += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">';
+  html += '<span style="font-size:14px">' + icon + '</span>';
+  html += '<span style="font-weight:600;color:' + (isHebbian ? weightColor(info.weight || 0) : '#8b949e') + '">' + typeLabel + '</span>';
+  html += '</div>';
+  html += '<div style="margin-bottom:4px">';
+  html += '<span style="color:#58a6ff">' + escapeHtml(info.source_title) + '</span>';
+  html += ' <span style="color:#6e7681">→</span> ';
+  html += '<span style="color:#58a6ff">' + escapeHtml(info.target_title) + '</span>';
+  html += '</div>';
+
+  if (isHebbian) {
+    html += '<div style="display:flex;gap:16px;font-size:11px;color:#8b949e">';
+    html += '<span>Weight: <b style="color:' + weightColor(info.weight) + '">' + info.weight.toFixed(3) + '</b></span>';
+    html += '<span>Freq: <b>' + info.frequency + '</b></span>';
+    html += '</div>';
+  } else if (info.type === 'phantom') {
+    html += '<div style="font-size:11px;color:#8b949e">Similarity: <b>' + (info.similarity || 0).toFixed(2) + '</b></div>';
+  }
+
+  html += '</div>';
+
+  tooltipEl.innerHTML = html;
+  tooltipEl.style.display = 'block';
+  positionTooltip(evt);
+}
+
+function isMobile() {
+  return window.innerWidth <= 768 || 'ontouchstart' in window;
+}
+
+function positionTooltip(evt) {
+  if (!tooltipEl) return;
+  if (isMobile()) {
+    tooltipEl.style.left = '10px';
+    tooltipEl.style.right = '10px';
+    tooltipEl.style.bottom = (60 + envInset()) + 'px';
+    tooltipEl.style.top = 'auto';
+    tooltipEl.style.maxWidth = 'calc(100vw - 20px)';
+    tooltipEl.style.width = 'auto';
+  } else {
+    const pad = 16;
+    let x = (evt.clientX || evt.pageX || 0) + pad;
+    let y = (evt.clientY || evt.pageY || 0) + pad;
+    tooltipEl.style.width = '';
+    tooltipEl.style.right = '';
+    tooltipEl.style.bottom = '';
+    const rect = tooltipEl.getBoundingClientRect();
+    if (x + rect.width > window.innerWidth) x = (evt.clientX || evt.pageX || 0) - rect.width - pad;
+    if (y + rect.height > window.innerHeight) y = (evt.clientY || evt.pageY || 0) - rect.height - pad;
+    tooltipEl.style.left = x + 'px';
+    tooltipEl.style.top = y + 'px';
+  }
+}
+
+function envInset() {
+  try { return parseInt(getComputedStyle(document.documentElement).getPropertyValue('env(safe-area-inset-bottom)')) || 0; }
+  catch(e) { return 0; }
+}
+
+function hideTooltip() {
+  if (tooltipEl) tooltipEl.style.display = 'none';
+}
+
+function linkEndpointId(endpoint) {
+  return typeof endpoint === 'object' ? endpoint.id : endpoint;
+}
+
+// Stable key for a link: "sourceId→targetId:type" sorted alphabetically.
+function linkKey(link) {
+  const s = linkEndpointId(link.source);
+  const t = linkEndpointId(link.target);
+  return s < t ? s + '→' + t + ':' + (link.type || 'syn') : t + '→' + s + ':' + (link.type || 'syn');
+}
+
+function isHoverActive() {
+  return !!(hoverHighlight && (hoverHighlight.nodeIds.size || hoverHighlight.linkIds.size));
+}
+
+function isHoverNode(node) {
+  return isHoverActive() && hoverHighlight.nodeIds.has(node.id);
+}
+
+function isHoverLink(link) {
+  return isHoverActive() && hoverHighlight.linkIds.has(link._id);
+}
+
+function isHoverEdge(link) {
+  return hoverEdgeId && link && link._id === hoverEdgeId;
+}
+
+function hoverKey(seedNodeIds = [], seedLinkId = null) {
+  return seedNodeIds.slice().sort().join('|') + '::' + (seedLinkId || '');
+}
+
+function setHoverHighlight(seedNodeIds = [], seedLinkId = null) {
+  if (!graph) return;
+  cancelScheduledHoverClear();
+  clearHoverEdge(false);
+  const nextKey = hoverKey(seedNodeIds, seedLinkId);
+  if (hoverHighlightKey === nextKey) return;
+  const data = graph.graphData();
+  const seedSet = new Set(seedNodeIds.filter(Boolean));
+  const nodeIds = new Set(seedSet);
+  const linkIds = new Set(seedLinkId ? [seedLinkId] : []);
+
+  // DEBUG: log traversal for hovered node
+  const _debugLinks = { total: 0, phantomSkip: 0, invisSkip: 0, actSkip: 0, visSkip: 0, matched: 0 };
+  _debugLinks.total = data.links.length;
+
+  data.links.forEach(link => {
+    if (link._visible === false) { _debugLinks.invisSkip++; return; }
+    if (linkActivationVisible.get(linkKey(link)) === false) { _debugLinks.actSkip++; return; }
+    if (link.type === 'phantom') { _debugLinks.phantomSkip++; return; }
+    // Skip links hidden by hebbian threshold slider — they're not visually connected
+    const linkVis = linkVisibilityState.get(linkKey(link));
+    if (linkVis === false) { _debugLinks.visSkip++; return; }
+    const sourceId = linkEndpointId(link.source);
+    const targetId = linkEndpointId(link.target);
+    if (seedSet.has(sourceId) || seedSet.has(targetId) || link._id === seedLinkId) {
+      _debugLinks.matched++;
+      linkIds.add(link._id);
+      nodeIds.add(sourceId);
+      nodeIds.add(targetId);
+    }
+  });
+  // Expose for console debugging
+  window._hoverDebug = { seed: seedNodeIds[0], nodeIds: [...nodeIds], links: _debugLinks, totalNodes: data.nodes.length };
+
+  hoverHighlight = {
+    nodeIds,
+    linkIds,
+    hoverNodeId: seedNodeIds.length === 1 ? seedNodeIds[0] : null,
+    hoverLinkId: seedLinkId,
+  };
+  hoverHighlightKey = nextKey;
+  requestGraphRedraw();
+}
+
+function cancelScheduledHoverClear() {
+  if (hoverClearFrame == null) return;
+  cancelAnimationFrame(hoverClearFrame);
+  hoverClearFrame = null;
+}
+
+function scheduleClearHoverHighlight() {
+  cancelScheduledHoverClear();
+  hoverClearFrame = requestAnimationFrame(() => {
+    hoverClearFrame = null;
+    clearHoverHighlight();
+    hideTooltip();
+  });
+}
+
+function clearHoverHighlight() {
+  cancelScheduledHoverClear();
+  if (!hoverHighlight) return;
+  hoverHighlight = null;
+  hoverHighlightKey = null;
+  requestGraphRedraw();
+}
+
+function setHoverEdge(linkId) {
+  if (!graph || !linkId) return;
+  cancelScheduledHoverClear();
+  clearHoverHighlight();
+  if (hoverEdgeId === linkId) return;
+  hoverEdgeId = linkId;
+  requestGraphRedraw();
+}
+
+function clearHoverEdge(redraw = true) {
+  if (!hoverEdgeId) return;
+  hoverEdgeId = null;
+  if (redraw) requestGraphRedraw();
+}
+
+function hoverAwareLinkColor(link) {
+  const key = linkKey(link);
+  const actVisible = linkActivationVisible.get(key);
+  if (actVisible === false) return 'rgba(0,0,0,0)';
+  const mapColor = linkActivationColor.get(key);
+  if (mapColor) return mapColor;
+  if (isHoverEdge(link)) return COLORS.edgeHebbianPulse;
+  if (!isHoverActive()) return link.color;
+  return isHoverLink(link) ? COLORS.edgeHebbianPulse : 'rgba(139,148,158,0.62)';
+}
+
+function hoverAwareLinkWidth(link) {
+  const key = linkKey(link);
+  const actVisible = linkActivationVisible.get(key);
+  if (actVisible === false) return 0;
+  const mapWidth = linkWidthState.get(key);
+  const baseWidth = mapWidth != null ? mapWidth : (link.width || 1);
+  if (isHoverEdge(link)) return Math.max(baseWidth * 2.4, 2.8);
+  if (!isHoverActive()) return baseWidth;
+  return isHoverLink(link) ? Math.max(baseWidth * 2.2, 2.5) : Math.max(baseWidth * 0.85, 0.75);
+}
+
+function hoverAwareParticles(link) {
+  const key = linkKey(link);
+  if (link._visible === false) return 0;
+  if (linkActivationVisible.get(key) === false) return 0;
+  const mapParticles = linkParticlesState.get(key) || 0;
+  if (isHoverEdge(link)) return Math.max(mapParticles || link.particles || 0, 2);
+  if (isHoverLink(link) && hoverHighlight && link._id === hoverHighlight.hoverLinkId) return Math.max(mapParticles || link.particles || 0, 2);
+  return mapParticles || link.particles || 0;
+}
+
+// ============================================================================
+// Node canvas rendering — custom shapes, colors, opacity, 💤 text
+// ============================================================================
+function drawNode(node, ctx, globalScale) {
+  const val = node.val || 4;
+  const actColor = nodeActivationColor.get(node.id);
+  const color = actColor || node.color || COLORS.inactive;
+  const actOpacity = nodeActivationOpacity.get(node.id);
+  const baseOpacity = actOpacity != null ? actOpacity : 1.0;
+  const hoverActive = isHoverActive();
+  const hoverMatch = isHoverNode(node);
+  // Ensure baseOpacity is a valid number — Math.min(undefined, 0.38) === NaN
+  // which makes ctx.globalAlpha default to 1.0, so non-query nodes appear
+  // full-bright during hover and look "highlighted" when they shouldn't be.
+  const safeBase = (typeof baseOpacity === 'number' && !isNaN(baseOpacity)) ? baseOpacity : 1.0;
+  const opacity = hoverActive ? (hoverMatch ? Math.max(safeBase, 0.95) : Math.min(safeBase, 0.38)) : safeBase;
+  const x = node.x;
+  const y = node.y;
+
+  ctx.globalAlpha = opacity;
+
+  const shape = node._shape || 'circle';
+  // force-graph: r = sqrt(val * nodeRelSize), with nodeRelSize=20
+  const r = Math.sqrt(val * 20);
+
+  if (shape === 'diamond') {
+    // Neurogenesis — diamond shape
+    ctx.beginPath();
+    ctx.moveTo(x, y - r);
+    ctx.lineTo(x + r, y);
+    ctx.lineTo(x, y + r);
+    ctx.lineTo(x - r, y);
+    ctx.closePath();
+    ctx.fillStyle = color;
+    ctx.fill();
+    if (hoverMatch) {
+      ctx.strokeStyle = COLORS.edgeHebbianPulse;
+      ctx.lineWidth = 3 / globalScale;
+      ctx.stroke();
+    }
+  } else if (shape === 'triangleDown') {
+    // Dormant — triangle pointing down
+    ctx.beginPath();
+    ctx.moveTo(x, y + r);
+    ctx.lineTo(x + r, y - r * 0.7);
+    ctx.lineTo(x - r, y - r * 0.7);
+    ctx.closePath();
+    ctx.fillStyle = color;
+    ctx.fill();
+    if (hoverMatch) {
+      ctx.strokeStyle = COLORS.edgeHebbianPulse;
+      ctx.lineWidth = 3 / globalScale;
+      ctx.stroke();
+    }
+    // Draw 💤 text above
+    if (globalScale >= 1.5) {
+      ctx.font = (10 / globalScale) + 'px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'bottom';
+      ctx.fillStyle = '#6e7681';
+      ctx.fillText('\u{1F4A4}', x, y - r - 2);
+    }
+  } else if (shape === 'hexagon') {
+    // Hub — hexagon
+    ctx.beginPath();
+    for (let i = 0; i < 6; i++) {
+      const angle = (Math.PI / 3) * i;
+      const px = x + r * Math.cos(angle);
+      const py = y + r * Math.sin(angle);
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.fillStyle = color;
+    ctx.fill();
+    if (hoverMatch) {
+      ctx.strokeStyle = COLORS.edgeHebbianPulse;
+      ctx.lineWidth = 3 / globalScale;
+      ctx.stroke();
+    }
+  } else {
+    // Default — circle
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, 2 * Math.PI);
+    ctx.fillStyle = color;
+    ctx.fill();
+    if (hoverMatch) {
+      ctx.strokeStyle = COLORS.edgeHebbianPulse;
+      ctx.lineWidth = 3 / globalScale;
+      ctx.stroke();
+    }
+  }
+
+  // Highlight ring around the directly hovered node only
+  if (hoverMatch && node.id === hoverHighlight.hoverNodeId) {
+    ctx.beginPath();
+    ctx.arc(x, y, r + (5 / globalScale), 0, 2 * Math.PI);
+    ctx.strokeStyle = COLORS.edgeHebbianPulse;
+    ctx.lineWidth = 1.5 / globalScale;
+    ctx.globalAlpha = 0.9;
+    ctx.stroke();
+    ctx.globalAlpha = opacity;
+  }
+
+  // Node label (visible when zoomed in)
+  if (globalScale >= 1.2 && node.name) {
+    ctx.font = (10 / globalScale) + 'px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    ctx.fillStyle = '#c9d1d9';
+    ctx.globalAlpha = opacity * 0.8;
+    const label = node.name.length > 25 ? node.name.substring(0, 22) + '\u2026' : node.name;
+    ctx.fillText(label, x, y + r + 2);
+  }
+
+  ctx.globalAlpha = 1.0;
+}
+
+
+// ============================================================================
+// Activation state — stored in maps, never mutates live force-graph objects
+// Defined here (graph-core.js) so they're available to graph-init.js and
+// activation.js which load after this file.
+// ============================================================================
+const nodeActivationOpacity = new Map(); // nodeId → opacity
+const nodeActivationColor = new Map();   // nodeId → color string
+const linkActivationVisible = new Map(); // linkKey → bool
+const linkActivationColor = new Map();   // linkKey → color string
+const linkParticlesState = new Map();    // linkKey → number
+const linkParticleColorState = new Map();// linkKey → color string
+const linkWidthState = new Map();        // linkKey → number
+const linkVisibilityState = new Map();  // linkKey → bool (threshold/direct filter)
+
+function clearActivationState() {
+  nodeActivationOpacity.clear();
+  nodeActivationColor.clear();
+  linkActivationVisible.clear();
+  linkActivationColor.clear();
+  linkParticlesState.clear();
+  linkParticleColorState.clear();
+  linkWidthState.clear();
+}
+
+// ============================================================================
+// Utilities
+// ============================================================================
+function escapeHtml(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
