@@ -1216,7 +1216,6 @@ function drawNode(node, ctx, globalScale) {
 // Graph initialization
 // ============================================================================
 function initNetwork(graphData) {
-  window.__graphInitPhase = true;
   // Store full node list for orphan toggle + build fast lookup map
   allGraphNodes = graphData.nodes;
   nodeDataMap = {};
@@ -1497,6 +1496,7 @@ function initNetwork(graphData) {
     .warmupTicks(100)
     .cooldownTime(30000)
     .autoPauseRedraw(false)
+    .enableNodeDrag(true)
     .onNodeHover((node, prevNode) => {
       if (node) {
         clearHoverEdge(false);
@@ -1595,15 +1595,13 @@ function initNetwork(graphData) {
   document.getElementById('stat-synapses').textContent = graphData.stats.synapses;
   document.getElementById('stat-hebbian').textContent = graphData.stats.hebbian_synapses;
 
-  // Apply edge filters on initial load
-  applyEdgeFilters();
+  // NOTE: applyEdgeFilters() is NOT called here — it calls setGraphDataPreservingView
+  // which calls graph.graphData() again, breaking all interactions (drag/zoom/click).
+  // All links are visible by default (linkVisibilityState Map is empty → fallback = show).
+  // applyEdgeFilters will be called on first user interaction with the controls.
 
-  // Re-enable drag AFTER applyEdgeFilters (it calls graphData which may reset drag state)
-  graph.enableNodeDrag(true);
-
-  // Center viewport on graph — must be last, after all graphData() calls
+  // Center viewport on graph — must be last
   graph.zoomToFit(400);
-  window.__graphInitPhase = false;
 
   // Show dormant count if > 0
   const dormantEl = document.getElementById('stat-dormant');
@@ -1641,10 +1639,8 @@ function requestGraphRedraw() {
 // user's current pan/zoom so live updates don't throw the graph off-screen.
 function setGraphDataPreservingView(data, opts = {}) {
   if (!graph) return;
-  // During init: skip viewport preservation so zoomToFit works after
-  const preserveView = !window.__graphInitPhase;
-  const center = preserveView && typeof graph.centerAt === 'function' ? graph.centerAt() : null;
-  const zoom = preserveView && typeof graph.zoom === 'function' ? graph.zoom() : null;
+  const center = typeof graph.centerAt === 'function' ? graph.centerAt() : null;
+  const zoom = typeof graph.zoom === 'function' ? graph.zoom() : null;
   // Build a fresh graph. NEVER spread force-graph internal objects — their
   // properties may have non-writable descriptors that crash in Safari/WebKit.
   const safeData = {
