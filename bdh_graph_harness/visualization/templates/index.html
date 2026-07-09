@@ -2128,14 +2128,26 @@ function connectWS() {
         if (event.neurons != null) document.getElementById('stat-neurons').textContent = event.neurons;
         if (event.synapses != null) document.getElementById('stat-synapses').textContent = event.synapses;
 
-        // 6. Animate new concepts
-        if (newConcepts.length > 0) {
-          handleActivation({
-            type: 'activation',
-            query: 'graph_refresh',
-            activated_notes: [],
-            hebbian_updates: [],
-            new_concepts: newConcepts,
+        // 6. Animate new concept birth (do NOT clobber existing activation state)
+        if (newConcepts.length > 0 && isHoverActive()) {
+          // Only pulse new concepts if user is actively hovering
+        } else if (newConcepts.length > 0) {
+          // Subtle birth pulse without wiping query activation
+          newConcepts.forEach((nc, i) => {
+            const node = currentData.nodes.find(n => n.id === nc.id);
+            if (!node) return;
+            setTimeout(() => {
+              nodeActivationOpacity.set(nc.id, 1.0);
+              nodeActivationColor.set(nc.id, COLORS.neurogenesis);
+              requestGraphRedraw();
+            }, i * 150);
+            setTimeout(() => {
+              // Restore to dim if query is active, or full opacity if not
+              const hasQuery = nodeActivationOpacity.size > 0 && [...nodeActivationOpacity.values()].some(o => o < 1);
+              nodeActivationOpacity.set(nc.id, hasQuery ? 0.3 : 1.0);
+              nodeActivationColor.delete(nc.id);
+              requestGraphRedraw();
+            }, i * 150 + 1200);
           });
         }
 
