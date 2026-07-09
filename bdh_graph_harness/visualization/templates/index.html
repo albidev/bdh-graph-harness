@@ -977,6 +977,13 @@ function linkEndpointId(endpoint) {
   return typeof endpoint === 'object' ? endpoint.id : endpoint;
 }
 
+// Stable key for a link: "sourceId→targetId:type" sorted alphabetically.
+function linkKey(link) {
+  const s = linkEndpointId(link.source);
+  const t = linkEndpointId(link.target);
+  return s < t ? s + '→' + t + ':' + (link.type || 'syn') : t + '→' + s + ':' + (link.type || 'syn');
+}
+
 function isHoverActive() {
   return !!(hoverHighlight && (hoverHighlight.nodeIds.size || hoverHighlight.linkIds.size));
 }
@@ -1010,6 +1017,7 @@ function setHoverHighlight(seedNodeIds = [], seedLinkId = null) {
 
   data.links.forEach(link => {
     if (link._visible === false) return;
+    if (linkActivationVisible.get(linkKey(link)) === false) return;
     const sourceId = linkEndpointId(link.source);
     const targetId = linkEndpointId(link.target);
     if (seedSet.has(sourceId) || seedSet.has(targetId) || link._id === seedLinkId) {
@@ -1068,7 +1076,8 @@ function clearHoverEdge(redraw = true) {
 }
 
 function hoverAwareLinkColor(link) {
-  if (link._visible === false) return 'rgba(0,0,0,0)';
+  const actVisible = linkActivationVisible.get(linkKey(link));
+  if (actVisible === false) return 'rgba(0,0,0,0)';
   if (isHoverEdge(link)) return COLORS.edgeHebbianPulse;
   if (!isHoverActive()) return link.color;
   // Keep non-highlighted edges visible as a gray topology layer, not hidden.
@@ -1076,7 +1085,8 @@ function hoverAwareLinkColor(link) {
 }
 
 function hoverAwareLinkWidth(link) {
-  if (link._visible === false) return 0;
+  const actVisible = linkActivationVisible.get(linkKey(link));
+  if (actVisible === false) return 0;
   const baseWidth = link.width || 1;
   if (isHoverEdge(link)) return Math.max(baseWidth * 2.4, 2.8);
   if (!isHoverActive()) return baseWidth;
@@ -1085,6 +1095,7 @@ function hoverAwareLinkWidth(link) {
 
 function hoverAwareParticles(link) {
   if (link._visible === false) return 0;
+  if (linkActivationVisible.get(linkKey(link)) === false) return 0;
   if (isHoverEdge(link)) return Math.max(link.particles || 0, 2);
   if (isHoverLink(link) && hoverHighlight && link._id === hoverHighlight.hoverLinkId) return Math.max(link.particles || 0, 2);
   return link.particles || 0;
@@ -1095,8 +1106,10 @@ function hoverAwareParticles(link) {
 // ============================================================================
 function drawNode(node, ctx, globalScale) {
   const val = node.val || 4;
-  const color = node.color || COLORS.inactive;
-  const baseOpacity = node._opacity != null ? node._opacity : 1.0;
+  const actColor = nodeActivationColor.get(node.id);
+  const color = actColor || node.color || COLORS.inactive;
+  const actOpacity = nodeActivationOpacity.get(node.id);
+  const baseOpacity = actOpacity != null ? actOpacity : 1.0;
   const hoverActive = isHoverActive();
   const hoverMatch = isHoverNode(node);
   const opacity = hoverActive ? (hoverMatch ? Math.max(baseOpacity, 0.95) : Math.min(baseOpacity, 0.38)) : baseOpacity;
@@ -1457,7 +1470,7 @@ function initNetwork(graphData) {
     .nodeVisibility(node => !node._hidden)
     .linkSource('source')
     .linkTarget('target')
-    .linkVisibility(link => link._visible !== false)
+    .linkVisibility(link => linkActivationVisible.get(linkKey(link)) !== false)
     .linkColor(hoverAwareLinkColor)
     .linkWidth(hoverAwareLinkWidth)
     .linkCurvature(0.15)
@@ -1633,42 +1646,58 @@ function setGraphDataPreservingView(data, opts = {}) {
 }
 
 // ============================================================================
+// Activation state — stored in maps, never mutates live force-graph objects
+// ============================================================================
+const nodeActivationOpacity = new Map(); // nodeId → opacity
+const nodeActivationColor = new Map();   // nodeId → color string
+const linkActivationVisible = new Map(); // linkKey → bool
+const linkActivationColor = new Map();   // linkKey → color string
+
+function clearActivationState() {
+  nodeActivationOpacity.clear();
+  nodeActivationColor.clear();
+  linkActivationVisible.clear();
+  linkActivationColor.clear();
+}
+
+// ============================================================================
 // Activation handler — dim non-active nodes, light up active ones, pulse Hebbian
 // ============================================================================
 function handleActivation(event) {
   const activated = event.activated_notes || [];
   const activatedIds = new Set(activated.map(n => n.id));
   const seedId = activated.length > 0 ? activated[0].id : null;
+  const hasActivation = activatedIds.size > 0;
 
-  // Dim all nodes, light up activated ones
-  let currentData = graph.graphData();
+  const currentData = graph.graphData();
+
+  // Write activation state to maps (never touch live node objects)
   currentData.nodes.forEach(node => {
-    if (activatedIds.has(node.id)) {
-      node._opacity = 1.0;
-      // Light up with activation color
+    if (hasActivation) {
+      nodeActivationOpacity.set(node.id, activatedIds.has(node.id) ? 1.0 : 0.3);
       if (node.id === seedId) {
-        node.color = COLORS.seed;
+        nodeActivationColor.set(node.id, COLORS.seed);
+      } else if (activatedIds.has(node.id)) {
+        nodeActivationColor.set(node.id, COLORS.activated);
       } else {
-        node.color = COLORS.activated;
+        nodeActivationColor.set(node.id, nodeTagColorMap[node.id] || COLORS.inactive);
       }
     } else {
-      node._opacity = activatedIds.size > 0 ? 0.3 : 1.0;
-      // Restore tag color
-      node.color = nodeTagColorMap[node.id] || COLORS.inactive;
+      nodeActivationOpacity.delete(node.id);
+      nodeActivationColor.delete(node.id);
     }
   });
 
-  // Dim non-active edges
+  // Write link activation state to maps
   currentData.links.forEach(link => {
-    const sourceId = typeof link.source === 'object' ? link.source.id : link.source;
-    const targetId = typeof link.target === 'object' ? link.target.id : link.target;
+    const key = linkKey(link);
+    const sourceId = linkEndpointId(link.source);
+    const targetId = linkEndpointId(link.target);
     const bothActive = activatedIds.has(sourceId) && activatedIds.has(targetId);
-    if (bothActive) {
-      link._visible = true;
-    } else if (activatedIds.size > 0) {
-      link._visible = false;
+    if (hasActivation) {
+      linkActivationVisible.set(key, bothActive);
     } else {
-      link._visible = true;
+      linkActivationVisible.delete(key);
     }
   });
 
@@ -1676,6 +1705,9 @@ function handleActivation(event) {
 
   // Pulse Hebbian synapses that were strengthened in this query
   const hebbianUpdates = event.hebbian_updates || [];
+  // Collect new Hebbian links to add in a single batch
+  const newHebbLinks = [];
+
   hebbianUpdates.forEach((h, idx) => {
     const parts = h.pair.split('|');
     if (parts.length !== 2) return;
@@ -1684,8 +1716,8 @@ function handleActivation(event) {
 
     // Find the Hebbian link
     const targetLink = currentData.links.find(l => {
-      const ls = typeof l.source === 'object' ? l.source.id : l.source;
-      const lt = typeof l.target === 'object' ? l.target.id : l.target;
+      const ls = linkEndpointId(l.source);
+      const lt = linkEndpointId(l.target);
       return (ls === a && lt === b) || (ls === b && lt === a);
     });
 
@@ -1699,7 +1731,8 @@ function handleActivation(event) {
         targetLink.particleColor = COLORS.edgeHebbianPulse;
         targetLink.color = COLORS.edgeHebbianPulse;
         targetLink.width = newWidth + 5;
-        targetLink._visible = true;
+        const key = linkKey(targetLink);
+        linkActivationVisible.set(key, true);
         requestGraphRedraw();
       }, delay);
 
@@ -1722,8 +1755,12 @@ function handleActivation(event) {
         applyEdgeFilters();
       }, delay + 2500);
     } else if (activatedIds.has(a) || activatedIds.has(b)) {
-      // New Hebbian synapse — add the link live
-      const newLink = {
+      // New Hebbian synapse — collect for batch add
+      const eid = 'hebb_' + a + '→' + b;
+      const srcTitle = (nodeDataMap[a] || {}).title || a;
+      const tgtTitle = (nodeDataMap[b] || {}).title || b;
+      edgeInfoMap[eid] = { source_title: srcTitle, target_title: tgtTitle, type: 'hebbian', weight: h.weight, frequency: h.frequency };
+      newHebbLinks.push({
         source: a,
         target: b,
         color: COLORS.edgeHebbianPulse,
@@ -1733,15 +1770,9 @@ function handleActivation(event) {
         frequency: h.frequency,
         particles: 4,
         particleColor: COLORS.edgeHebbianPulse,
-        _id: 'hebb_' + a + '→' + b,
+        _id: eid,
         _visible: true,
-      };
-      const eid = 'hebb_' + a + '→' + b;
-      const srcTitle = (nodeDataMap[a] || {}).title || a;
-      const tgtTitle = (nodeDataMap[b] || {}).title || b;
-      edgeInfoMap[eid] = { source_title: srcTitle, target_title: tgtTitle, type: 'hebbian', weight: h.weight, frequency: h.frequency };
-      currentData.links.push(newLink);
-      currentData = setGraphDataPreservingView(currentData, { reheat: true }) || currentData;
+      });
 
       // Settle animation
       setTimeout(() => {
@@ -1768,13 +1799,16 @@ function handleActivation(event) {
     }
   });
 
-  // Reset non-Hebbian edge visibility after 4s
+  // Batch-add new Hebbian links to live graph data
+  if (newHebbLinks.length > 0) {
+    const liveData = graph.graphData();
+    newHebbLinks.forEach(link => liveData.links.push(link));
+    requestGraphRedraw();
+  }
+
+  // Reset activation state after 4s
   setTimeout(() => {
-    currentData.links.forEach(link => {
-      if (link.type !== 'hebbian') {
-        link._visible = true;
-      }
-    });
+    clearActivationState();
     requestGraphRedraw();
   }, 4000);
 
@@ -2483,14 +2517,11 @@ function resetQuery() {
   document.getElementById('activated-list').innerHTML = '<div class="empty">No activations yet</div>';
 
   if (graph) {
+    clearActivationState();
+    // Reset Hebbian pulse particles on live links
     const currentData = graph.graphData();
-    currentData.nodes.forEach(node => {
-      node._opacity = 1.0;
-      node.color = nodeTagColorMap[node.id] || COLORS.inactive;
-    });
     currentData.links.forEach(link => {
-      link._visible = true;
-      link.particles = 0;
+      if (link.particles) link.particles = 0;
     });
     requestGraphRedraw();
     applyEdgeFilters();
