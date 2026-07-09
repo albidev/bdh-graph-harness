@@ -1360,7 +1360,8 @@ function initNetwork(graphData) {
   edgeInfoMap = {};
   const nodeIdSet = new Set(activeNodeIds);
 
-  // Wikilinks
+  // === Z-ORDER: links drawn in array order, last = on top ===
+  // 1. Wikilinks (bottom — thin, least important)
   graphData.edges.forEach(e => {
     if (!nodeIdSet.has(e.source) || !nodeIdSet.has(e.target)) return;
     const eid = e.source + '→' + e.target;
@@ -1379,7 +1380,26 @@ function initNetwork(graphData) {
     });
   });
 
-  // Hebbian synapses
+  // 2. Phantom links (middle — dashed, medium importance)
+  (graphData.phantom || []).forEach(p => {
+    if (!nodeIdSet.has(p.source) || !nodeIdSet.has(p.target)) return;
+    const eid = 'phantom_' + p.source + '→' + p.target;
+    const srcTitle = (graphData.nodes.find(n => n.id === p.source) || {}).title || p.source;
+    const tgtTitle = (graphData.nodes.find(n => n.id === p.target) || {}).title || p.target;
+    edgeInfoMap[eid] = { source_title: srcTitle, target_title: tgtTitle, type: 'phantom', similarity: p.similarity };
+    fgLinks.push({
+      source: p.source,
+      target: p.target,
+      color: COLORS.edgePhantom,
+      width: 1.5,
+      type: 'phantom',
+      _id: eid,
+      _dashes: true,
+      _visible: true,
+    });
+  });
+
+  // 3. Hebbian synapses (top — thickest, most important)
   graphData.hebbian.forEach(h => {
     if (!nodeIdSet.has(h.note_a) || !nodeIdSet.has(h.note_b)) return;
     const eid = 'hebb_' + h.note_a + '→' + h.note_b;
@@ -1397,25 +1417,6 @@ function initNetwork(graphData) {
       frequency: h.frequency,
       particles: 0,
       _id: eid,
-      _visible: true,
-    });
-  });
-
-  // Phantom links
-  (graphData.phantom || []).forEach(p => {
-    if (!nodeIdSet.has(p.source) || !nodeIdSet.has(p.target)) return;
-    const eid = 'phantom_' + p.source + '→' + p.target;
-    const srcTitle = (graphData.nodes.find(n => n.id === p.source) || {}).title || p.source;
-    const tgtTitle = (graphData.nodes.find(n => n.id === p.target) || {}).title || p.target;
-    edgeInfoMap[eid] = { source_title: srcTitle, target_title: tgtTitle, type: 'phantom', similarity: p.similarity };
-    fgLinks.push({
-      source: p.source,
-      target: p.target,
-      color: COLORS.edgePhantom,
-      width: 1.5,
-      type: 'phantom',
-      _id: eid,
-      _dashes: true,
       _visible: true,
     });
   });
@@ -1495,7 +1496,7 @@ function initNetwork(graphData) {
     .warmupTicks(100)
     .cooldownTime(30000)
     .autoPauseRedraw(false)
-    .enableNodeDrag(false)
+    .enableNodeDrag(true)
     .onNodeHover((node, prevNode) => {
       if (node) {
         clearHoverEdge(false);
@@ -1656,6 +1657,11 @@ function setGraphDataPreservingView(data, opts = {}) {
       };
     }),
   };
+  // Z-ORDER: sort links so important ones render on top (last in array = drawn last)
+  safeData.links.sort((a, b) => {
+    const order = { wikilink: 0, phantom: 1, hebbian: 2 };
+    return (order[a.type] || 0) - (order[b.type] || 0);
+  });
   graph.graphData(safeData);
   if (opts.reheat && typeof graph.d3ReheatSimulation === 'function') graph.d3ReheatSimulation();
   requestAnimationFrame(() => {
