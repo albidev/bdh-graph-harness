@@ -356,7 +356,8 @@ function showTooltip(node, evt) {
   const neighborLimit = mobile ? 2 : 6;
   const neighborHtml = neighbors.slice(0, mobile ? 2 : 6).map(nb => '<span style="color:#58a6ff">' + escapeHtml(nb) + '</span>').join(', ') + (neighbors.length > neighborLimit ? ' <span style="color:#6e7681">+' + (neighbors.length - neighborLimit) + ' more</span>' : '');
 
-  let html = '<div style="font-weight:600;color:#f0883e;margin-bottom:4px;font-size:13px">' + title + '</div>';
+  let html = mobile ? '<button class="mobile-sheet-close" onclick="dismissMobileSheet()" aria-label="Close node details">×</button>' : '';
+  html += '<div style="font-weight:600;color:#f0883e;margin-bottom:4px;font-size:13px">' + title + '</div>';
   if (tagHtml) html += '<div style="margin-bottom:6px">' + tagHtml + '</div>';
   if (shortPath) html += '<div style="color:#8b949e;font-size:11px;margin-bottom:3px">📄 ' + escapeHtml(shortPath) + '</div>';
   html += '<div style="color:#8b949e;font-size:11px;margin-bottom:3px">🔗 ' + deg + ' connection' + (deg !== 1 ? 's' : '') + '</div>';
@@ -406,7 +407,7 @@ function showEdgeTooltip(link, evt) {
 }
 
 function isMobile() {
-  return window.innerWidth <= 768 || 'ontouchstart' in window;
+  return window.matchMedia('(max-width: 768px)').matches;
 }
 
 function positionTooltip(evt) {
@@ -442,6 +443,12 @@ function envInset() {
 
 function hideTooltip() {
   if (tooltipEl) tooltipEl.style.display = 'none';
+}
+
+// Exposed for the mobile sheet close button. Kept separate from hover cleanup so
+// a deliberate dismiss does not disturb the selected graph context.
+function dismissMobileSheet() {
+  hideTooltip();
 }
 
 function linkEndpointId(endpoint) {

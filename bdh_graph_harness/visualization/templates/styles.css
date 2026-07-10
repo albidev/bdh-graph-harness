@@ -580,20 +580,24 @@
 
   /* ======== MOBILE RESPONSIVE ======== */
   @media (max-width: 768px) {
-    body { display: grid; grid-template-rows: auto 36px minmax(0, 1fr); height: 100dvh; overflow: hidden; }
-    #titlebar { display: block; height: auto; min-height: 0; padding: calc(8px + env(safe-area-inset-top)) 12px 8px; }
+    /* Phone is a graph viewer first. Everything else is deliberately compact. */
+    body { display: grid; grid-template-rows: auto 40px minmax(0, 1fr); height: 100dvh; overflow: hidden; }
+    #titlebar { display: block; height: auto; min-height: 0; padding: calc(10px + env(safe-area-inset-top)) 12px 10px; background: rgba(22, 27, 34, 0.96); }
     #titlebar h1 { display: none; }
-    #titlebar .controls { display: flex; width: 100%; gap: 8px; flex-wrap: wrap; }
+    #titlebar .controls { display: grid; grid-template-columns: minmax(0, 1fr); width: 100%; gap: 8px; }
     #titlebar .toggle-label, #threshold-control, #spacing-control, #edge-filter-group,
     #zoom-controls, .tag-legend, #panel-resize, .collapse-btn { display: none !important; }
-    .vault-control { order: 1; flex: 0 1 138px; }
-    .vault-control select { max-width: 112px; }
-    .search-control { order: 2; flex: 1 1 150px; margin-left: 0; }
-    .search-control input { width: 100%; min-height: 36px; font-size: 16px; }
-    #titlebar .stats { order: 3; width: 100%; overflow-x: auto; font-size: 12px; line-height: 20px; -webkit-overflow-scrolling: touch; }
-    #mobile-tabs { display: flex; height: 36px; background: #161b22; border-bottom: 1px solid #30363d; }
-    #mobile-tabs .tab { flex: 1; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 600; color: #6e7681; cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.2s; user-select: none; -webkit-user-select: none; }
-    #mobile-tabs .tab.active { color: #f0883e; border-bottom-color: #f0883e; }
+    .vault-control { display: none; }
+    .search-control { order: 1; margin-left: 0; }
+    .search-control input { width: 100%; min-height: 44px; padding: 10px 14px; border-radius: 12px; font-size: 16px; }
+    .search-control input:focus { width: 100%; }
+    #titlebar .stats { order: 2; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; width: 100%; font-size: 11px; line-height: 1.15; white-space: normal; }
+    #titlebar .stats > span, #titlebar .stats { font-variant-numeric: tabular-nums; }
+    #titlebar .stats span { display: inline; font-size: 15px; }
+    #titlebar .stats #stat-dormant, #titlebar .stats #stat-phantom, #status-indicator { display: none !important; }
+    #mobile-tabs { display: flex; height: 40px; padding: 4px 12px; gap: 8px; background: #161b22; border-bottom: 1px solid #30363d; }
+    #mobile-tabs .tab { flex: 1; min-height: 32px; display: flex; align-items: center; justify-content: center; border: 1px solid transparent; border-radius: 9px; font-size: 13px; font-weight: 650; color: #8b949e; cursor: pointer; transition: all 0.2s; user-select: none; -webkit-user-select: none; }
+    #mobile-tabs .tab.active { color: #f0883e; background: rgba(240, 136, 62, 0.10); border-color: rgba(240, 136, 62, 0.22); }
     #main { grid-row: 3; height: auto; min-height: 0; flex-direction: column; }
     #graph-area { width: 100%; height: 100%; min-height: 0; flex: 1; }
     #side-panel { width: 100%; height: 100%; min-height: 0; flex: 1; border-left: none; border-top: 1px solid #30363d; display: none; }
@@ -603,11 +607,13 @@
     body.panel-tab #side-panel { display: flex; flex-direction: column; flex: 1; overflow-y: auto; }
     body.panel-tab #side-panel #activated-section { flex: 0 1 auto; max-height: 250px; }
     body.panel-tab #side-panel #response-section { max-height: none; flex: 0 1 auto; }
-    #query-input { font-size: 16px; padding: 12px 32px 12px 14px; }
-    #query-btn { padding: 14px; font-size: 15px; }
+    #query-input { min-height: 44px; font-size: 16px; padding: 12px 38px 12px 14px; }
+    #query-btn { min-height: 44px; padding: 12px; font-size: 15px; }
     #activated-list li { padding: 12px 10px; font-size: 14px; }
     #stats-dashboard { display: none; }
-    #custom-tooltip.mobile-tooltip { max-height: min(32dvh, 300px); overflow: hidden; border-radius: 14px; }
+    #custom-tooltip.mobile-tooltip { left: 12px !important; right: 12px !important; bottom: calc(env(safe-area-inset-bottom) + 12px) !important; width: auto !important; max-width: none !important; max-height: min(26dvh, 220px); padding: 14px 16px 12px !important; overflow: auto; border-radius: 18px; border-color: rgba(88, 166, 255, 0.35); box-shadow: 0 -12px 32px rgba(0, 0, 0, 0.38); pointer-events: auto; }
+    #custom-tooltip.mobile-tooltip::before { content: ''; display: block; width: 34px; height: 4px; margin: -4px auto 10px; border-radius: 999px; background: #484f58; }
+    .mobile-sheet-close { position: absolute; top: 10px; right: 10px; width: 30px; height: 30px; border: 0; border-radius: 50%; background: #21262d; color: #c9d1d9; font-size: 20px; line-height: 1; cursor: pointer; }
   }
   /* Desktop: titlebar row layout */
   /* Hide mobile tabs on desktop */
