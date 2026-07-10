@@ -206,9 +206,9 @@ python -m pytest -q
 python -m pytest -q --cov=bdh_graph_harness --cov-branch --cov-report=term-missing
 ```
 
-The current `develop` baseline is **214 passing tests** and **49% package branch coverage**. The target is 100%, without excluding application modules just to manufacture a prettier number. Regression coverage is already complete for state persistence, consolidation, node quality, and BM25; the remaining work focuses on API/WebSocket, CLI/MCP, graph/cache, embeddings, and provider failure paths.
+The current `develop` baseline is **214 passing tests** and **50% package branch coverage**. The target is 100%, without excluding application modules just to manufacture a prettier number. Regression coverage is already complete for state persistence, consolidation, node quality, and BM25; the remaining work focuses on API/WebSocket, CLI/MCP, graph/cache, embeddings, and provider failure paths.
 
-See [`docs/testing.md`](docs/testing.md) for the coverage policy, exact commands, and multi-vault regression requirements.
+See [`docs/testing.md`](docs/testing.md) for the coverage policy, exact commands, and multi-vault regression requirements. [`docs/coverage.md`](docs/coverage.md) records the current versioned baseline; GitHub Actions keeps the XML and JSON report for every later `develop` or `main` run.
 
 ## Visualization
 

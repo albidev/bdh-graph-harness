@@ -29,7 +29,7 @@ python -m pytest -q \
 
 ## Coverage status
 
-The current `develop` baseline is **214 passing tests** and **49% package branch coverage**. This is an honest baseline, not a badge with lipstick on it.
+The current `develop` baseline is **214 passing tests** and **50% package branch coverage**. This is an honest baseline, not a badge with lipstick on it.
 
 Modules at 100% branch coverage:
 
