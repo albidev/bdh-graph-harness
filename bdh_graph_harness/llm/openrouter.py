@@ -13,13 +13,14 @@ def build_openrouter_payload(messages, stream, config):
         "messages": messages,
         "stream": stream,
         "temperature": config['llm_temperature'],
-        "max_tokens": config['llm_max_ctx'],
+        "max_tokens": config.get('llm_max_tokens', min(config['llm_max_ctx'], 2048)),
     }
     headers = {
         'Content-Type': 'application/json',
         'Authorization': f"Bearer {config.get('openrouter_key', '')}",
         'HTTP-Referer': 'https://github.com/bdh-graph-harness',
         'X-Title': 'BDH Graph Harness',
+        'User-Agent': 'BDH-Graph-Harness/1.0',
     }
     return json.dumps(payload).encode(), headers
 

@@ -52,6 +52,7 @@ CONFIG = {
     'hub_dampening': True,
     'hub_degree_threshold': 25,      # dampen only very high-degree hubs (e.g. wiki/index)
     'max_neighbors_per_hop': 10,
+    'hop_decay': 0.5,  # score decay per hop (single application, not compound)
     'alpha': 0.7,
     'beta': 0.3,
     'decay': 0.95,
@@ -60,6 +61,7 @@ CONFIG = {
     'neurogenesis_enabled': True,
     'api_host': '127.0.0.1',
     'api_port': 8642,
+    'api_auth_token': '',  # if set, requires Authorization: Bearer <token> on all API routes
     'python_exec': sys.executable,
     # Hybrid search (Phase 3.1)
     'hybrid_search': True,
@@ -72,6 +74,13 @@ CONFIG = {
     'threshold_floor': 0.15,
     # Online plasticity (Phase 3.2)
     'online_plasticity': True,
+    # Hebbian-aware seed ranking (Phase 5)
+    'hebbian_seed_boost': True,
+    'hebbian_boost_max': 0.5,              # max boost factor (+50%)
+    'hebbian_boost_top_n': 3,              # only count top-N strongest synapses
+    'hebbian_boost_weight_factor': 0.3,    # multiplier on summed weight
+    'hebbian_boost_window_minutes': 10,    # recency window for "recently active"
+    'hebbian_boost_min_weight': 0.15,      # min synapse weight to consider active
     # Node quality (Phase 3.5)
     'quality_threshold': 0.25,           # below this → dormant
     'quality_reactivation_score': 0.50,  # activation to re-awaken

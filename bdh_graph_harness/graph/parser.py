@@ -25,7 +25,17 @@ def extract_note_id(filepath, vault_root):
 
 
 def find_note_by_id(vault_root, note_id):
-    """Find the actual file for a note ID (may have .md or be in a subdir)."""
+    """Find the actual file for a note ID (may have .md or be in a subdir).
+
+    Path traversal protection: normalizes the note_id and rejects any
+    path that escapes the vault root.
+    """
+    # Normalize and check for path traversal
+    note_id = os.path.normpath(note_id)
+    full_check = os.path.normpath(os.path.join(vault_root, note_id))
+    if not full_check.startswith(os.path.normpath(vault_root)):
+        return None  # path traversal attempt
+
     candidates = [
         os.path.join(vault_root, note_id + '.md'),
         os.path.join(vault_root, note_id),

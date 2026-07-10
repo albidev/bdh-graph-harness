@@ -108,7 +108,7 @@ def interactive_mode(vault_root, nodes, edges, collection, state, bm25_index=Non
 
         # Online plasticity: Hebbian update right after attention (Phase 3.2)
         if CONFIG.get('online_plasticity', True):
-            state = hebbian_update(active, state)
+            state, _updated_keys, _pruned = hebbian_update(active, state)
             save_state(vault_root, state)
 
         # Show results
@@ -146,8 +146,8 @@ def interactive_mode(vault_root, nodes, edges, collection, state, bm25_index=Non
         else:
             print(f"\n  🧬 Neurogenesis: no new concepts")
 
-        # Hebbian update
-        state = hebbian_update(active, state)
+        # Hebbian update (post-response, with nodes for quality pruning)
+        state, _updated_keys, _pruned = hebbian_update(active, state, nodes=nodes)
         save_state(vault_root, state)
         print(f"  🔌 Hebbian update: {len(state['synapses'])} synapses\n")
 
@@ -163,6 +163,8 @@ def main():
     parser.add_argument('query', nargs='*', help='Query text (positional)')
     parser.add_argument('--config', default=None, help='Path to config YAML file')
     parser.add_argument('--vault', default=None, help='Vault root path (overrides config)')
+    parser.add_argument('--vault-id', default=None,
+                        help='Select a configured vault by ID (for multi-vault configs)')
     parser.add_argument('--serve', action='store_true', help='Start the API server')
     parser.add_argument('--stats', action='store_true', help='Show graph statistics')
     parser.add_argument('--hebbian-show', action='store_true', help='Show Hebbian synaptic state')
@@ -177,14 +179,53 @@ def main():
                         help='MCP transport mode (default: stdio)')
     parser.add_argument('--mcp-port', type=int, default=8644,
                         help='MCP HTTP server port (default: 8644)')
+    parser.add_argument('--list-vaults', action='store_true',
+                        help='List configured vaults and exit')
     args = parser.parse_args()
 
     # Load configuration
     config = load_config(args.config)
 
-    # Determine vault root
-    vault_root = args.vault or config['vault_path']
-    vault_root = os.path.expanduser(vault_root)
+    # --list-vaults: show configured vaults and exit
+    if args.list_vaults:
+        from bdh_graph_harness.vaults import normalize_vault_configs
+        import chromadb
+        vault_cfgs = normalize_vault_configs(config)
+        print(f"\n{'id':<12} {'path':<40} {'collection':<30} neurons embeddings")
+        print("-" * 100)
+        for vc in vault_cfgs:
+            neurons = 0
+            embeddings = 0
+            try:
+                from bdh_graph_harness.graph.builder import build_graph
+                nodes, _ = build_graph(vc.path, use_cache=True)
+                neurons = len(nodes)
+            except Exception:
+                pass
+            try:
+                client = chromadb.PersistentClient(path=vc.chroma_path)
+                coll = client.get_collection(vc.chroma_collection)
+                embeddings = coll.count()
+            except Exception:
+                pass
+            print(f"{vc.id:<12} {vc.path:<40} {vc.chroma_collection:<30} {neurons:<7} {embeddings}")
+        print()
+        return
+
+    # Resolve vault (--vault-id takes precedence over --vault)
+    if args.vault_id:
+        from bdh_graph_harness.vaults import normalize_vault_configs
+        vault_cfgs = normalize_vault_configs(config)
+        matched = [v for v in vault_cfgs if v.id == args.vault_id]
+        if not matched:
+            available = [v.id for v in vault_cfgs]
+            print(f"Error: vault-id '{args.vault_id}' not found. Available: {available}")
+            sys.exit(1)
+        vault_root = matched[0].path
+    else:
+        vault_root = args.vault or config['vault_path']
+        vault_root = os.path.expanduser(vault_root)
+
     if not os.path.isdir(vault_root):
         print(f"Error: vault path '{vault_root}' not found")
         sys.exit(1)
@@ -262,7 +303,7 @@ def main():
 
     # Online plasticity: Hebbian update right after attention (Phase 3.2)
     if config.get('online_plasticity', True):
-        state = hebbian_update(active, state)
+        state, _updated_keys, _pruned = hebbian_update(active, state, nodes=nodes)
         save_state(vault_root, state)
         print(f"  🔌 Hebbian update (online): {len(state['synapses'])} synapses")
 

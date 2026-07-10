@@ -116,7 +116,8 @@ async def broadcast_activation(event: dict, ws_clients: set = None) -> None:
     if ws_clients is not None:
         msg = json.dumps(event)
         dead = []
-        for ws in ws_clients:
+        # Copy the set to avoid RuntimeError: Set changed size during iteration
+        for ws in list(ws_clients):
             try:
                 await ws.send_str(msg)
             except Exception:
@@ -130,6 +131,10 @@ async def broadcast_activation(event: dict, ws_clients: set = None) -> None:
 async def websocket_handler(request, app_state: dict, ws_clients: set = None) -> web.WebSocketResponse:
     """WebSocket handler.
 
+    Resolves the target vault from the ``vault_id`` query parameter
+    (defaults to the registry's default vault).  Sends the full graph
+    on connect and receives ping/pong keepalive messages.
+
     When *ws_clients* is supplied the handler registers/deregisters against
     that set (matching the original closure-based design where ``ws_clients``
     was captured from the enclosing ``start_api_server`` scope).
@@ -142,9 +147,24 @@ async def websocket_handler(request, app_state: dict, ws_clients: set = None) ->
     else:
         _default_manager.clients.add(ws)
 
-    n = app_state['nodes']
-    e = app_state['edges']
-    s = app_state['state']
+    # Resolve vault context (default if vault_id not specified)
+    vault_id = request.query.get('vault_id') or None
+    registry = app_state.get('registry')
+    if registry is not None:
+        try:
+            ctx = registry.get(vault_id)
+        except KeyError:
+            ctx = registry.get()  # fall back to default
+        n = ctx.nodes
+        e = ctx.edges
+        s = ctx.state
+        vault_id_label = ctx.config.id
+    else:
+        # Legacy fallback (app_state has flat structure)
+        n = app_state.get('nodes', {})
+        e = app_state.get('edges', {})
+        s = app_state.get('state', {'synapses': {}})
+        vault_id_label = app_state.get('vault_id', 'default')
 
     node_list = []
     for note_id, node in n.items():
@@ -181,6 +201,7 @@ async def websocket_handler(request, app_state: dict, ws_clients: set = None) ->
 
     init_msg = {
         'type': 'graph',
+        'vault_id': vault_id_label,
         'nodes': node_list,
         'edges': edge_list,
         'hebbian': hebbian_list,

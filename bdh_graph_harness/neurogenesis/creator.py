@@ -7,7 +7,42 @@ import json
 
 from bdh_graph_harness.config import CONFIG, retry_with_backoff
 import bdh_graph_harness.config as _config
-from bdh_graph_harness.neurogenesis.dedupe import is_duplicate
+from bdh_graph_harness.neurogenesis.dedupe import is_duplicate, is_semantic_duplicate
+
+
+# --- Noise filters (deterministic, applied before LLM and after) ---
+
+import re as _re
+
+# Regex patterns for concepts that are ALWAYS noise — never create a note for these.
+# Matched against the slugified title (lowercase, hyphenated).
+_NOISE_PATTERNS = [
+    # LLM model names (glm-5, gemma3, ministral-3b, gpt-oss-20b, mimo-v2.5, etc.)
+    _re.compile(r'^(glm|gemma|mistral|ministral|minimax|gpt|gpt-oss|llama|qwen|deepseek|phi|codestral|mimo|command-r|mixtral|yi|solar|dbrx|gemma\d|nemotron)[\w.-]*$'),
+    # Infrastructure/tool names that are just labels, not concepts
+    _re.compile(r'^(ollama|ollama-cloud|openrouter|opencode|opencode-zen|huggingface|anthropic|together|groq|fireworks|runway)$'),
+    # BDH internal plumbing — the graph describing its own operations
+    _re.compile(r'^(changed-nodes|graph-refresh|hebbian-update|hebbian-updates|incremental-update|incremental-updates|initnetwork|newconcepts|delta-update|pulse-animation|removed-nodes|added-node-data|diamond-shape|neuron-particles|new-concepts|graph-rebuild|full-rebuild)$'),
+    # Honcho internal components
+    _re.compile(r'^honcho-(deriver|dialectic|dream|summary|context|search|reasoning)$'),
+    # Generic process descriptors (no domain signal)
+    _re.compile(r'^(incremental|delta|update|refresh|rebuild|init|startup|shutdown|pulse|animation|changed|removed|added)$'),
+]
+
+
+def _is_noise_title(title: str) -> bool:
+    """Deterministic check: is this title pure noise that should never become a note?"""
+    slug = slugify(title)
+    for pat in _NOISE_PATTERNS:
+        if pat.match(slug):
+            return True
+    # Reject very short slugs (< 4 chars) — almost always noise
+    if len(slug) < 4:
+        return True
+    # Reject pure version numbers or sizes (e.g. "3b", "20b", "v2.5")
+    if _re.fullmatch(r'[\d.v-]+', slug):
+        return True
+    return False
 
 
 def extract_new_concepts(llm_response, query, active_notes, nodes):
@@ -18,10 +53,23 @@ def extract_new_concepts(llm_response, query, active_notes, nodes):
     existing_titles = [node['title'] for node in nodes.values()]
 
     system_prompt = (
-        "You are a concept extractor for a knowledge graph. "
+        "You are a concept extractor for a knowledge graph about AI, software, and neuroscience. "
         "Given an LLM response and a list of existing concept titles in the vault, "
-        "identify any NEW concepts introduced in the response that are NOT in the existing list. "
-        "For each new concept, provide: 1) a short title, 2) a 1-sentence definition. "
+        "identify NEW concepts introduced in the response that are NOT in the existing list.\n\n"
+        "EXTRACT concepts that are:\n"
+        "- Algorithms, architectures, or design patterns (e.g. 'sparse attention', 'mixture-of-experts')\n"
+        "- Technical methods or techniques with a specific domain (e.g. 'contrastive learning', 'kv-cache')\n"
+        "- Lessons learned, error patterns, or debugging insights (e.g. 'b-tree corruption recovery')\n"
+        "- Domain concepts that someone would want to look up later\n\n"
+        "DO NOT extract:\n"
+        "- Names of LLM models (e.g. 'glm-5', 'gemma3', 'mistral', 'llama')\n"
+        "- Names of API providers or tools (e.g. 'ollama', 'openrouter', 'huggingface')\n"
+        "- Internal operations of the knowledge graph itself (e.g. 'graph refresh', 'hebbian update', 'neurogenesis', 'changed nodes')\n"
+        "- Generic process words without domain meaning (e.g. 'incremental update', 'delta', 'refresh', 'init')\n"
+        "- Meta-descriptions of what the LLM is doing right now\n"
+        "- Concepts that are just synonyms or spelling variants of existing ones\n"
+        "- Proper nouns that are just labels (company names, product names) without technical depth\n\n"
+        "For each new concept, provide: 1) a short title (2-5 words, descriptive), 2) a 1-sentence definition.\n"
         'Return as JSON array: [{"title": "...", "definition": "..."}]. '
         "If no new concepts, return []."
     )
@@ -55,6 +103,7 @@ def extract_new_concepts(llm_response, query, active_notes, nodes):
         headers['Authorization'] = f"Bearer {CONFIG.get('openrouter_key', '')}"
         headers['HTTP-Referer'] = 'https://github.com/bdh-graph-harness'
         headers['X-Title'] = 'BDH Graph Harness'
+        headers['User-Agent'] = 'BDH-Graph-Harness/1.0'
 
     def _extract_call():
         req = urllib.request.Request(_config.OLLAMA_LLM_URL, data=data, headers=headers)
@@ -82,12 +131,25 @@ def extract_new_concepts(llm_response, query, active_notes, nodes):
                     return []
             concepts = json.loads(content)
             if isinstance(concepts, list):
-                # Filter out duplicates that already exist
-                concepts = [c for c in concepts
-                            if isinstance(c, dict)
-                            and 'title' in c
-                            and not is_duplicate(c['title'], existing_titles)]
-                return concepts
+                # Filter out:
+                # 1. Concepts that already exist (exact title match)
+                # 2. Noise titles (regex blocklist — model names, plumbing, etc.)
+                # 3. Semantic duplicates (embedding similarity > threshold)
+                filtered = []
+                for c in concepts:
+                    if not isinstance(c, dict) or 'title' not in c:
+                        continue
+                    title = c['title']
+                    if is_duplicate(title, existing_titles):
+                        continue
+                    if _is_noise_title(title):
+                        print(f"  🚫 Noise filter rejected: '{title}'", file=sys.stderr)
+                        continue
+                    if is_semantic_duplicate(title, c.get('definition', '')):
+                        print(f"  🔁 Semantic duplicate rejected: '{title}'", file=sys.stderr)
+                        continue
+                    filtered.append(c)
+                return filtered
             return []
 
     try:
@@ -106,6 +168,29 @@ def slugify(title):
     return slug.strip('-')
 
 
+def _yaml_escape(value):
+    """Escape a string for safe YAML frontmatter value.
+    Wraps in double quotes and escapes special chars to prevent YAML injection."""
+    if not value:
+        return '""'
+    # Escape backslash and double quotes, then wrap in double quotes
+    escaped = value.replace('\\', '\\\\').replace('"', '\\"')
+    # Also escape newlines (shouldn't happen in titles, but safety first)
+    escaped = escaped.replace('\n', '\\n')
+    return f'"{escaped}"'
+
+
+def _sanitize_for_note(text, max_len=200):
+    """Sanitize text for inclusion in a vault note body.
+    Strips control chars and truncates. Prevents prompt injection from becoming
+    executable YAML or markdown frontmatter injection."""
+    if not text:
+        return ''
+    # Remove null bytes and other control chars (except newline/tab)
+    text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', text)
+    return text[:max_len]
+
+
 def create_note(vault_root, title, definition, source_notes, query):
     """Create a new atomic note in the vault (neurogenesis)."""
     from datetime import datetime
@@ -121,8 +206,12 @@ def create_note(vault_root, title, definition, source_notes, query):
     # Build wikilinks to source notes
     source_links = "\n".join(f"- [[concepts/{slugify(s)}|{s}]]" for s in source_notes[:3])
 
+    # Sanitize: escape YAML frontmatter values, truncate query in body
+    safe_title = _yaml_escape(title)
+    safe_query = _sanitize_for_note(query, max_len=200)
+
     content = f"""---
-title: {title}
+title: {safe_title}
 created: {now[:10]}
 updated: {now[:10]}
 type: concept
@@ -137,7 +226,7 @@ confidence: low
 
 ## Origin
 - **Created by:** BDH Graph Harness neurogenesis
-- **Query:** {query[:200]}
+- **Query:** {safe_query}
 - **Activated from:** {', '.join(source_notes[:3])}
 
 ## Links

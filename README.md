@@ -4,24 +4,39 @@
 
 # BDH Graph Harness
 
-Graph-based retrieval system for Obsidian vaults with Hebbian synaptic plasticity.
+> **⚠️ Disclaimer**
+> This is an **experimental research project** implementing biological neural network analogies (Hebbian plasticity, neurogenesis, sleep-cycle consolidation) on Obsidian vault graphs. It is **not production software** — API endpoints, configuration, and data formats may change without notice between versions.
+>
+> The theoretical foundation comes from the [Dragon Hatchling paper](https://arxiv.org/abs/2509.26507) (Kosowski et al., 2025). This implementation is an independent exploration of those ideas, not an official implementation of the paper.
+>
+> If you're looking for a stable knowledge management tool, consider [Obsidian](https://obsidian.md) + [Dataview](https://github.com/blacksmithgu/obsidian-dataview) or a mature RAG solution. This project is for people who want to experiment with bio-inspired graph learning.
 
 ## What it does
 
 Turns an Obsidian vault into a living knowledge graph where:
-- **Notes → neurons** — each note embedded with `nomic-embed-text-v2-moe` (Ollama, local)
+- **Notes → neurons** — each note embedded with `nomic-embed-text-v2-moe` (768d, via Ollama) and stored in ChromaDB with `OllamaEmbeddingFunction`
 - **Wikilinks → synapses** — graph edges from `[[wikilinks]]`
 - **Hebbian learning** — co-activated notes strengthen their synaptic weight over time (frequency + recency + activation correlation)
 - **Vector retrieval** — semantic search via embeddings (default). Optional BM25 hybrid mode for multilingual vaults (disabled by default — see `benchmarks/BM25_ANALYSIS.md`)
 - **Adaptive thresholding** — `max(Q75, mean+1std, 0.15)` to filter noise dynamically
-- **Neurogenesis** — LLM extracts new concepts from queries and creates notes in the vault
+- **Neurogenesis** — LLM extracts new concepts from queries and creates notes in the vault, filtered by a 3-layer signal system (prompt engineering + regex blocklist + semantic dedup) to prevent noise
 - **Node quality scoring** — composite score (strong edges + mean weight + frequency) auto-prunes dormant nodes from visualization; re-activates on strong re-encounter
 - **Sleep-cycle consolidation** — periodic synaptic downscaling (×0.9), structural pruning below weight floor, and stale dormant node removal — mirrors biological sleep consolidation
 - **Server-side file watcher** — mtime-based polling detects vault changes from any source (Obsidian, LLM, scripts) and triggers incremental graph updates
-- **LLM responses** — OpenRouter (`openrouter/free`) or local Ollama, with citations back to source notes
-- **Real-time visualization** — vis.js network showing nodes activating, edges pulsing as Hebbian weights update during queries
+- **LLM responses** — any OpenAI-compatible provider (OpenRouter, Ollama Cloud, local Ollama), with citations back to source notes
+- **Real-time visualization** — WebGL force-graph showing nodes activating, edges pulsing as Hebbian weights update during queries
 
 For the theory behind these choices — why Hebbian plasticity, why Obsidian, why not just RAG — see [`docs/philosophy.md`](docs/philosophy.md).
+
+## Neurogenesis Signal Filtering
+
+Neurogenesis creates new notes from concepts the LLM identifies in its response. Without filtering, this generates ~50% noise (model names, internal plumbing, generic process words). Three layers ensure signal-first neurogenesis:
+
+1. **Prompt engineering** — the system prompt explicitly instructs the LLM what to extract (algorithms, architectures, patterns, lessons) vs what to reject (model names, API providers, internal plumbing, generic words)
+2. **Regex blocklist** — deterministic post-LLM filter catches model names (`glm-*`, `gemma*`, `mistral-*`, etc.), BDH plumbing (`graph-refresh`, `hebbian-update`, etc.), generic process words, and too-short slugs
+3. **Semantic dedup** — ChromaDB cosine similarity (threshold 0.65) catches spelling variants and semantic duplicates that exact-string matching misses (e.g. `sleepcycle-consolidation` vs `sleep-cycle-consolidation`)
+
+See [`bdh_graph_harness/neurogenesis/creator.py`](bdh_graph_harness/neurogenesis/creator.py) and [`dedupe.py`](bdh_graph_harness/neurogenesis/dedupe.py) for implementation.
 
 ## Architecture
 
@@ -30,9 +45,9 @@ Obsidian Vault → Embed (Ollama) → ChromaDB + Graph
                                     ↓
 Query → Vector Search → Attention Spread (max_hop=2)
                                     ↓
-Hebbian Update (co-activation strengthening) → LLM Response (OpenRouter)
+Hebbian Update (co-activation strengthening) → LLM Response (OpenAI-compatible)
                                     ↓
-WebSocket → vis.js visualization (nodes light up, synapses pulse)
+WebSocket → force-graph (WebGL) (nodes light up, synapses pulse)
 
 Sleep Cycle (periodic):
   Synaptic Downscaling (×0.9) → Prune (< floor) → Quality Re-eval → Stale Removal
@@ -66,23 +81,27 @@ bdh_graph_harness/
 │   ├── openrouter.py        # OpenRouter backend (OpenAI-compatible)
 │   └── prompt.py            # System prompt + context formatting
 ├── neurogenesis/
-│   ├── creator.py           # Concept extraction + note creation
-│   └── dedupe.py            # Fuzzy duplicate detection
+│   ├── creator.py           # Concept extraction + note creation + noise filtering
+│   └── dedupe.py            # Exact + semantic duplicate detection (ChromaDB cosine similarity)
 ├── api/
 │   ├── server.py            # aiohttp app setup + WebSocket
 │   ├── routes.py            # REST endpoints
 │   ├── ws.py                # WebSocket handlers
 │   └── watcher.py           # Server-side vault file watcher (mtime polling)
 └── visualization/
-    └── templates/index.html # vis.js real-time graph UI
+    └── templates/index.html # force-graph (WebGL) real-time graph UI
 ```
 
 `harness.py` is a compatibility shim that re-exports from the package — tests use `import harness`.
 
 ## Setup
 
-1. **Ollama** running locally with `nomic-embed-text-v2-moe` pulled
-2. **OpenRouter API key** in `OPENROUTER_API_KEY` env var (or switch `llm_provider: ollama` in config)
+1. **Ollama** running locally with `nomic-embed-text-v2-moe` pulled (for embeddings)
+2. **LLM provider** — any OpenAI-compatible endpoint:
+   - **OpenRouter**: set `OPENROUTER_API_KEY` env var (default config uses `openrouter/free`)
+   - **Ollama Cloud**: set `OLLAMA_API_KEY` and point `openrouter_url` to `https://ollama.com/v1/chat/completions`
+   - **Local Ollama**: switch `llm_provider: ollama` in config
+   - Any other OpenAI-compatible API works — just set `openrouter_url`, `openrouter_key`, and `llm_model`
 3. **Python 3.11+** with dependencies:
 
 ```bash
@@ -137,8 +156,8 @@ See `bdh-config.yaml` for all parameters. Key ones:
 | `hybrid_search` | `false` | Enable BM25 hybrid mode (disabled by default for Italian vaults) |
 | `hybrid_alpha` | 0.7 | Vector search weight (only when `hybrid_search: true`) |
 | `hybrid_beta` | 0.3 | BM25 search weight (only when `hybrid_search: true`) |
-| `llm_provider` | `openrouter` | `openrouter` or `ollama` |
-| `llm_model` | `openrouter/free` | Auto-selects available free models |
+| `llm_provider` | `openrouter` | `openrouter` (any OpenAI-compatible endpoint) or `ollama` (local) |
+| `llm_model` | `openrouter/free` | Model name for chosen provider |
 | `api_port` | 8643 | Server port |
 | `quality_threshold` | 0.25 | Quality score below this → node marked dormant |
 | `quality_reactivation_score` | 0.50 | Activation score to re-awaken a dormant node |
@@ -155,16 +174,20 @@ See `bdh-config.yaml` for all parameters. Key ones:
 pytest tests/ -v
 ```
 
-180 tests covering graph building, attention spread, adaptive threshold, BM25, hybrid search (optional), Hebbian updates, LLM providers (Ollama + OpenRouter), neurogenesis, consolidation (downscaling, pruning, stale removal), and API endpoints.
+180 tests covering graph building, attention spread, adaptive threshold, BM25, hybrid search (optional), Hebbian updates, LLM providers (Ollama + OpenAI-compatible), neurogenesis, consolidation (downscaling, pruning, stale removal), and API endpoints.
 
 ## Visualization
 
-The web UI at `:8643` shows a real-time vis.js graph with:
+The web UI at `:8643` shows a real-time force-graph (WebGL) with:
 - **Nodes** colored by activation state or by Obsidian tags (toggle)
-- **Wikilink edges** + **Hebbian synapses** with hover tooltips (weight, type, connected notes)
+- **Wikilink edges** + **Hebbian synapses** + **Phantom links** with hover tooltips (weight, type, connected notes)
 - **Live neurogenesis** — new edges appear in real-time as concepts are created
+- **Hover highlighting** — node hover shows 1-hop subgraph, edge hover highlights the edge
+- **Node drag**, **viewport-preserving updates**, **manual collision force**
+- **Z-order** — wikilinks (bottom) → phantom (middle) → hebbian (top)
 - **Orphan nodes toggle**, **tag legend overlay**, **dark theme**, **mobile responsive** (iPhone safe area, touch dismiss)
 - **Node quality** — dormant nodes dimmed (gray, 30% opacity) with 💤 tooltip; stats bar shows dormant count
+- **Persisted controls** — slider values saved in localStorage, restored on refresh
 
 See [`docs/visualization.md`](docs/visualization.md) for full details on controls, tooltips, and mobile support.
 
@@ -237,7 +260,7 @@ Obsidian edit → Plugin detects → Debounce 1s → POST /api/node-update
 - Ignores non-`.md` files and `.obsidian/` directory
 - Configurable server URL, debounce delay, enable/disable
 
-**Pulse animation:** updated nodes pulse orange for 2.5s then restore to original appearance via remove + re-add (vis.js cannot reset explicit color overrides via `update()` — the remove+re-add trick restores group defaults cleanly).
+**Pulse animation:** Hebbian edges get animated particles during query — color transitions from green through blue, particle count scales with weight gain. Activation state is managed via external Maps to avoid mutating force-graph's live objects.
 
 ## Sleep-Cycle Consolidation
 

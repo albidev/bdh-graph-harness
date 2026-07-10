@@ -1,8 +1,16 @@
 """API server startup for the BDH Graph Harness.
 
-The monkeypatch, BM25 index build, ``app_state`` dict, and ``web.run_app``
-call remain here.  Route handlers have been moved to ``routes.py`` and
-WebSocket logic to ``ws.py``.
+Supports both single-vault (legacy) and multi-vault modes via
+:class:`~bdh_graph_harness.vaults.VaultRegistry`.
+
+The ``app_state`` passed to all route handlers is::
+
+    {
+        'registry': VaultRegistry,
+        'config': dict,        # global config (for server-level settings)
+    }
+
+Route handlers resolve the per-request vault via ``registry.get(vault_id)``.
 """
 
 import asyncio
@@ -18,11 +26,173 @@ logger = logging.getLogger("bdh-server")
 __all__ = ["start_api_server"]
 
 
+def _build_registry(config, nodes, edges, collection, state):
+    """Build a VaultRegistry from the server startup arguments.
+
+    For single-vault (legacy) mode: wraps the pre-built data into a
+    ``VaultContext`` registered as the default vault.
+
+    For multi-vault mode (config has ``vaults:`` key): calls
+    ``registry.load_all()`` to build graph/embeddings/state per vault.
+    Pre-built data is ignored in multi-vault mode — it was built for the
+    *single* ``vault_path`` entry, which may not match the multi-vault list.
+    """
+    from bdh_graph_harness.vaults import (
+        VaultRegistry, VaultContext, normalize_vault_configs,
+    )
+    from bdh_graph_harness.retrieval import BM25Index
+
+    registry = VaultRegistry(config)
+
+    if config.get('vaults'):
+        # Multi-vault mode: load everything from the config
+        registry.load_all()
+    else:
+        # Single-vault (legacy) mode: wrap pre-built data
+        vault_configs = normalize_vault_configs(config)
+        vc = vault_configs[0]
+
+        bm25_idx = None
+        if config.get('hybrid_search', False):
+            print("📊 Building BM25 index for hybrid search...")
+            bm25_idx = BM25Index(
+                nodes,
+                k1=config.get('bm25_k1', 1.5),
+                b=config.get('bm25_b', 0.75),
+            )
+            print(f"   ✓ BM25: {bm25_idx.N} docs, {len(bm25_idx.df)} terms")
+
+        ctx = VaultContext(
+            config=vc,
+            nodes=nodes,
+            edges=edges,
+            collection=collection,
+            state=state,
+            bm25_index=bm25_idx,
+        )
+        registry.register_context(vc.id, ctx)
+
+    return registry
+
+
+def _make_watcher_callback(ctx, app_state, ws_clients):
+    """Factory for the vault watcher callback — avoids closure capture bugs."""
+
+    async def trigger_node_update():
+        from bdh_graph_harness.graph.builder import build_graph
+        from bdh_graph_harness.api.ws import broadcast_activation
+        from bdh_graph_harness.retrieval import compute_all_embeddings
+
+        vault_path = ctx.config.path
+        old_nodes = ctx.nodes or {}
+
+        new_nodes, new_edges = await asyncio.to_thread(
+            build_graph, vault_path, False
+        )
+
+        old_ids = set(old_nodes.keys())
+        new_ids = set(new_nodes.keys())
+        added = sorted(new_ids - old_ids)
+        deleted = sorted(old_ids - new_ids)
+        changed = []
+        for nid in sorted(old_ids & new_ids):
+            old_title = old_nodes[nid].get('title', '')
+            new_title = new_nodes[nid].get('title', '')
+            old_text = old_nodes[nid].get('text', '')
+            new_text = new_nodes[nid].get('text', '')
+            if old_title != new_title or old_text != new_text:
+                changed.append({'id': nid, 'title': new_title, 'old_title': old_title})
+
+        print(
+            f"👁️  trigger_node_update [{ctx.config.id}]: "
+            f"added={len(added)} changed={len(changed)} deleted={len(deleted)}",
+            flush=True,
+        )
+        if not added and not changed and not deleted:
+            print(f"👁️  trigger_node_update [{ctx.config.id}]: no changes, skipping", flush=True)
+            return
+
+        ctx.nodes = new_nodes
+        ctx.edges = new_edges
+
+        if added or changed:
+            ctx.collection = await asyncio.to_thread(
+                compute_all_embeddings, new_nodes, vault_path, False,
+                chroma_path=ctx.config.chroma_path,
+                collection_name=ctx.config.chroma_collection,
+                config=ctx.config.settings,
+            )
+
+        if added:
+            added_node_data = []
+            new_concepts = []
+            for nid in added:
+                node = new_nodes[nid]
+                node_edges = []
+                source_notes = []
+                for link in new_edges.get(nid, []):
+                    target_id = link['target'] if isinstance(link, dict) else link
+                    node_edges.append({'source': nid, 'target': target_id})
+                    if target_id in old_ids:
+                        source_notes.append(old_nodes.get(target_id, {}).get('title', target_id))
+                added_node_data.append({
+                    'id': nid,
+                    'title': node.get('title', nid.split('/')[-1]),
+                    'tags': node.get('tags', ''),
+                    'text': node.get('text', ''),
+                    'path': node.get('path', ''),
+                    'edges': node_edges,
+                })
+                new_concepts.append({
+                    'id': nid,
+                    'title': node.get('title', nid.split('/')[-1]),
+                    'source_notes': source_notes[:5],
+                })
+            await broadcast_activation({
+                'type': 'graph_refresh',
+                'vault_id': ctx.config.id,
+                'neurons': len(new_nodes),
+                'synapses': sum(len(links) for links in new_edges.values()),
+                'delta': len(added) - len(deleted),
+                'new_concepts': new_concepts,
+                'changed_nodes': changed,
+                'deleted_nodes': deleted,
+                'added_node_data': added_node_data,
+                'message': f'{len(added)} new, {len(changed)} changed, {len(deleted)} deleted',
+            }, ws_clients)
+        elif changed or deleted:
+            await broadcast_activation({
+                'type': 'node_update',
+                'vault_id': ctx.config.id,
+                'changed_nodes': changed,
+                'deleted_nodes': deleted,
+                'message': f'{len(changed)} changed, {len(deleted)} deleted',
+            }, ws_clients)
+
+        logger.info(
+            f"Vault watcher [{ctx.config.id}]: "
+            f"{len(added)} new, {len(changed)} changed, {len(deleted)} deleted"
+        )
+
+    return trigger_node_update
+
+
 def start_api_server(config, nodes, edges, collection, state):
-    """Start an aiohttp web API server for the BDH graph harness."""
+    """Start an aiohttp web API server for the BDH Graph Harness.
+
+    Parameters
+    ----------
+    config:
+        Merged configuration dict.
+    nodes, edges:
+        Pre-built graph (used in single-vault mode; ignored in multi-vault mode).
+    collection:
+        Pre-built ChromaDB collection (single-vault mode).
+    state:
+        Pre-loaded Hebbian state dict (single-vault mode).
+    """
 
     # Monkeypatch tcp_keepalive to avoid OSError [Errno 22] on macOS/Tailscale
-    # This is a known aiohttp bug on macOS where setsockopt(SO_KEEPALIVE) fails
     try:
         import aiohttp.tcp_helpers as _tcp_helpers
         _orig = _tcp_helpers.tcp_keepalive
@@ -30,138 +200,79 @@ def start_api_server(config, nodes, edges, collection, state):
             try:
                 _orig(transport)
             except OSError:
-                pass  # Ignore on macOS/Tailscale
+                pass
         _tcp_helpers.tcp_keepalive = _safe_keepalive
     except Exception:
         pass
 
-    # Build BM25 index for hybrid search (Phase 3.1)
-    # BM25Index lives in the retrieval module
-    from bdh_graph_harness.retrieval import BM25Index
+    registry = _build_registry(config, nodes, edges, collection, state)
 
-    bm25_idx = None
-    if config.get('hybrid_search', False):
-        print("📊 Building BM25 index for hybrid search...")
-        bm25_idx = BM25Index(
-            nodes,
-            k1=config.get('bm25_k1', 1.5),
-            b=config.get('bm25_b', 0.75),
-        )
-        print(f"   ✓ BM25: {bm25_idx.N} docs, {len(bm25_idx.df)} terms")
-
-    # Shared mutable state container
+    # Shared mutable state container used by all route handlers
     app_state = {
-        'nodes': nodes,
-        'edges': edges,
-        'collection': collection,
-        'state': state,
+        'registry': registry,
         'config': config,
-        'bm25_index': bm25_idx,
     }
 
-    # Global set of connected WebSocket clients
+    # Global set of connected WebSocket clients (shared across all vaults)
     ws_clients = set()
 
-    # Build the aiohttp app and register routes
+    # Build aiohttp app and register routes
     app = web.Application()
+
+    # Auth middleware
+    auth_token = config.get('api_auth_token', '')
+    if auth_token:
+        @web.middleware
+        async def auth_middleware(request, handler):
+            if request.path == '/ws':
+                token = request.query.get('token', '')
+                if token != auth_token:
+                    return web.json_response({'error': 'Unauthorized'}, status=401)
+                return await handler(request)
+            if request.path.startswith('/api/'):
+                auth = request.headers.get('Authorization', '')
+                if not auth.startswith('Bearer ') or auth[7:] != auth_token:
+                    return web.json_response({'error': 'Unauthorized'}, status=401)
+            return await handler(request)
+        app.middlewares.append(auth_middleware)
+
     setup_routes(app, app_state, ws_clients)
 
-    # Start vault file watcher (auto-detect .md changes)
-    vault_watcher = None
-    vault_path = config.get('vault_path', './wiki')
-
+    # Start one watcher per vault
+    watchers = []
     try:
         from bdh_graph_harness.api.watcher import VaultWatcher
 
-        async def trigger_node_update():
-            """Re-run the node-update logic when vault files change."""
-            from bdh_graph_harness.graph.builder import build_graph
-            from bdh_graph_harness.api.ws import broadcast_activation
+        for ctx in registry.list():
+            try:
+                callback = _make_watcher_callback(ctx, app_state, ws_clients)
+                watcher = VaultWatcher(ctx.config.path, callback)
+                ctx.watcher = watcher
+                watchers.append((ctx, watcher))
+            except Exception as e:
+                print(f"⚠️  Vault watcher setup failed for '{ctx.config.id}': {e}", flush=True)
 
-            old_nodes = app_state['nodes'] or {}
-            new_nodes, new_edges = build_graph(vault_path, use_cache=False)
-
-            old_ids = set(old_nodes.keys())
-            new_ids = set(new_nodes.keys())
-            added = sorted(new_ids - old_ids)
-            deleted = sorted(old_ids - new_ids)
-            changed = []
-            for nid in sorted(old_ids & new_ids):
-                old_title = old_nodes[nid].get('title', '')
-                new_title = new_nodes[nid].get('title', '')
-                old_text = old_nodes[nid].get('text', '')
-                new_text = new_nodes[nid].get('text', '')
-                if old_title != new_title or old_text != new_text:
-                    changed.append({'id': nid, 'title': new_title, 'old_title': old_title})
-
-            print(f"👁️  trigger_node_update: added={len(added)} changed={len(changed)} deleted={len(deleted)}", flush=True)
-            if not added and not changed and not deleted:
-                print(f"👁️  trigger_node_update: no changes detected, skipping", flush=True)
-                return
-
-            app_state['nodes'] = new_nodes
-            app_state['edges'] = new_edges
-
-            if added or changed:
-                from bdh_graph_harness.retrieval import compute_all_embeddings
-                # Use force_refresh=False for incremental updates — only compute
-                # embeddings for new/changed notes, not all 400+ notes every time.
-                # force_refresh=True was causing server freezes during watcher updates.
-                app_state['collection'] = compute_all_embeddings(new_nodes, vault_path, force_refresh=False)
-
-            if added:
-                new_concepts = []
-                for nid in added:
-                    node = new_nodes[nid]
-                    source_notes = []
-                    for link in new_edges.get(nid, []):
-                        target_id = link['target'] if isinstance(link, dict) else link
-                        if target_id in old_ids:
-                            source_notes.append(old_nodes.get(target_id, {}).get('title', target_id))
-                    new_concepts.append({
-                        'id': nid,
-                        'title': node.get('title', nid.split('/')[-1]),
-                        'source_notes': source_notes[:5],
-                    })
-                await broadcast_activation({
-                    'type': 'graph_refresh',
-                    'neurons': len(new_nodes),
-                    'synapses': sum(len(links) for links in new_edges.values()),
-                    'delta': len(added) - len(deleted),
-                    'new_concepts': new_concepts,
-                    'changed_nodes': changed,
-                    'deleted_nodes': deleted,
-                    'message': f'{len(added)} new, {len(changed)} changed, {len(deleted)} deleted',
-                }, ws_clients)
-            elif changed or deleted:
-                await broadcast_activation({
-                    'type': 'node_update',
-                    'changed_nodes': changed,
-                    'deleted_nodes': deleted,
-                    'message': f'{len(changed)} changed, {len(deleted)} deleted',
-                }, ws_clients)
-
-            logger.info(f"Vault watcher: {len(added)} new, {len(changed)} changed, {len(deleted)} deleted")
-
-        vault_watcher = VaultWatcher(vault_path, trigger_node_update)
     except ImportError as e:
         print(f"⚠️  Vault watcher disabled: {e}", flush=True)
     except Exception as e:
-        print(f"⚠️  Vault watcher setup failed: {e}", flush=True)
+        print(f"⚠️  Vault watcher global setup failed: {e}", flush=True)
 
     host = config['api_host']
     port = config['api_port']
     print(f"🌐 BDH Graph Harness API server starting on http://{host}:{port}")
 
-    # Start watcher via on_startup hook (needs the running event loop)
-    if vault_watcher:
-        async def _start_watcher(app):
+    if watchers:
+        async def _start_watchers(app):
             loop = asyncio.get_running_loop()
-            vault_watcher.start(loop)
-            print(f"👁️  Vault watcher active on {vault_path}", flush=True)
-        async def _stop_watcher(app):
-            vault_watcher.stop()
-        app.on_startup.append(_start_watcher)
-        app.on_cleanup.append(_stop_watcher)
+            for ctx, watcher in watchers:
+                watcher.start(loop)
+                print(f"👁️  Vault watcher active on {ctx.config.path} [{ctx.config.id}]", flush=True)
+
+        async def _stop_watchers(app):
+            for ctx, watcher in watchers:
+                watcher.stop()
+
+        app.on_startup.append(_start_watchers)
+        app.on_cleanup.append(_stop_watchers)
 
     web.run_app(app, host=host, port=port)
