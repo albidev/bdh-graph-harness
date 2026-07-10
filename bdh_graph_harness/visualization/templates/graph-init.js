@@ -374,6 +374,11 @@ function initNetwork(graphData) {
         hideTooltip();
       }
     })
+    .onBackgroundClick(() => {
+      clearHoverEdge();
+      clearHoverHighlight();
+      hideTooltip();
+    })
     .onZoom(() => {
       syncZoomUI(true);
     });
