@@ -36,7 +36,7 @@ python -m pytest -q
 python -m pytest -q --cov=bdh_graph_harness --cov-branch --cov-report=term-missing
 ```
 
-The current `develop` baseline is 214 passing tests and 49% package branch coverage. Do not lower it. The project is working toward 100% by adding behavioral tests, not by omitting application modules from collection.
+The current `develop` baseline is 214 passing tests and 50% package branch coverage. Do not lower it. The project is working toward 100% by adding behavioral tests, not by omitting application modules from collection.
 
 For commands, scope, and the regression-test policy, see [`docs/testing.md`](docs/testing.md).
 
