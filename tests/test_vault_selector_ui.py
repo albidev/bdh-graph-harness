@@ -49,8 +49,10 @@ def test_vault_selector_template_wires_the_control_and_scoped_transport():
     """The page loads the selector before the WebSocket/query transport modules."""
     html = (ROOT / "bdh_graph_harness/visualization/templates/index.html").read_text()
     websocket = (ROOT / "bdh_graph_harness/visualization/templates/websocket.js").read_text()
+    styles = (ROOT / "bdh_graph_harness/visualization/templates/styles.css").read_text()
 
     assert 'id="vault-selector"' in html
+    assert '#vault-control[hidden]' in styles
     assert html.index('vault-selector.js') < html.index('websocket.js')
     assert 'vault_id: getActiveVaultId()' in websocket
     assert "vaultApiUrl('/ws')" in websocket

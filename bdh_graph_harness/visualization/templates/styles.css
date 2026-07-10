@@ -29,6 +29,7 @@
     align-items: center;
     gap: 16px;
   }
+  #vault-control[hidden] { display: none; }
   .vault-control {
     display: flex;
     align-items: center;
