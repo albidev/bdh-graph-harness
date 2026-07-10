@@ -10,6 +10,11 @@
 <div id="titlebar">
   <h1>🐉 BDH Graph Harness</h1>
   <div class="controls">
+    <div id="vault-control" class="vault-control" hidden>
+      <label for="vault-selector">Vault</label>
+      <select id="vault-selector" onchange="switchVault(this.value)" aria-label="Select vault"></select>
+      <span id="vault-selector-status" class="vault-selector-status" aria-live="polite"></span>
+    </div>
     <label class="toggle-label" title="Show orphan nodes (no connections)">
       <input type="checkbox" id="orphan-toggle" checked onchange="toggleOrphans(this.checked)">
       <span class="toggle-text">Orphans</span>
@@ -123,6 +128,7 @@
 <script src="/static/graph-core.js?v=node-bloom"></script>
 <script src="/static/graph-init.js?v=node-bloom"></script>
 <script src="/static/activation.js?v=node-bloom"></script>
+<script src="/static/vault-selector.js?v=multi-vault"></script>
 <script src="/static/websocket.js?v=node-bloom"></script>
 <script src="/static/ui-controls.js?v=node-bloom"></script>
 </body>

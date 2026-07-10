@@ -197,7 +197,6 @@ def main():
             neurons = 0
             embeddings = 0
             try:
-                from bdh_graph_harness.graph.builder import build_graph
                 nodes, _ = build_graph(vc.path, use_cache=True)
                 neurons = len(nodes)
             except Exception:
