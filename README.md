@@ -25,6 +25,7 @@ Turns an Obsidian vault into a living knowledge graph where:
 - **Server-side file watcher** — mtime-based polling detects vault changes from any source (Obsidian, LLM, scripts) and triggers incremental graph updates
 - **LLM responses** — any OpenAI-compatible provider (OpenRouter, Ollama Cloud, local Ollama), with citations back to source notes
 - **Real-time visualization** — WebGL force-graph showing nodes activating, edges pulsing as Hebbian weights update during queries
+- **Multi-vault isolation** — optional `vaults:` configuration creates one graph state, watcher, BM25 index, lock, and ChromaDB collection per vault; requests select a vault explicitly without cross-contaminating embeddings or state
 
 For the theory behind these choices — why Hebbian plasticity, why Obsidian, why not just RAG — see [`docs/philosophy.md`](docs/philosophy.md).
 
@@ -59,6 +60,7 @@ Sleep Cycle (periodic):
 bdh_graph_harness/
 ├── __main__.py              # CLI entry point (--serve, --mcp, --query, --refresh)
 ├── config.py                # Config loading, env var expansion, retry logic
+├── vaults.py                # VaultConfig, VaultContext, VaultRegistry (multi-vault isolation)
 ├── mcp_server.py            # MCP server (FastMCP, stdio + HTTP transport)
 ├── graph/
 │   ├── parser.py            # Frontmatter + wikilink parsing
@@ -129,7 +131,30 @@ python -m bdh_graph_harness --refresh
 
 # Open visualization
 open http://localhost:8643
+
+# List configured vaults (multi-vault mode)
+python -m bdh_graph_harness --list-vaults
+
+# Target a configured vault from the CLI
+python -m bdh_graph_harness --vault-id research --stats
 ```
+
+### Multi-vault API
+
+Keep the legacy `vault_path` config for one vault, or use the `vaults:` list shown in [`bdh-config.yaml`](bdh-config.yaml). Each entry is isolated: it has its own graph, Hebbian state, watcher, BM25 index, lock, and ChromaDB collection.
+
+```bash
+# Query one vault explicitly
+curl -X POST http://localhost:8643/api/query \
+  -H 'Content-Type: application/json' \
+  -d '{"vault_id":"research","query":"How does retrieval work?"}'
+
+# Read stats for one vault, or discover configured vaults
+curl 'http://localhost:8643/api/stats?vault_id=research'
+curl http://localhost:8643/api/vaults
+```
+
+`vault_id` is also accepted by MCP tools such as `query(question="...", vault_id="research")`. Omitting it selects `default_vault` (or the first configured vault).
 
 ### Running as a service (macOS)
 
@@ -171,10 +196,19 @@ See `bdh-config.yaml` for all parameters. Key ones:
 ## Tests
 
 ```bash
-pytest tests/ -v
+# Install runtime + test tooling
+pip install -r requirements-dev.txt
+
+# Full suite
+python -m pytest -q
+
+# Include statement and branch coverage
+python -m pytest -q --cov=bdh_graph_harness --cov-branch --cov-report=term-missing
 ```
 
-180 tests covering graph building, attention spread, adaptive threshold, BM25, hybrid search (optional), Hebbian updates, LLM providers (Ollama + OpenAI-compatible), neurogenesis, consolidation (downscaling, pruning, stale removal), and API endpoints.
+The current `develop` baseline is **214 passing tests** and **49% package branch coverage**. The target is 100%, without excluding application modules just to manufacture a prettier number. Regression coverage is already complete for state persistence, consolidation, node quality, and BM25; the remaining work focuses on API/WebSocket, CLI/MCP, graph/cache, embeddings, and provider failure paths.
+
+See [`docs/testing.md`](docs/testing.md) for the coverage policy, exact commands, and multi-vault regression requirements.
 
 ## Visualization
 
