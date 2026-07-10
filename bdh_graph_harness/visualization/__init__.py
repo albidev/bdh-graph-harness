@@ -1,4 +1,4 @@
-"""Visualization module — renders the self-contained vis.js graph page."""
+"""Visualization module — renders the BDH graph page with external CSS/JS assets."""
 
 import os
 
