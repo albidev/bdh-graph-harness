@@ -29,6 +29,32 @@
     align-items: center;
     gap: 16px;
   }
+  .vault-control {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+  }
+  .vault-control label {
+    color: #8b949e;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .vault-control select {
+    max-width: 160px;
+    padding: 4px 26px 4px 9px;
+    background: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    color: #c9d1d9;
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+    outline: none;
+  }
+  .vault-control select:focus { border-color: #58a6ff; }
+  .vault-selector-status { color: #8b949e; font-size: 11px; white-space: nowrap; }
+  .vault-selector-status.error { color: #f97583; }
   #titlebar .stats {
     font-size: 13px;
     color: #8b949e;
@@ -567,6 +593,7 @@
     #titlebar h1 { font-size: 15px; width: 100%; }
     #titlebar .controls { gap: 10px; flex-wrap: wrap; }
     #titlebar .stats { font-size: 11px; }
+    .vault-control select { max-width: 138px; }
     #main {
       flex-direction: column;
       height: calc(100vh - 44px - 36px);  /* minus tabbar */
