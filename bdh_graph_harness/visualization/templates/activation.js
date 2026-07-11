@@ -8,6 +8,11 @@ function handleActivation(event) {
   const seedId = activated.length > 0 ? activated[0].id : null;
   const hasActivation = activatedIds.size > 0;
 
+  if (!graph || typeof graph.graphData !== 'function') {
+    console.warn('Activation received before graph initialization; skipping visual update');
+    return;
+  }
+
   const currentData = graph.graphData();
 
   // Write activation state to maps (never touch live node objects)
