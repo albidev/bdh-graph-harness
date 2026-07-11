@@ -53,7 +53,9 @@ def extract_new_concepts(llm_response, query, active_notes, nodes):
     existing_titles = [node['title'] for node in nodes.values()]
 
     system_prompt = (
-        "You are a conservative concept extractor for a knowledge graph about AI, software, and neuroscience. "
+        "You are a conservative concept extractor for a persistent knowledge graph. "
+        "The knowledge graph may contain information from any domain. Infer the relevant domain from the response "
+        "and the existing vault context; never assume a fixed subject area. "
         "Given an LLM response and a list of existing concept titles in the vault, identify only NEW concepts "
         "that are explicitly present in the response and are NOT in the existing list. Never infer or invent a "
         "concept merely because it is related to the query.\n\n"

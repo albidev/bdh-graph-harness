@@ -334,6 +334,9 @@ def test_extract_new_concepts_prompt_is_signal_first_and_bounded(monkeypatch):
     harness.extract_new_concepts('response', 'query', {}, {})
     system_prompt = captured['payload']['messages'][0]['content']
     assert 'explicitly present in the response' in system_prompt
+    assert 'The knowledge graph may contain information from any domain' in system_prompt
+    assert 'Infer the relevant domain from the response' in system_prompt
+    assert 'about AI, software, and neuroscience' not in system_prompt
     assert 'Return at most 5 concepts' in system_prompt
     assert 'When evidence is weak, return []' in system_prompt
     assert captured['payload']['response_format'] == {'type': 'json_object'}
