@@ -277,8 +277,10 @@ async def _run_attention_and_plasticity_unlocked(
             })
 
     # Broadcast activation event to WebSocket clients (includes vault_id)
+    ctx.event_sequence += 1
     activation_event = {
         'type': 'activation',
+        'sequence': ctx.event_sequence,
         'vault_id': vault_id,
         'query': query,
         'activated_notes': activated_notes,
@@ -618,8 +620,10 @@ async def api_node_update(request, app_state: dict, ws_clients: set) -> web.Resp
                 'path': node.get('path', ''),
                 'edges': node_edges,
             })
+        ctx.event_sequence += 1
         await broadcast_activation({
             'type': 'graph_refresh',
+            'sequence': ctx.event_sequence,
             'vault_id': ctx.config.id,
             'neurons': len(new_nodes),
             'synapses': sum(len(links) for links in new_edges.values()),
@@ -631,8 +635,10 @@ async def api_node_update(request, app_state: dict, ws_clients: set) -> web.Resp
             'message': f'{len(added)} new, {len(changed)} changed, {len(deleted)} deleted',
         }, ws_clients)
     elif changed or deleted:
+        ctx.event_sequence += 1
         await broadcast_activation({
             'type': 'node_update',
+            'sequence': ctx.event_sequence,
             'vault_id': ctx.config.id,
             'changed_nodes': changed,
             'deleted_nodes': deleted,
@@ -726,8 +732,10 @@ async def api_refresh_graph(request, app_state: dict, ws_clients: set) -> web.Re
     delta = new_count - len(old_node_ids)
 
     from bdh_graph_harness.api.ws import broadcast_activation
+    ctx.event_sequence += 1
     event = {
         'type': 'graph_refresh',
+        'sequence': ctx.event_sequence,
         'vault_id': ctx.config.id,
         'neurons': new_count,
         'synapses': len(edges),

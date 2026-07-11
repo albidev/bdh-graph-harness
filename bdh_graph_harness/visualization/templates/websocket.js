@@ -2,6 +2,7 @@
 // Query — HTTP POST to /api/query
 // ============================================================================
 let activeWebSocket = null;
+let lastEventSequence = 0;
 
 function closeActiveWebSocket() {
   if (!activeWebSocket) return;
@@ -83,6 +84,7 @@ function connectWS() {
   const ind = document.getElementById('status-indicator');
 
   ws.onopen = () => {
+    lastEventSequence = 0;
     ind.classList.add('connected');
     setVaultSelectorStatus('');
   };
@@ -91,6 +93,10 @@ function connectWS() {
     try {
       const event = JSON.parse(msg.data);
       if (!isActiveVaultEvent(event)) return;
+      if (Number.isFinite(event.sequence)) {
+        if (event.sequence <= lastEventSequence) return;
+        lastEventSequence = event.sequence;
+      }
       if (event.type === 'graph') {
         initNetwork(event);
         if (showTagColors) toggleTagColors(true);
