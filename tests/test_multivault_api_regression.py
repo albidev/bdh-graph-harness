@@ -119,21 +119,25 @@ async def test_attention_and_plasticity_only_mutates_resolved_vault(monkeypatch)
 async def test_neurogenesis_is_scoped_to_context_path(monkeypatch):
     ctx = make_context("research")
     ctx.config.settings["neurogenesis_enabled"] = True
+    ctx.config.settings["neurogenesis_dir"] = "research-concepts"
     monkeypatch.setattr(routes, "extract_new_concepts", lambda *_args: [
         {"title": "New concept", "definition": "A definition"},
         {"title": "", "definition": "ignored"},
     ])
     captured = []
 
-    def fake_create(path, title, definition, source_notes, query):
-        captured.append((path, title, definition, source_notes, query))
+    def fake_create(path, title, definition, source_notes, query, **kwargs):
+        captured.append((path, title, definition, source_notes, query, kwargs))
         return "wiki/concepts/new-concept"
 
     monkeypatch.setattr(routes, "create_note", fake_create)
 
     result = routes.run_neurogenesis("response", "query", {"note": 0.8}, ctx)
 
-    assert captured == [("/tmp/research", "New concept", "A definition", ["Scoped note"], "query")]
+    assert captured == [(
+        "/tmp/research", "New concept", "A definition", ["Scoped note"],
+        "query", {"neurogenesis_dir": "research-concepts"},
+    )]
     assert result == [{
         "id": "wiki/concepts/new-concept",
         "title": "New concept",
