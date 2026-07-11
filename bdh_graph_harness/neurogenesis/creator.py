@@ -206,9 +206,14 @@ def create_note(vault_root, title, definition, source_notes, query):
     # Build wikilinks to source notes
     source_links = "\n".join(f"- [[concepts/{slugify(s)}|{s}]]" for s in source_notes[:3])
 
-    # Sanitize: escape YAML frontmatter values, truncate query in body
+    # Keep provenance in frontmatter: parser.extract_text() excludes it from
+    # embeddings, so generation metadata cannot become a shared retrieval
+    # attractor across every neurogenesis note.
     safe_title = _yaml_escape(title)
-    safe_query = _sanitize_for_note(query, max_len=200)
+    safe_query = _yaml_escape(_sanitize_for_note(query, max_len=200))
+    safe_sources = _yaml_escape(', '.join(
+        _sanitize_for_note(str(s), max_len=120) for s in source_notes[:3]
+    ))
 
     content = f"""---
 title: {safe_title}
@@ -218,16 +223,14 @@ type: concept
 tags: [neurogenesis, auto-generated]
 sources: []
 confidence: low
+created_by: bdh-neurogenesis
+generation_query: {safe_query}
+activated_from: {safe_sources}
 ---
 
 # {title}
 
 {definition}
-
-## Origin
-- **Created by:** BDH Graph Harness neurogenesis
-- **Query:** {safe_query}
-- **Activated from:** {', '.join(source_notes[:3])}
 
 ## Links
 {source_links}

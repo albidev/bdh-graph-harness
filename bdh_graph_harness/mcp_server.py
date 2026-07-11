@@ -87,75 +87,114 @@ def _http_post(url: str, body: dict, timeout: float = 120) -> dict | None:
 # Fallback: direct in-process pipeline (used when web server is not running)
 # ---------------------------------------------------------------------------
 
-_fallback = {
-    "config": None,
-    "vault_root": None,
-    "nodes": None,
-    "edges": None,
-    "collection": None,
-    "bm25_index": None,
-    "hebbian_state": None,
-    "initialised": False,
-}
+# Per-vault fallback cache.  Key = vault_id (or 'default' for single-vault mode).
+_fallback_by_vault: dict[str, dict] = {}
+
+# Global config cache for vault resolution
+_fallback_config: dict | None = None
+_fallback_config_path: str | None = None
 
 
-def _init_fallback(config_path: str = None):
-    """Initialise the fallback in-process pipeline. Called lazily."""
-    if _fallback["initialised"]:
-        return
+def _get_fallback_config(config_path: str | None = None) -> dict:
+    """Load (or return cached) config for the fallback pipeline."""
+    global _fallback_config, _fallback_config_path
+    if _fallback_config is None or config_path != _fallback_config_path:
+        _fallback_config = load_config(config_path)
+        _fallback_config_path = config_path
+    return _fallback_config
 
+
+def _init_fallback(config_path: str | None = None, vault_id: str | None = None) -> dict:
+    """Initialise (or return) the fallback in-process pipeline for a vault.
+
+    In single-vault mode, vault_id is treated as 'default'.
+    In multi-vault mode, the vault_id must match a configured vault.
+
+    Returns the fallback dict for the resolved vault.
+    """
     from bdh_graph_harness.graph import build_graph
     from bdh_graph_harness.retrieval import compute_all_embeddings, BM25Index
     from bdh_graph_harness.memory import load_state
+    from bdh_graph_harness.vaults import normalize_vault_configs
 
-    config = load_config(config_path)
-    _fallback["config"] = config
+    config = _get_fallback_config(config_path)
+    vault_cfgs = normalize_vault_configs(config)
 
-    vault_root = os.path.expanduser(config["vault_path"])
+    # Resolve which vault to use
+    if vault_id is None:
+        target_cfg = vault_cfgs[0]
+        effective_id = target_cfg.id
+    else:
+        matched = [v for v in vault_cfgs if v.id == vault_id]
+        if not matched:
+            available = [v.id for v in vault_cfgs]
+            raise KeyError(f"Unknown vault '{vault_id}'. Available: {available}")
+        target_cfg = matched[0]
+        effective_id = vault_id
+
+    if effective_id in _fallback_by_vault:
+        return _fallback_by_vault[effective_id]
+
+    # Build the fallback for this vault
+    vault_root = target_cfg.path
     if not os.path.isdir(vault_root):
         raise FileNotFoundError(f"Vault path '{vault_root}' not found")
 
-    _fallback["vault_root"] = vault_root
-
     nodes, edges = build_graph(vault_root, use_cache=True)
-    _fallback["nodes"] = nodes
-    _fallback["edges"] = edges
-
-    collection = compute_all_embeddings(nodes, vault_root)
-    _fallback["collection"] = collection
-
-    if config.get("hybrid_search", False):
-        _fallback["bm25_index"] = BM25Index(
-            nodes,
-            k1=config.get("bm25_k1", 1.5),
-            b=config.get("bm25_b", 0.75),
-        )
-
-    _fallback["hebbian_state"] = load_state(vault_root)
-    _fallback["initialised"] = True
-
-    logger.info(
-        f"BDH MCP fallback initialised: {len(nodes)} neurons, "
-        f"{sum(len(e) for e in edges.values())} synapses, "
-        f"{len(_fallback['hebbian_state']['synapses'])} Hebbian connections"
+    collection = compute_all_embeddings(
+        nodes, vault_root,
+        chroma_path=target_cfg.chroma_path,
+        collection_name=target_cfg.chroma_collection,
+        config=target_cfg.settings,
     )
 
+    bm25_index = None
+    cfg = target_cfg.settings
+    if cfg.get("hybrid_search", False):
+        bm25_index = BM25Index(
+            nodes,
+            k1=cfg.get("bm25_k1", 1.5),
+            b=cfg.get("bm25_b", 0.75),
+        )
 
-def _fallback_query(question: str) -> str:
+    fb = {
+        "config": cfg,
+        "vault_root": vault_root,
+        "nodes": nodes,
+        "edges": edges,
+        "collection": collection,
+        "bm25_index": bm25_index,
+        "hebbian_state": load_state(vault_root),
+    }
+    _fallback_by_vault[effective_id] = fb
+
+    logger.info(
+        f"BDH MCP fallback initialised [{effective_id}]: {len(nodes)} neurons, "
+        f"{sum(len(e) for e in edges.values())} synapses, "
+        f"{len(fb['hebbian_state']['synapses'])} Hebbian connections"
+    )
+    return fb
+
+
+# Keep a module-level reference to config_path so tool functions can use it
+_mcp_config_path: str | None = None
+
+
+def _fallback_query(question: str, vault_id: str | None = None) -> str:
     """Run a query directly against the in-process pipeline."""
     from bdh_graph_harness.retrieval.attention import attention
     from bdh_graph_harness.memory import hebbian_update, save_state
     from bdh_graph_harness.llm import llm_respond
     from bdh_graph_harness.neurogenesis import extract_new_concepts, create_note
 
-    _init_fallback()
-    cfg = _fallback["config"]
-    nodes = _fallback["nodes"]
-    edges = _fallback["edges"]
-    collection = _fallback["collection"]
-    bm25_idx = _fallback["bm25_index"]
-    state = _fallback["hebbian_state"]
-    vault_root = _fallback["vault_root"]
+    fb = _init_fallback(_mcp_config_path, vault_id)
+    cfg = fb["config"]
+    nodes = fb["nodes"]
+    edges = fb["edges"]
+    collection = fb["collection"]
+    bm25_idx = fb["bm25_index"]
+    state = fb["hebbian_state"]
+    vault_root = fb["vault_root"]
 
     active = attention(question, nodes, edges, collection, bm25_index=bm25_idx)
     if not active:
@@ -169,7 +208,7 @@ def _fallback_query(question: str) -> str:
     if cfg.get("online_plasticity", True):
         state, _updated_keys, _pruned = hebbian_update(active, state)
         save_state(vault_root, state)
-        _fallback["hebbian_state"] = state
+        fb["hebbian_state"] = state
 
     response_text = llm_respond(question, active, nodes)
 
@@ -214,12 +253,12 @@ def _fallback_query(question: str) -> str:
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-def _fallback_stats() -> str:
+def _fallback_stats(vault_id: str | None = None) -> str:
     """Get stats from the in-process pipeline."""
-    _init_fallback()
-    nodes = _fallback["nodes"]
-    edges = _fallback["edges"]
-    state = _fallback["hebbian_state"]
+    fb = _init_fallback(_mcp_config_path, vault_id)
+    nodes = fb["nodes"]
+    edges = fb["edges"]
+    state = fb["hebbian_state"]
 
     total_edges = sum(len(e) for e in edges.values())
     degrees = [len(e) for e in edges.values()]
@@ -255,11 +294,11 @@ def _fallback_stats() -> str:
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-def _fallback_hebbian() -> str:
+def _fallback_hebbian(vault_id: str | None = None) -> str:
     """Get Hebbian state from the in-process pipeline."""
-    _init_fallback()
-    state = _fallback["hebbian_state"]
-    nodes = _fallback["nodes"]
+    fb = _init_fallback(_mcp_config_path, vault_id)
+    state = fb["hebbian_state"]
+    nodes = fb["nodes"]
 
     synapses = []
     for key, syn in sorted(state["synapses"].items(), key=lambda x: -x[1]["weight"]):
@@ -284,11 +323,11 @@ def _fallback_hebbian() -> str:
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-def _fallback_graph() -> str:
+def _fallback_graph(vault_id: str | None = None) -> str:
     """Get graph structure from the in-process pipeline."""
-    _init_fallback()
-    nodes = _fallback["nodes"]
-    edges = _fallback["edges"]
+    fb = _init_fallback(_mcp_config_path, vault_id)
+    nodes = fb["nodes"]
+    edges = fb["edges"]
 
     node_list = []
     for nid, node in nodes.items():
@@ -317,31 +356,52 @@ def _fallback_graph() -> str:
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-def _fallback_refresh() -> str:
+def _fallback_refresh(vault_id: str | None = None) -> str:
     """Force refresh via in-process pipeline."""
     from bdh_graph_harness.graph import build_graph
     from bdh_graph_harness.retrieval import compute_all_embeddings, BM25Index
     from bdh_graph_harness.memory import load_state
+    from bdh_graph_harness.vaults import normalize_vault_configs
 
-    _init_fallback()
-    cfg = _fallback["config"]
-    vault_root = _fallback["vault_root"]
+    config = _get_fallback_config(_mcp_config_path)
+    vault_cfgs = normalize_vault_configs(config)
+
+    if vault_id is None:
+        target_cfg = vault_cfgs[0]
+        effective_id = target_cfg.id
+    else:
+        matched = [v for v in vault_cfgs if v.id == vault_id]
+        if not matched:
+            available = [v.id for v in vault_cfgs]
+            return json.dumps({"error": f"Unknown vault '{vault_id}'",
+                               "available_vaults": available})
+        target_cfg = matched[0]
+        effective_id = vault_id
+
+    fb = _init_fallback(_mcp_config_path, vault_id)
+    cfg = target_cfg.settings
+    vault_root = target_cfg.path
 
     nodes, edges = build_graph(vault_root, use_cache=False)
-    _fallback["nodes"] = nodes
-    _fallback["edges"] = edges
+    fb["nodes"] = nodes
+    fb["edges"] = edges
 
-    collection = compute_all_embeddings(nodes, vault_root, force_refresh=True)
-    _fallback["collection"] = collection
+    collection = compute_all_embeddings(
+        nodes, vault_root, force_refresh=True,
+        chroma_path=target_cfg.chroma_path,
+        collection_name=target_cfg.chroma_collection,
+        config=cfg,
+    )
+    fb["collection"] = collection
 
     if cfg.get("hybrid_search", False):
-        _fallback["bm25_index"] = BM25Index(
+        fb["bm25_index"] = BM25Index(
             nodes,
             k1=cfg.get("bm25_k1", 1.5),
             b=cfg.get("bm25_b", 0.75),
         )
 
-    _fallback["hebbian_state"] = load_state(vault_root)
+    fb["hebbian_state"] = load_state(vault_root)
 
     total_edges = sum(len(e) for e in edges.values())
     result = {
@@ -349,7 +409,7 @@ def _fallback_refresh() -> str:
         "neurons": len(nodes),
         "synapses": total_edges,
         "embeddings": collection.count(),
-        "hebbian_synapses": len(_fallback["hebbian_state"]["synapses"]),
+        "hebbian_synapses": len(fb["hebbian_state"]["synapses"]),
     }
     return json.dumps(result, ensure_ascii=False, indent=2)
 
@@ -371,7 +431,7 @@ mcp = FastMCP(
 
 
 @mcp.tool()
-def query(question: str) -> str:
+def query(question: str, vault_id: str | None = None) -> str:
     """Query the vault knowledge graph and get a grounded response with citations.
 
     Runs attention (hybrid vector + BM25 search + k-hop graph traversal),
@@ -385,6 +445,8 @@ def query(question: str) -> str:
 
     Args:
         question: The question to ask the knowledge graph.
+        vault_id: Optional vault ID to query (for multi-vault configs).
+                  Defaults to the configured default vault.
 
     Returns:
         A JSON string with: response (LLM answer), activated_notes (sources
@@ -392,43 +454,60 @@ def query(question: str) -> str:
         hebbian_updates (synaptic changes from this query).
     """
     # Try the web server first (thin client)
-    result = _http_post(_api_url("/api/query"), {"query": question})
+    payload: dict = {"query": question}
+    if vault_id is not None:
+        payload["vault_id"] = vault_id
+    result = _http_post(_api_url("/api/query"), payload)
     if result is not None:
         return json.dumps(result, ensure_ascii=False, indent=2)
 
     # Fallback: in-process pipeline
     logger.warning("Web server not reachable, using in-process fallback pipeline")
-    return _fallback_query(question)
+    return _fallback_query(question, vault_id=vault_id)
 
 
 @mcp.tool()
-def stats() -> str:
+def stats(vault_id: str | None = None) -> str:
     """Get graph statistics: neuron count, synapse count, Hebbian state, top hubs.
+
+    Args:
+        vault_id: Optional vault ID (for multi-vault configs).
+                  Defaults to the configured default vault.
 
     Returns:
         JSON string with graph statistics.
     """
-    result = _http_get(_api_url("/api/stats"))
+    url = _api_url("/api/stats")
+    if vault_id is not None:
+        url = f"{url}?vault_id={vault_id}"
+    result = _http_get(url)
     if result is not None:
         # Web API already returns the right keys, just pass through
         return json.dumps(result, ensure_ascii=False, indent=2)
 
     logger.warning("Web server not reachable, using in-process fallback pipeline")
-    return _fallback_stats()
+    return _fallback_stats(vault_id=vault_id)
 
 
 @mcp.tool()
-def hebbian() -> str:
+def hebbian(vault_id: str | None = None) -> str:
     """Get the full Hebbian synaptic state — all learned connections between notes.
 
     Hebbian synapses are connections discovered through co-activation during
     queries, not from wikilinks. They represent semantic relationships the
     graph learned from usage patterns.
 
+    Args:
+        vault_id: Optional vault ID (for multi-vault configs).
+                  Defaults to the configured default vault.
+
     Returns:
         JSON string with all synaptic connections sorted by weight.
     """
-    result = _http_get(_api_url("/api/hebbian"))
+    url = _api_url("/api/hebbian")
+    if vault_id is not None:
+        url = f"{url}?vault_id={vault_id}"
+    result = _http_get(url)
     if result is not None:
         # Normalise: web API uses 'total' + 'queries', MCP uses 'total_synapses' + 'queries_processed'
         synapses = result.get("synapses", [])
@@ -440,20 +519,27 @@ def hebbian() -> str:
         return json.dumps(normalised, ensure_ascii=False, indent=2)
 
     logger.warning("Web server not reachable, using in-process fallback pipeline")
-    return _fallback_hebbian()
+    return _fallback_hebbian(vault_id=vault_id)
 
 
 @mcp.tool()
-def graph() -> str:
+def graph(vault_id: str | None = None) -> str:
     """Get the full graph structure as nodes and edges.
 
     Returns all notes (neurons) with their metadata and all wikilink connections
     (synapses). Useful for visualisation or analysis.
 
+    Args:
+        vault_id: Optional vault ID (for multi-vault configs).
+                  Defaults to the configured default vault.
+
     Returns:
         JSON string with nodes array and edges array.
     """
-    result = _http_get(_api_url("/api/graph"))
+    url = _api_url("/api/graph")
+    if vault_id is not None:
+        url = f"{url}?vault_id={vault_id}"
+    result = _http_get(url)
     if result is not None:
         # Normalise: web API returns 'nodes' + 'edges' without counts
         nodes = result.get("nodes", [])
@@ -467,30 +553,40 @@ def graph() -> str:
         return json.dumps(normalised, ensure_ascii=False, indent=2)
 
     logger.warning("Web server not reachable, using in-process fallback pipeline")
-    return _fallback_graph()
+    return _fallback_graph(vault_id=vault_id)
 
 
 @mcp.tool()
-def refresh() -> str:
+def refresh(vault_id: str | None = None) -> str:
     """Force refresh all embeddings in ChromaDB.
 
     Use this after adding new notes to the vault or when the graph seems stale.
     Rebuilds the graph from scratch (skips cache) and re-computes all embeddings.
 
+    Args:
+        vault_id: Optional vault ID (for multi-vault configs).
+                  Defaults to the configured default vault.
+
     Returns:
         JSON string with refresh results.
     """
-    result = _http_post(_api_url("/api/refresh"), {})
+    payload: dict = {}
+    if vault_id is not None:
+        payload["vault_id"] = vault_id
+    result = _http_post(_api_url("/api/refresh"), payload)
     if result is not None:
         # Enrich with hebbian count if not present
         if "hebbian_synapses" not in result:
-            stats = _http_get(_api_url("/api/stats"))
-            if stats and "hebbian_synapses" in stats:
-                result["hebbian_synapses"] = stats["hebbian_synapses"]
+            stats_url = _api_url("/api/stats")
+            if vault_id is not None:
+                stats_url = f"{stats_url}?vault_id={vault_id}"
+            s = _http_get(stats_url)
+            if s and "hebbian_synapses" in s:
+                result["hebbian_synapses"] = s["hebbian_synapses"]
         return json.dumps(result, ensure_ascii=False, indent=2)
 
     logger.warning("Web server not reachable, using in-process fallback pipeline")
-    return _fallback_refresh()
+    return _fallback_refresh(vault_id=vault_id)
 
 
 # ---------------------------------------------------------------------------
@@ -508,6 +604,8 @@ def run_mcp_server(transport: str = "stdio", port: int = 8644, config_path: str 
     import asyncio
 
     # Store config path for fallback initialisation
+    global _mcp_config_path
+    _mcp_config_path = config_path
     if config_path:
         os.environ.setdefault("BDH_CONFIG_PATH", config_path)
 

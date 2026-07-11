@@ -20,7 +20,7 @@ def is_duplicate(title, existing_titles):
     return False
 
 
-def is_semantic_duplicate(title, definition, threshold=0.65):
+def is_semantic_duplicate(title, definition, threshold=0.65, *, vault_root=None, config=None):
     """Check if a concept is semantically similar to an existing note via embeddings.
 
     Uses the ChromaDB collection to query the nearest neighbor by cosine similarity.
@@ -34,15 +34,19 @@ def is_semantic_duplicate(title, definition, threshold=0.65):
         title: The candidate concept title.
         definition: The candidate concept definition (combined with title for the query).
         threshold: Cosine similarity threshold above which we consider it a duplicate.
+        vault_root: Vault path for ChromaDB location.  Defaults to ``CONFIG['vault_path']``.
+        config: Per-vault settings dict.  Falls back to global ``CONFIG``.
 
     Returns:
         True if a semantically similar note exists, False otherwise.
     """
     try:
         from bdh_graph_harness.retrieval.embeddings import get_embeddings, cosine_similarity
-        from bdh_graph_harness.config import CONFIG
+        from bdh_graph_harness.config import CONFIG as _GLOBAL_CONFIG
         import chromadb
         import os
+
+        cfg = config or _GLOBAL_CONFIG
 
         # Build query text from title + definition
         query_text = f"{title}. {definition}" if definition else title
@@ -55,12 +59,16 @@ def is_semantic_duplicate(title, definition, threshold=0.65):
         query_emb = embs[0]
 
         # Query ChromaDB for nearest neighbors
-        vault_root = CONFIG['vault_path']
-        chroma_path = os.path.join(vault_root, CONFIG.get('chroma_path', '.bdh-chroma'))
+        _vault_root = vault_root or cfg.get('vault_path', '')
+        raw_cp = cfg.get('chroma_path', '.bdh-chroma')
+        if os.path.isabs(raw_cp):
+            chroma_path = raw_cp
+        else:
+            chroma_path = os.path.join(_vault_root, raw_cp)
         client = chromadb.PersistentClient(path=chroma_path)
         from bdh_graph_harness.retrieval.chroma_store import _get_ollama_embedding_function
         collection = client.get_or_create_collection(
-            CONFIG.get('chroma_collection', 'bdh_notes'),
+            cfg.get('chroma_collection', 'notes'),
             metadata={'hnsw:space': 'cosine'},
             embedding_function=_get_ollama_embedding_function(),
         )

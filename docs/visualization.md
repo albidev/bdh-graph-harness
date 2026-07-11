@@ -81,8 +81,22 @@ This approach avoids the `TypeError: Attempted to assign to readonly property` c
 The visualization is fully responsive:
 - **Tab-based layout** at ≤768px — controls and graph on separate tabs
 - **iPhone safe area** — respects `env(safe-area-inset-top/bottom)` for notch/Dynamic Island
-- **Touch dismiss** — tap anywhere to dismiss open tooltips
+- **Touch-first graph interactions** — one-finger drag pans the graph, pinch zooms, and taps select nodes without relying on hover events
+- **Touch dismiss** — tap anywhere outside an open tooltip to dismiss it
 - **Tag legend hidden** on mobile to save space (tags visible in node tooltips)
+- **Compact mobile layout** — reduced chrome and controls preserve graph area on narrow screens
+
+The mobile interaction model deliberately avoids treating touch as a synthetic mouse. This prevents accidental node selection while panning and keeps the graph usable on phones and tablets.
+
+## Neurogenesis provenance
+
+Generated concept notes store provenance in YAML frontmatter rather than in a visible `## Origin` body section:
+
+- `created_by` identifies the generator;
+- `generation_query` stores the sanitized triggering query;
+- `activated_from` stores the source notes used for generation.
+
+The parser excludes frontmatter from note embeddings, so generation metadata remains available for auditing without becoming a retrieval attractor shared by every generated note.
 
 ## WebSocket
 

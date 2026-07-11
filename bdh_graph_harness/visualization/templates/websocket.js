@@ -1,6 +1,16 @@
 // ============================================================================
 // Query — HTTP POST to /api/query
 // ============================================================================
+let activeWebSocket = null;
+
+function closeActiveWebSocket() {
+  if (!activeWebSocket) return;
+  const ws = activeWebSocket;
+  activeWebSocket = null;
+  ws.onclose = null;
+  ws.close();
+}
+
 function sendQuery() {
   const input = document.getElementById('query-input');
   const btn = document.getElementById('query-btn');
@@ -17,7 +27,7 @@ function sendQuery() {
   fetch('/api/query', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ query }),
+    body: JSON.stringify({ query, vault_id: getActiveVaultId() }),
     signal: controller.signal,
   }).then(r => {
     clearTimeout(timeoutId);
@@ -66,15 +76,21 @@ function sendQuery() {
 // WebSocket connection
 // ============================================================================
 function connectWS() {
+  closeActiveWebSocket();
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const ws = new WebSocket(proto + '//' + location.host + '/ws');
+  const ws = new WebSocket(proto + '//' + location.host + vaultApiUrl('/ws'));
+  activeWebSocket = ws;
   const ind = document.getElementById('status-indicator');
 
-  ws.onopen = () => { ind.classList.add('connected'); };
+  ws.onopen = () => {
+    ind.classList.add('connected');
+    setVaultSelectorStatus('');
+  };
 
   ws.onmessage = (msg) => {
     try {
       const event = JSON.parse(msg.data);
+      if (!isActiveVaultEvent(event)) return;
       if (event.type === 'graph') {
         initNetwork(event);
         if (showTagColors) toggleTagColors(true);
@@ -295,6 +311,8 @@ function connectWS() {
   };
 
   ws.onclose = () => {
+    if (activeWebSocket !== ws) return;
+    activeWebSocket = null;
     ind.classList.remove('connected');
     setTimeout(connectWS, 2000);  // auto-reconnect
   };

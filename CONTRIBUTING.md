@@ -5,8 +5,8 @@
 ```bash
 git clone https://github.com/albidev/bdh-graph-harness.git
 cd bdh-graph-harness
-pip install -r requirements.txt
-pytest tests/ -v
+pip install -r requirements-dev.txt
+python -m pytest -q
 ```
 
 ## Architecture
@@ -18,9 +18,10 @@ The codebase is a Python package (`bdh_graph_harness/`) with 8 subpackages:
 - `memory/` — Hebbian synaptic plasticity and persistent state
 - `llm/` — provider abstraction (Ollama, OpenRouter), prompt building
 - `neurogenesis/` — concept extraction and note creation in the vault
-- `api/` — aiohttp REST + WebSocket server
-- `mcp_server.py` — MCP (Model Context Protocol) server for Claude Desktop, Cursor, etc.
-- `visualization/` — vis.js real-time graph UI (see `docs/visualization.md`)
+- `api/` — aiohttp REST + WebSocket server, scoped through `VaultRegistry`
+- `vaults.py` — `VaultConfig`, `VaultContext`, and per-vault runtime isolation
+- `mcp_server.py` — MCP thin client with an in-process fallback
+- `visualization/` — force-graph WebGL real-time graph UI (see `docs/visualization.md`)
 - `config.py` — YAML config loading with env var expansion
 
 `harness.py` is a compatibility shim re-exporting from the package (tests use `import harness`).
@@ -28,10 +29,16 @@ The codebase is a Python package (`bdh_graph_harness/`) with 8 subpackages:
 ## Running tests
 
 ```bash
-pytest tests/ -v
+# Full suite
+python -m pytest -q
+
+# Required before opening a PR that changes application code
+python -m pytest -q --cov=bdh_graph_harness --cov-branch --cov-report=term-missing
 ```
 
-108 tests covering graph building, attention, adaptive threshold, BM25 (optional), Hebbian updates, LLM providers, neurogenesis, and API endpoints.
+The current `develop` baseline is 214 passing tests and 50% package branch coverage. Do not lower it. The project is working toward 100% by adding behavioral tests, not by omitting application modules from collection.
+
+For commands, scope, and the regression-test policy, see [`docs/testing.md`](docs/testing.md).
 
 ## Adding a new LLM provider
 
