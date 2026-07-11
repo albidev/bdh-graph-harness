@@ -231,6 +231,7 @@ High-degree nodes (like `index.md` with 35 links) activate during almost every q
 ## Pitfalls
 
 - **Ollama model loading**: first embedding call after model load may timeout. Warm up with 2-3 dummy calls before batch embedding.
+- **Neurogenesis JSON contract**: use the provider-neutral object shape `{\"concepts\": [{\"title\": \"...\", \"definition\": \"...\"}]}`. OpenRouter's `response_format: {\"type\": \"json_object\"}` can return an object rather than a top-level array; the parser accepts the canonical wrapper plus legacy arrays and single objects.
 - **Gemma4 JSON format**: even with `format: "json"`, output may include markdown fences. Parse defensively.
 - **Threshold sensitivity**: 0.15 admits too much noise, 0.25 is clean. Tune per vault density.
 - **Port conflicts**: `OSError: [Errno 48] address already in use` if a previous instance is still running. Kill with `lsof -ti:8643 | xargs kill`.

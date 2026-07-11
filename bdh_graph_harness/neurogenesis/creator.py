@@ -53,9 +53,10 @@ def extract_new_concepts(llm_response, query, active_notes, nodes):
     existing_titles = [node['title'] for node in nodes.values()]
 
     system_prompt = (
-        "You are a concept extractor for a knowledge graph about AI, software, and neuroscience. "
-        "Given an LLM response and a list of existing concept titles in the vault, "
-        "identify NEW concepts introduced in the response that are NOT in the existing list.\n\n"
+        "You are a conservative concept extractor for a knowledge graph about AI, software, and neuroscience. "
+        "Given an LLM response and a list of existing concept titles in the vault, identify only NEW concepts "
+        "that are explicitly present in the response and are NOT in the existing list. Never infer or invent a "
+        "concept merely because it is related to the query.\n\n"
         "EXTRACT concepts that are:\n"
         "- Algorithms, architectures, or design patterns (e.g. 'sparse attention', 'mixture-of-experts')\n"
         "- Technical methods or techniques with a specific domain (e.g. 'contrastive learning', 'kv-cache')\n"
@@ -69,9 +70,9 @@ def extract_new_concepts(llm_response, query, active_notes, nodes):
         "- Meta-descriptions of what the LLM is doing right now\n"
         "- Concepts that are just synonyms or spelling variants of existing ones\n"
         "- Proper nouns that are just labels (company names, product names) without technical depth\n\n"
-        "For each new concept, provide: 1) a short title (2-5 words, descriptive), 2) a 1-sentence definition.\n"
-        'Return as JSON array: [{"title": "...", "definition": "..."}]. '
-        "If no new concepts, return []."
+        "For each new concept, provide a short title of 2-5 words and a one-sentence definition. "
+        "Return at most 5 concepts. When evidence is weak, return []. In that case use {\"concepts\": []}.\n\n"
+        'The required JSON shape is exactly: {"concepts": [{"title": "...", "definition": "..."}]}.'
     )
 
     user_prompt = f"""## Existing concept titles in vault
@@ -122,35 +123,51 @@ def extract_new_concepts(llm_response, query, active_notes, nodes):
             # Remove leading "json" prefix that gemma4 sometimes adds
             content = re.sub(r'^json\s*', '', content)
             content = content.strip()
-            # Try to find JSON array in the response
-            if not content.startswith('['):
-                match = re.search(r'\[.*\]', content, re.DOTALL)
-                if match:
-                    content = match.group(0)
-                else:
+            # Parse the canonical object wrapper, while accepting legacy arrays
+            # and the single-object shape returned by some OpenRouter free models.
+            try:
+                parsed = json.loads(content)
+            except json.JSONDecodeError:
+                match = re.search(r'(\{.*\}|\[.*\])', content, re.DOTALL)
+                if not match:
                     return []
-            concepts = json.loads(content)
-            if isinstance(concepts, list):
-                # Filter out:
-                # 1. Concepts that already exist (exact title match)
-                # 2. Noise titles (regex blocklist — model names, plumbing, etc.)
-                # 3. Semantic duplicates (embedding similarity > threshold)
-                filtered = []
-                for c in concepts:
-                    if not isinstance(c, dict) or 'title' not in c:
-                        continue
-                    title = c['title']
-                    if is_duplicate(title, existing_titles):
-                        continue
-                    if _is_noise_title(title):
-                        print(f"  🚫 Noise filter rejected: '{title}'", file=sys.stderr)
-                        continue
-                    if is_semantic_duplicate(title, c.get('definition', '')):
-                        print(f"  🔁 Semantic duplicate rejected: '{title}'", file=sys.stderr)
-                        continue
-                    filtered.append(c)
-                return filtered
-            return []
+                parsed = json.loads(match.group(1))
+
+            if isinstance(parsed, dict) and isinstance(parsed.get('concepts'), list):
+                concepts = parsed['concepts']
+            elif isinstance(parsed, dict) and 'title' in parsed and 'definition' in parsed:
+                concepts = [parsed]
+            elif isinstance(parsed, list):
+                concepts = parsed
+            else:
+                concepts = []
+
+            # Filter out:
+            # 1. Concepts that already exist (exact title match)
+            # 2. Noise titles (regex blocklist — model names, plumbing, etc.)
+            # 3. Semantic duplicates (embedding similarity > threshold)
+            filtered = []
+            for c in concepts:
+                if not isinstance(c, dict) or 'title' not in c:
+                    continue
+                title = c['title']
+                definition = c.get('definition', '')
+                if not isinstance(title, str) or not isinstance(definition, str):
+                    continue
+                title = title.strip()
+                definition = definition.strip()
+                if not title or not definition:
+                    continue
+                if is_duplicate(title, existing_titles):
+                    continue
+                if _is_noise_title(title):
+                    print(f"  🚫 Noise filter rejected: '{title}'", file=sys.stderr)
+                    continue
+                if is_semantic_duplicate(title, definition):
+                    print(f"  🔁 Semantic duplicate rejected: '{title}'", file=sys.stderr)
+                    continue
+                filtered.append({'title': title, 'definition': definition})
+            return filtered[:5]
 
     try:
         return retry_with_backoff(_extract_call)
