@@ -221,24 +221,12 @@ async def api_hebbian(request, app_state: dict) -> web.Response:
 
 
 async def run_attention_and_plasticity(
-    query: str, ctx, ws_clients: set, source: str | None = None
-) -> tuple[dict, list, list]:
-    """Run the attention + Hebbian plasticity phase shared by all query routes.
+    query: str, ctx, ws_clients: set, source: str | None = None,
+    learn: bool = True,
+) -> tuple[dict, list, list, dict]:
+    """Run attention and optionally mutate Hebbian/neurogenesis state.
 
-    Steps:
-      1. Attention (with optional BM25 hybrid search).
-      2. Build the ``activated_notes`` list (id, title, score).
-      3. Online plasticity: Hebbian update + persist state.
-      4. Build ``hebbian_updates`` from the current synaptic state.
-      5. Broadcast an activation event to WebSocket clients (includes vault_id).
-
-    Args:
-        query: The query string.
-        ctx: Resolved :class:`~bdh_graph_harness.vaults.VaultContext`.
-        ws_clients: Set of active WebSocket connections.
-        source: When ``"assistant_response"``, Hebbian dampening is applied.
-
-    Returns ``(active, activated_notes, hebbian_updates)``.
+    ``learn=False`` is the read-only path used by automatic retrieval.
     """
     config = ctx.config.settings
     n = ctx.nodes
@@ -248,8 +236,10 @@ async def run_attention_and_plasticity(
     vault_id = ctx.config.id
 
     # Attention — run blocking I/O (embeddings) in a thread
+    routing = {}
     active = await asyncio.to_thread(
-        attention, query, n, e, coll, None, None, bm25, ctx.state
+        attention, query, n, e, coll, None, None, bm25, ctx.state,
+        routing_meta=routing,
     )
 
     activated_notes = []
@@ -265,7 +255,7 @@ async def run_attention_and_plasticity(
     # Online plasticity: Hebbian update immediately after attention
     updated_keys = set()
     pruned_count = 0
-    if config.get('online_plasticity', True) and active:
+    if learn and config.get('online_plasticity', True) and active:
         # Acquire lock, then run hebbian_update + save_state in a thread
         async with ctx.state_lock:
             ctx.state, updated_keys, pruned_count = await asyncio.to_thread(
@@ -299,11 +289,12 @@ async def run_attention_and_plasticity(
         'synapse_count': sum(len(links) for links in ctx.edges.values()),
         'dormant_count': len(ctx.state.get('dormant_nodes', set())),
         'pruned_count': pruned_count,
+        'routing': routing,
         'timestamp': datetime.now().isoformat(),
     }
     await broadcast_activation(activation_event, ws_clients)
 
-    return active, activated_notes, hebbian_updates
+    return active, activated_notes, hebbian_updates, routing
 
 
 def run_neurogenesis(
@@ -344,6 +335,8 @@ async def api_query(request, app_state: dict, ws_clients: set) -> web.Response:
     Optional fields:
       - vault_id: select vault (default used if omitted)
       - source: "assistant_response" triggers Hebbian dampening
+      - learn: false performs retrieval without Hebbian update or neurogenesis
+      - respond: false skips the BDH synthesis LLM and returns activated notes only
       - user_prompt: original user question, combined with query for LLM context
     """
     try:
@@ -360,20 +353,28 @@ async def api_query(request, app_state: dict, ws_clients: set) -> web.Response:
         return err
 
     source = data.get('source')
+    learn = data.get('learn', True) is not False
+    respond = data.get('respond', True) is not False
     user_prompt = data.get('user_prompt', '').strip()
 
     llm_query = query
     if user_prompt:
         llm_query = f"{user_prompt}\n\n---\n\n{query}"
 
-    active, activated_notes, hebbian_updates = await run_attention_and_plasticity(
-        query, ctx, ws_clients, source=source
+    active, activated_notes, hebbian_updates, routing = await run_attention_and_plasticity(
+        query, ctx, ws_clients, source=source, learn=learn
     )
 
     n = ctx.nodes
-    response_text = await asyncio.to_thread(llm_respond, llm_query, active, n)
+    response_text = (
+        await asyncio.to_thread(llm_respond, llm_query, active, n)
+        if respond else ""
+    )
 
-    new_concepts_list = run_neurogenesis(response_text, query, active, ctx)
+    new_concepts_list = (
+        run_neurogenesis(response_text, query, active, ctx)
+        if learn and respond else []
+    )
 
     return web.json_response({
         'response': response_text,
@@ -381,6 +382,7 @@ async def api_query(request, app_state: dict, ws_clients: set) -> web.Response:
         'new_concepts': new_concepts_list,
         'hebbian_synapses': len(ctx.state['synapses']),
         'hebbian_updates': hebbian_updates,
+        'routing': routing,
         'queries_processed': ctx.state.get('queries', 0),
         'neuron_count': len(ctx.nodes),
         'synapse_count': sum(len(links) for links in ctx.edges.values()),
@@ -419,7 +421,7 @@ async def api_stream(request, app_state: dict, ws_clients: set) -> web.StreamRes
 
     n = ctx.nodes
 
-    active, activated_notes, hebbian_updates = await run_attention_and_plasticity(
+    active, activated_notes, hebbian_updates, routing = await run_attention_and_plasticity(
         query, ctx, ws_clients, source=source
     )
 
@@ -438,6 +440,7 @@ async def api_stream(request, app_state: dict, ws_clients: set) -> web.StreamRes
         'vault_id': ctx.config.id,
         'activated_notes': activated_notes,
         'hebbian_synapses': len(ctx.state['synapses']),
+        'routing': routing,
     })
     await resp.write(f"data: {init_data}\n\n".encode())
 

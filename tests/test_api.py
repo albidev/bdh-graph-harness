@@ -206,6 +206,47 @@ async def test_api_query_success(mock_app_setup, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_api_query_read_only_skips_learning_and_neurogenesis(mock_app_setup, monkeypatch):
+    from aiohttp.test_utils import TestClient, TestServer
+
+    nodes, edges, collection, state, config, _ = mock_app_setup
+    app = _capture_app(monkeypatch, config, nodes, edges, collection, state)
+    before = json.dumps(state, sort_keys=True)
+    monkeypatch.setattr(
+        bdh_routes, 'run_neurogenesis',
+        lambda *args: pytest.fail('read-only query ran neurogenesis'),
+    )
+    monkeypatch.setattr(
+        bdh_routes, 'llm_respond',
+        lambda *args: pytest.fail('read-only query ran synthesis LLM'),
+    )
+
+    server = TestServer(app)
+    client = TestClient(server)
+    await client.start_server()
+
+    try:
+        resp = await client.post('/api/query', json={
+            'query': 'technical retrieval',
+            'source': 'automatic_retrieval',
+            'learn': False,
+            'respond': False,
+        })
+        assert resp.status == 200
+        data = await resp.json()
+        assert data['hebbian_updates'] == []
+        assert data['new_concepts'] == []
+        assert set(data['routing']) >= {
+            'vector_top_score', 'bm25_top_score', 'hybrid_top_score',
+            'hybrid_second_score', 'hybrid_margin', 'hybrid_enabled',
+        }
+        assert data['routing']['hybrid_enabled'] is True
+        assert json.dumps(state, sort_keys=True) == before
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
 async def test_api_query_empty_returns_400(mock_app_setup, monkeypatch):
     from aiohttp.test_utils import TestClient, TestServer
 
