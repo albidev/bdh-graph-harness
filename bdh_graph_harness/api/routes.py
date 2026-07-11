@@ -661,7 +661,7 @@ async def api_node_update(request, app_state: dict, ws_clients: set) -> web.Resp
     })
 
 
-async def api_refresh_graph(request, app_state: dict, ws_clients: set) -> web.Response:
+async def _api_refresh_graph_unlocked(request, app_state: dict, ws_clients: set) -> web.Response:
     """Full graph rebuild: re-read vault, rebuild graph, re-embed, notify WS clients.
 
     Accepts optional ``vault_id`` in the JSON body.
@@ -767,6 +767,18 @@ async def api_refresh_graph(request, app_state: dict, ws_clients: set) -> web.Re
         'new_concepts': new_concepts,
         'changed_nodes': changed_nodes,
     })
+
+
+async def api_refresh_graph(request, app_state: dict, ws_clients: set) -> web.Response:
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+    ctx, err = _resolve_vault_ctx(app_state, data.get('vault_id'))
+    if err:
+        return err
+    async with ctx.runtime_lock:
+        return await _api_refresh_graph_unlocked(request, app_state, ws_clients)
 
 
 async def api_consolidate(request, app_state: dict, ws_clients: set) -> web.Response:
