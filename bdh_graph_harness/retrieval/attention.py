@@ -109,7 +109,7 @@ def _compute_hebbian_boost(candidate_id, hebbian_state, recently_active):
     return min(total_weight * weight_factor, max_boost)
 
 
-def _get_recently_active_notes(hebbian_state):
+def _get_recently_active_notes(hebbian_state, valid_node_ids=None):
     """Get notes activated in recent queries from Hebbian state.
 
     Uses last_coactivated timestamps on synapses to determine which notes
@@ -142,8 +142,6 @@ def _get_recently_active_notes(hebbian_state):
     min_weight = CONFIG.get('hebbian_boost_min_weight', 0.15)
 
     # Get the set of valid note IDs (to filter dead synapses)
-    # This is passed via hebbian_state if available, else we skip the check
-    valid_node_ids = hebbian_state.get('_valid_node_ids', None)
 
     recent_notes = set()
     for key, syn in synapses.items():
@@ -289,11 +287,10 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
     # This makes the graph "remember" what you're working on and prefer seeds
     # in the same context, even if their pure cosine similarity is slightly lower.
     if hebbian_state and CONFIG.get('hebbian_seed_boost', True):
-        # Inject valid node IDs so dead synapses (to deleted notes) are filtered
-        hebbian_state['_valid_node_ids'] = set(nodes.keys())
-        recently_active = _get_recently_active_notes(hebbian_state)
-        # Clean up the temporary key
-        hebbian_state.pop('_valid_node_ids', None)
+        valid_node_ids = set(nodes.keys())
+        recently_active = _get_recently_active_notes(
+            hebbian_state, valid_node_ids=valid_node_ids
+        )
         if recently_active:
             logger.info(f"Phase 5: {len(recently_active)} recently active notes, boosting seeds")
             boosted = {}
