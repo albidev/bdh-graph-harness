@@ -101,6 +101,7 @@ class VaultContext:
     bm25_index: Any | None = None
     state_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     runtime_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    event_sequence: int = 0
     watcher: Any | None = None
 
 
