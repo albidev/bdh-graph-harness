@@ -567,6 +567,10 @@ function requestGraphRedraw() {
 // user's current pan/zoom so live updates don't throw the graph off-screen.
 function setGraphDataPreservingView(data, opts = {}) {
   if (!graph) return;
+  if (!data || !Array.isArray(data.nodes) || data.nodes.length === 0) {
+    console.warn('Ignoring empty graph structural update');
+    return;
+  }
   const center = typeof graph.centerAt === 'function' ? graph.centerAt() : null;
   const zoom = typeof graph.zoom === 'function' ? graph.zoom() : null;
   const liveData = graph.graphData ? graph.graphData() : { nodes: [] };
