@@ -356,11 +356,22 @@ function initNetwork(graphData) {
       if (node) {
         clearHoverEdge(false);
         setHoverHighlight([node.id]);
-        const evt = lastMouseEvent || { clientX: 0, clientY: 0 };
-        showTooltip(node, evt);
+        // Hover cards make touch navigation miserable. Mobile opens details on tap.
+        if (!isMobile()) {
+          const evt = lastMouseEvent || { clientX: 0, clientY: 0 };
+          showTooltip(node, evt);
+        }
       } else {
         scheduleClearHoverHighlight();
+        if (!isMobile()) hideTooltip();
       }
+    })
+    .onNodeClick((node) => {
+      if (!node) return;
+      clearHoverEdge(false);
+      setHoverHighlight([node.id]);
+      const graphArea = document.getElementById('graph-area').getBoundingClientRect();
+      showTooltip(node, { clientX: graphArea.left + graphArea.width / 2, clientY: graphArea.top + graphArea.height / 2 });
     })
     .onLinkHover((link, prevLink) => {
       if (link) {
@@ -373,6 +384,11 @@ function initNetwork(graphData) {
         clearHoverEdge();
         hideTooltip();
       }
+    })
+    .onBackgroundClick(() => {
+      clearHoverEdge();
+      clearHoverHighlight();
+      hideTooltip();
     })
     .onZoom(() => {
       syncZoomUI(true);
