@@ -330,11 +330,12 @@ function showTooltip(node, evt) {
   ensureTooltip();
   const n = node ? nodeDataMap[node.id] : null;
   if (!n) { hideTooltip(); return; }
+  const mobile = isMobile();
 
   const title = escapeHtml(n.title || n.id);
   const path = n._path || n.path || '';
   const shortPath = path.replace(/.*\/Documents\/Hermes\//, '').replace(/.*\/wiki\//, 'wiki/');
-  const text = (n._text || n.text || '').replace(/\n/g, ' ').substring(0, 150);
+  const text = (n._text || n.text || '').replace(/\n/g, ' ').substring(0, mobile ? 80 : 150);
   const deg = degreeMap[n.id] || 0;
 
   // Tags
@@ -352,9 +353,11 @@ function showTooltip(node, evt) {
 
   // Connected nodes (first 6)
   const neighbors = neighborMap[n.id] || [];
-  const neighborHtml = neighbors.slice(0, 6).map(nb => '<span style="color:#58a6ff">' + escapeHtml(nb) + '</span>').join(', ') + (neighbors.length > 6 ? ' <span style="color:#6e7681">+' + (neighbors.length - 6) + ' more</span>' : '');
+  const neighborLimit = mobile ? 2 : 6;
+  const neighborHtml = neighbors.slice(0, mobile ? 2 : 6).map(nb => '<span style="color:#58a6ff">' + escapeHtml(nb) + '</span>').join(', ') + (neighbors.length > neighborLimit ? ' <span style="color:#6e7681">+' + (neighbors.length - neighborLimit) + ' more</span>' : '');
 
-  let html = '<div style="font-weight:600;color:#f0883e;margin-bottom:4px;font-size:13px">' + title + '</div>';
+  let html = mobile ? '<button class="mobile-sheet-close" onclick="dismissMobileSheet()" aria-label="Close node details">×</button>' : '';
+  html += '<div style="font-weight:600;color:#f0883e;margin-bottom:4px;font-size:13px">' + title + '</div>';
   if (tagHtml) html += '<div style="margin-bottom:6px">' + tagHtml + '</div>';
   if (shortPath) html += '<div style="color:#8b949e;font-size:11px;margin-bottom:3px">📄 ' + escapeHtml(shortPath) + '</div>';
   html += '<div style="color:#8b949e;font-size:11px;margin-bottom:3px">🔗 ' + deg + ' connection' + (deg !== 1 ? 's' : '') + '</div>';
@@ -362,6 +365,7 @@ function showTooltip(node, evt) {
   if (text) html += '<div style="color:#6e7681;font-size:11px;border-top:1px solid #30363d;padding-top:4px">' + escapeHtml(text) + '…</div>';
 
   tooltipEl.innerHTML = html;
+  tooltipEl.classList.toggle('mobile-tooltip', isMobile());
   tooltipEl.style.display = 'block';
   positionTooltip(evt);
 }
@@ -403,15 +407,16 @@ function showEdgeTooltip(link, evt) {
 }
 
 function isMobile() {
-  return window.innerWidth <= 768 || 'ontouchstart' in window;
+  return window.matchMedia('(max-width: 768px)').matches;
 }
 
 function positionTooltip(evt) {
   if (!tooltipEl) return;
   if (isMobile()) {
+    const bottom = 'calc(env(safe-area-inset-bottom) + 12px)';
     tooltipEl.style.left = '10px';
     tooltipEl.style.right = '10px';
-    tooltipEl.style.bottom = (60 + envInset()) + 'px';
+    tooltipEl.style.bottom = bottom;
     tooltipEl.style.top = 'auto';
     tooltipEl.style.maxWidth = 'calc(100vw - 20px)';
     tooltipEl.style.width = 'auto';
@@ -422,6 +427,7 @@ function positionTooltip(evt) {
     tooltipEl.style.width = '';
     tooltipEl.style.right = '';
     tooltipEl.style.bottom = '';
+    tooltipEl.classList.remove('mobile-tooltip');
     const rect = tooltipEl.getBoundingClientRect();
     if (x + rect.width > window.innerWidth) x = (evt.clientX || evt.pageX || 0) - rect.width - pad;
     if (y + rect.height > window.innerHeight) y = (evt.clientY || evt.pageY || 0) - rect.height - pad;
@@ -437,6 +443,12 @@ function envInset() {
 
 function hideTooltip() {
   if (tooltipEl) tooltipEl.style.display = 'none';
+}
+
+// Exposed for the mobile sheet close button. Kept separate from hover cleanup so
+// a deliberate dismiss does not disturb the selected graph context.
+function dismissMobileSheet() {
+  hideTooltip();
 }
 
 function linkEndpointId(endpoint) {

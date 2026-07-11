@@ -1,8 +1,7 @@
 """Route handlers for the BDH Graph Harness API server.
 
-All handlers were originally closures inside ``start_api_server()`` in
-harness.py.  They have been extracted into top-level async functions that
-accept ``app_state`` (and where needed ``ws_clients``) as explicit parameters.
+All handlers accept ``app_state`` (``{'registry': VaultRegistry, 'config': dict}``)
+and resolve the target vault at request entry via :func:`_resolve_vault_ctx`.
 
 ``setup_routes(app, app_state, ws_clients)`` registers every route on the
 aiohttp ``Application``.
@@ -36,10 +35,59 @@ __all__ = [
     "api_refresh",
     "api_consolidate",
     "api_consolidation_stats",
+    "api_vaults",
     "run_attention_and_plasticity",
     "run_neurogenesis",
     "setup_routes",
 ]
+
+
+# ---------------------------------------------------------------------------
+# Vault resolution helpers
+# ---------------------------------------------------------------------------
+
+def _resolve_vault_ctx(app_state: dict, vault_id: str | None = None):
+    """Resolve the target :class:`~bdh_graph_harness.vaults.VaultContext`.
+
+    Parameters
+    ----------
+    app_state:
+        The server's shared state dict — must contain a ``'registry'`` key.
+    vault_id:
+        Requested vault ID, or ``None`` to use the registry default.
+
+    Returns
+    -------
+    tuple[VaultContext, None] | tuple[None, web.Response]
+        On success: ``(ctx, None)``.
+        On failure: ``(None, error_response)`` — callers should ``return err``.
+    """
+    registry = app_state.get('registry')
+    if registry is None:
+        return None, web.json_response(
+            {'error': 'VaultRegistry not initialised'}, status=500
+        )
+    try:
+        return registry.get(vault_id), None
+    except KeyError:
+        available = registry.available_ids()
+        return None, web.json_response(
+            {
+                'error': f"Unknown vault '{vault_id}'",
+                'available_vaults': available,
+            },
+            status=400,
+        )
+
+
+def _vault_id_from_query(request: web.Request) -> str | None:
+    """Extract ``vault_id`` from query string, returning ``None`` if absent/empty."""
+    return request.query.get('vault_id') or None
+
+
+def _vault_id_from_body(data: dict) -> str | None:
+    """Extract ``vault_id`` from a parsed JSON body dict."""
+    return data.get('vault_id') or None
 
 
 # ---------------------------------------------------------------------------
@@ -48,22 +96,25 @@ __all__ = [
 
 async def index(request, app_state: dict) -> web.Response:
     """Serve the vis.js visualization page."""
-    n = app_state['nodes']
-    e = app_state['edges']
-    s = app_state['state']
+    ctx, err = _resolve_vault_ctx(app_state, _vault_id_from_query(request))
+    if err:
+        return err
     html = render_viz_html(
-        len(n),
-        sum(len(links) for links in e.values()),
-        len(s['synapses']),
+        len(ctx.nodes),
+        sum(len(links) for links in ctx.edges.values()),
+        len(ctx.state['synapses']),
     )
     return web.Response(text=html, content_type='text/html')
 
 
 async def api_stats(request, app_state: dict) -> web.Response:
     """Return graph stats + Hebbian summary as JSON."""
-    s = app_state['state']
-    n = app_state['nodes']
-    e = app_state['edges']
+    ctx, err = _resolve_vault_ctx(app_state, _vault_id_from_query(request))
+    if err:
+        return err
+    s = ctx.state
+    n = ctx.nodes
+    e = ctx.edges
     dormant = s.get('dormant_nodes', set())
     stats = {
         'neurons': len(n),
@@ -86,9 +137,12 @@ async def api_stats(request, app_state: dict) -> web.Response:
 
 async def api_graph(request, app_state: dict) -> web.Response:
     """Return nodes, edges, hebbian synapses, and stats as JSON for visualization."""
-    n = app_state['nodes']
-    e = app_state['edges']
-    s = app_state['state']
+    ctx, err = _resolve_vault_ctx(app_state, _vault_id_from_query(request))
+    if err:
+        return err
+    n = ctx.nodes
+    e = ctx.edges
+    s = ctx.state
     dormant = s.get('dormant_nodes', set())
     nq = s.get('node_quality', {})
 
@@ -145,7 +199,10 @@ async def api_graph(request, app_state: dict) -> web.Response:
 
 async def api_hebbian(request, app_state: dict) -> web.Response:
     """Return Hebbian synaptic state as JSON."""
-    s = app_state['state']
+    ctx, err = _resolve_vault_ctx(app_state, _vault_id_from_query(request))
+    if err:
+        return err
+    s = ctx.state
     synapses = []
     for key, syn in sorted(s['synapses'].items(), key=lambda x: -x[1]['weight']):
         a, b = key.split('|')
@@ -164,7 +221,7 @@ async def api_hebbian(request, app_state: dict) -> web.Response:
 
 
 async def run_attention_and_plasticity(
-    query: str, app_state: dict, ws_clients: set, source: str | None = None
+    query: str, ctx, ws_clients: set, source: str | None = None
 ) -> tuple[dict, list, list]:
     """Run the attention + Hebbian plasticity phase shared by all query routes.
 
@@ -173,29 +230,26 @@ async def run_attention_and_plasticity(
       2. Build the ``activated_notes`` list (id, title, score).
       3. Online plasticity: Hebbian update + persist state.
       4. Build ``hebbian_updates`` from the current synaptic state.
-      5. Broadcast an activation event to WebSocket clients.
-
-    All blocking operations (attention, hebbian_update, save_state) are
-    offloaded to ``asyncio.to_thread`` to avoid freezing the event loop.
-    An ``asyncio.Lock`` protects ``app_state['state']`` from concurrent
-    mutation by overlapping queries or the vault watcher.
+      5. Broadcast an activation event to WebSocket clients (includes vault_id).
 
     Args:
-        source: When ``"assistant_response"``, Hebbian dampening is applied
-                to prevent echo-loop reinforcement.
+        query: The query string.
+        ctx: Resolved :class:`~bdh_graph_harness.vaults.VaultContext`.
+        ws_clients: Set of active WebSocket connections.
+        source: When ``"assistant_response"``, Hebbian dampening is applied.
 
     Returns ``(active, activated_notes, hebbian_updates)``.
     """
-    config = app_state['config']
-    n = app_state['nodes']
-    e = app_state['edges']
-    coll = app_state['collection']
-    bm25 = app_state.get('bm25_index')
-    state_lock = app_state.get('state_lock')
+    config = ctx.config.settings
+    n = ctx.nodes
+    e = ctx.edges
+    coll = ctx.collection
+    bm25 = ctx.bm25_index
+    vault_id = ctx.config.id
 
     # Attention — run blocking I/O (embeddings) in a thread
     active = await asyncio.to_thread(
-        attention, query, n, e, coll, None, None, bm25, app_state.get('state')
+        attention, query, n, e, coll, None, None, bm25, ctx.state
     )
 
     activated_notes = []
@@ -211,29 +265,20 @@ async def run_attention_and_plasticity(
     # Online plasticity: Hebbian update immediately after attention
     updated_keys = set()
     pruned_count = 0
-    if CONFIG.get('online_plasticity', True):
+    if config.get('online_plasticity', True) and active:
         # Acquire lock, then run hebbian_update + save_state in a thread
-        if state_lock:
-            async with state_lock:
-                app_state['state'], updated_keys, pruned_count = await asyncio.to_thread(
-                    hebbian_update, active, app_state['state'], n, source
-                )
-                await asyncio.to_thread(
-                    save_state, config['vault_path'], app_state['state']
-                )
-        else:
-            # Fallback: no lock (e.g. MCP fallback path without server)
-            app_state['state'], updated_keys, pruned_count = await asyncio.to_thread(
-                hebbian_update, active, app_state['state'], n, source
+        async with ctx.state_lock:
+            ctx.state, updated_keys, pruned_count = await asyncio.to_thread(
+                hebbian_update, active, ctx.state, n, source
             )
             await asyncio.to_thread(
-                save_state, config['vault_path'], app_state['state']
+                save_state, ctx.config.path, ctx.state
             )
 
     # Collect ONLY hebbian synapses updated in this query (for pulse animation)
     hebbian_updates = []
     for key in updated_keys:
-        syn = app_state['state']['synapses'].get(key)
+        syn = ctx.state['synapses'].get(key)
         if syn:
             hebbian_updates.append({
                 'pair': key,
@@ -241,17 +286,18 @@ async def run_attention_and_plasticity(
                 'frequency': syn.get('frequency', 0),
             })
 
-    # Broadcast activation event to WebSocket clients
+    # Broadcast activation event to WebSocket clients (includes vault_id)
     activation_event = {
         'type': 'activation',
+        'vault_id': vault_id,
         'query': query,
         'activated_notes': activated_notes,
         'hebbian_updates': hebbian_updates,
-        'hebbian_synapses': len(app_state['state']['synapses']),
-        'queries_processed': app_state['state'].get('queries', 0),
-        'neuron_count': len(app_state['nodes']),
-        'synapse_count': sum(len(links) for links in app_state['edges'].values()),
-        'dormant_count': len(app_state['state'].get('dormant_nodes', set())),
+        'hebbian_synapses': len(ctx.state['synapses']),
+        'queries_processed': ctx.state.get('queries', 0),
+        'neuron_count': len(ctx.nodes),
+        'synapse_count': sum(len(links) for links in ctx.edges.values()),
+        'dormant_count': len(ctx.state.get('dormant_nodes', set())),
         'pruned_count': pruned_count,
         'timestamp': datetime.now().isoformat(),
     }
@@ -261,19 +307,19 @@ async def run_attention_and_plasticity(
 
 
 def run_neurogenesis(
-    response_text: str, query: str, active: dict, app_state: dict
+    response_text: str, query: str, active: dict, ctx
 ) -> list:
     """Run neurogenesis on a completed LLM response.
 
-    If ``CONFIG['neurogenesis_enabled']`` is True, extracts new concepts
-    from the response and creates notes for each one in the vault.
+    If ``neurogenesis_enabled`` is True in the vault config, extracts new
+    concepts from the response and creates notes in the vault.
 
     Returns the ``new_concepts_list`` (list of ``{'id', 'title'}`` dicts).
     """
     new_concepts_list = []
-    if CONFIG.get('neurogenesis_enabled', True):
-        n = app_state['nodes']
-        config = app_state['config']
+    config = ctx.config.settings
+    if config.get('neurogenesis_enabled', True):
+        n = ctx.nodes
         active_titles = [n[nid]['title'] for nid in active if nid in n]
         new_concepts = extract_new_concepts(response_text, query, active, n)
         for concept in new_concepts:
@@ -281,7 +327,7 @@ def run_neurogenesis(
             definition = concept.get('definition', '').strip()
             if not title or not definition:
                 continue
-            vault_root = config['vault_path']
+            vault_root = ctx.config.path
             new_note_id = create_note(vault_root, title, definition, active_titles, query)
             if new_note_id:
                 new_concepts_list.append({
@@ -295,12 +341,9 @@ def run_neurogenesis(
 async def api_query(request, app_state: dict, ws_clients: set) -> web.Response:
     """Accept {"query": "..."} and run the full BDH pipeline.
 
-    Phase 3.2: Online plasticity — Hebbian update happens right after
-    attention (not after LLM), so synaptic state reflects what was
-    activated, not what the LLM happened to use.
-
     Optional fields:
-      - source: "assistant_response" triggers Hebbian dampening (echo-loop prevention)
+      - vault_id: select vault (default used if omitted)
+      - source: "assistant_response" triggers Hebbian dampening
       - user_prompt: original user question, combined with query for LLM context
     """
     try:
@@ -312,48 +355,47 @@ async def api_query(request, app_state: dict, ws_clients: set) -> web.Response:
     if not query:
         return web.json_response({'error': 'Missing "query" field'}, status=400)
 
+    ctx, err = _resolve_vault_ctx(app_state, _vault_id_from_body(data))
+    if err:
+        return err
+
     source = data.get('source')
     user_prompt = data.get('user_prompt', '').strip()
 
-    # Combine user prompt + assistant response for richer LLM context
-    # when user_prompt is available (prevents losing question→answer association)
     llm_query = query
     if user_prompt:
         llm_query = f"{user_prompt}\n\n---\n\n{query}"
 
-    # Shared attention + plasticity phase (broadcasts activation to WS)
-    # Pass source for echo-loop dampening
     active, activated_notes, hebbian_updates = await run_attention_and_plasticity(
-        query, app_state, ws_clients, source=source
+        query, ctx, ws_clients, source=source
     )
 
-    # LLM response — use combined query for richer context (run in thread to avoid blocking)
-    n = app_state['nodes']
+    n = ctx.nodes
     response_text = await asyncio.to_thread(llm_respond, llm_query, active, n)
 
-    # Neurogenesis on the full response
-    new_concepts_list = run_neurogenesis(response_text, query, active, app_state)
+    new_concepts_list = run_neurogenesis(response_text, query, active, ctx)
 
     return web.json_response({
         'response': response_text,
         'activated_notes': activated_notes,
         'new_concepts': new_concepts_list,
-        'hebbian_synapses': len(app_state['state']['synapses']),
+        'hebbian_synapses': len(ctx.state['synapses']),
         'hebbian_updates': hebbian_updates,
-        'queries_processed': app_state['state'].get('queries', 0),
-        'neuron_count': len(app_state['nodes']),
-        'synapse_count': sum(len(links) for links in app_state['edges'].values()),
+        'queries_processed': ctx.state.get('queries', 0),
+        'neuron_count': len(ctx.nodes),
+        'synapse_count': sum(len(links) for links in ctx.edges.values()),
     })
 
 
 async def api_stream(request, app_state: dict, ws_clients: set) -> web.StreamResponse:
     """Streaming query endpoint using Server-Sent Events.
 
-    Phase 3.2: Online plasticity with streaming.
     Streams tokens as they arrive from the LLM, with Hebbian update
     performed right after attention (before streaming starts).
 
     SSE format: data: {json}\\n\\n
+
+    Optional body field: vault_id.
     """
     try:
         data = await request.json()
@@ -364,22 +406,23 @@ async def api_stream(request, app_state: dict, ws_clients: set) -> web.StreamRes
     if not query:
         return web.json_response({'error': 'Missing "query" field'}, status=400)
 
+    ctx, err = _resolve_vault_ctx(app_state, _vault_id_from_body(data))
+    if err:
+        return err
+
     source = data.get('source')
     user_prompt = data.get('user_prompt', '').strip()
 
-    # Combine user prompt + assistant response for richer LLM context
     llm_query = query
     if user_prompt:
         llm_query = f"{user_prompt}\n\n---\n\n{query}"
 
-    n = app_state['nodes']
+    n = ctx.nodes
 
-    # Shared attention + plasticity phase (broadcasts activation to WS)
     active, activated_notes, hebbian_updates = await run_attention_and_plasticity(
-        query, app_state, ws_clients, source=source
+        query, ctx, ws_clients, source=source
     )
 
-    # Stream LLM response via SSE
     resp = web.StreamResponse(
         status=200,
         headers={
@@ -390,20 +433,17 @@ async def api_stream(request, app_state: dict, ws_clients: set) -> web.StreamRes
     )
     await resp.prepare(request)
 
-    # Send activation info first
     init_data = json.dumps({
         'type': 'activation',
+        'vault_id': ctx.config.id,
         'activated_notes': activated_notes,
-        'hebbian_synapses': len(app_state['state']['synapses']),
+        'hebbian_synapses': len(ctx.state['synapses']),
     })
     await resp.write(f"data: {init_data}\n\n".encode())
 
-    # Stream tokens — run blocking generator in a thread, feed to SSE
     full_response = []
-    loop = asyncio.get_running_loop()
 
     def _run_stream():
-        """Run the blocking LLM stream in a thread, collecting tokens."""
         tokens = []
         try:
             for token in llm_stream(llm_query, active, n):
@@ -412,22 +452,20 @@ async def api_stream(request, app_state: dict, ws_clients: set) -> web.StreamRes
             logger.warning(f"Stream interrupted: {exc}")
         return tokens
 
-    # Execute the blocking stream call in a thread
     tokens = await asyncio.to_thread(_run_stream)
     for token in tokens:
         full_response.append(token)
         token_data = json.dumps({'type': 'token', 'content': token})
         await resp.write(f"data: {token_data}\n\n".encode())
 
-    # Neurogenesis on the full response
     response_text = ''.join(full_response)
-    new_concepts_list = run_neurogenesis(response_text, query, active, app_state)
+    new_concepts_list = run_neurogenesis(response_text, query, active, ctx)
 
-    # Send final event with new concepts
     done_data = json.dumps({
         'type': 'done',
+        'vault_id': ctx.config.id,
         'new_concepts': new_concepts_list,
-        'hebbian_synapses': len(app_state['state']['synapses']),
+        'hebbian_synapses': len(ctx.state['synapses']),
     })
     await resp.write(f"data: {done_data}\n\n".encode())
     await resp.write(b'data: [DONE]\n\n')
@@ -439,10 +477,13 @@ async def api_quality(request, app_state: dict) -> web.Response:
     """Return node quality statistics and dormant node list."""
     from bdh_graph_harness.memory.quality import quality_stats
 
-    state = app_state['state']
+    ctx, err = _resolve_vault_ctx(app_state, _vault_id_from_query(request))
+    if err:
+        return err
+
+    state = ctx.state
     stats = quality_stats(state)
 
-    # Include per-node quality details for dormant nodes
     nq = state.get('node_quality', {})
     dormant_details = []
     for nid, q in sorted(nq.items(), key=lambda x: x[1]['score']):
@@ -460,15 +501,27 @@ async def api_quality(request, app_state: dict) -> web.Response:
 
 
 async def api_refresh(request, app_state: dict) -> web.Response:
-    """Force refresh all embeddings."""
-    config = app_state['config']
-    n = app_state['nodes']
-    vault_root = config['vault_path']
+    """Force refresh all embeddings for the selected vault."""
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
 
-    # compute_all_embeddings lives in the retrieval module
+    ctx, err = _resolve_vault_ctx(app_state, _vault_id_from_body(data))
+    if err:
+        return err
+
+    n = ctx.nodes
+    vault_root = ctx.config.path
+
     from bdh_graph_harness.retrieval import compute_all_embeddings
-    coll = await asyncio.to_thread(compute_all_embeddings, n, vault_root, False)
-    app_state['collection'] = coll
+    coll = await asyncio.to_thread(
+        compute_all_embeddings, n, vault_root, False,
+        chroma_path=ctx.config.chroma_path,
+        collection_name=ctx.config.chroma_collection,
+        config=ctx.config.settings,
+    )
+    ctx.collection = coll
     return web.json_response({'status': 'ok', 'embeddings': coll.count()})
 
 
@@ -476,14 +529,21 @@ async def api_node_update(request, app_state: dict, ws_clients: set) -> web.Resp
     """Lightweight vault diff: detect new/changed/deleted notes without full rebuild.
 
     Sends targeted WebSocket events instead of rebuilding the entire graph.
-    Much faster than /api/refresh-graph for single-note updates.
+    Accepts optional ``vault_id`` in the JSON body.
     """
-    config = app_state['config']
-    vault_root = config['vault_path']
-    old_nodes = app_state['nodes'] or {}
-    old_edges = app_state['edges'] or {}
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
 
-    # Rebuild graph from vault (fresh read) — in thread
+    ctx, err = _resolve_vault_ctx(app_state, _vault_id_from_body(data))
+    if err:
+        return err
+
+    vault_root = ctx.config.path
+    old_nodes = ctx.nodes or {}
+    old_edges = ctx.edges or {}
+
     from bdh_graph_harness.graph.builder import build_graph
     new_nodes, new_edges = await asyncio.to_thread(build_graph, vault_root, False)
 
@@ -499,24 +559,20 @@ async def api_node_update(request, app_state: dict, ws_clients: set) -> web.Resp
         old_text = old_nodes[nid].get('text', '')
         new_text = new_nodes[nid].get('text', '')
         if old_title != new_title or old_text != new_text:
-            changed.append({
-                'id': nid,
-                'title': new_title,
-                'old_title': old_title,
-            })
+            changed.append({'id': nid, 'title': new_title, 'old_title': old_title})
 
-    # Update app state
-    app_state['nodes'] = new_nodes
-    app_state['edges'] = new_edges
+    ctx.nodes = new_nodes
+    ctx.edges = new_edges
 
-    # Re-embed if needed — in thread
     if added or changed:
         from bdh_graph_harness.retrieval import compute_all_embeddings
-        app_state['collection'] = await asyncio.to_thread(
-            compute_all_embeddings, new_nodes, vault_root, False
+        ctx.collection = await asyncio.to_thread(
+            compute_all_embeddings, new_nodes, vault_root, False,
+            chroma_path=ctx.config.chroma_path,
+            collection_name=ctx.config.chroma_collection,
+            config=ctx.config.settings,
         )
 
-    # Send targeted WS events
     from bdh_graph_harness.api.ws import broadcast_activation
 
     if added:
@@ -546,6 +602,7 @@ async def api_node_update(request, app_state: dict, ws_clients: set) -> web.Resp
             })
         await broadcast_activation({
             'type': 'graph_refresh',
+            'vault_id': ctx.config.id,
             'neurons': len(new_nodes),
             'synapses': sum(len(links) for links in new_edges.values()),
             'delta': len(added) - len(deleted),
@@ -558,6 +615,7 @@ async def api_node_update(request, app_state: dict, ws_clients: set) -> web.Resp
     elif changed or deleted:
         await broadcast_activation({
             'type': 'node_update',
+            'vault_id': ctx.config.id,
             'changed_nodes': changed,
             'deleted_nodes': deleted,
             'message': f'{len(changed)} changed, {len(deleted)} deleted',
@@ -575,23 +633,30 @@ async def api_node_update(request, app_state: dict, ws_clients: set) -> web.Resp
 
 async def api_refresh_graph(request, app_state: dict, ws_clients: set) -> web.Response:
     """Full graph rebuild: re-read vault, rebuild graph, re-embed, notify WS clients.
-    Detects new notes and returns them as new_concepts for neurogenesis animation."""
-    import asyncio
-    config = app_state['config']
-    vault_root = config['vault_path']
 
-    # 1. Snapshot old node data before rebuild
-    old_node_ids = set(app_state['nodes'].keys()) if app_state['nodes'] else set()
-    old_node_titles = {nid: n.get('title', '') for nid, n in (app_state['nodes'] or {}).items()}
+    Accepts optional ``vault_id`` in the JSON body.
+    """
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
 
-    # 2. Rebuild graph from vault (no cache — force fresh read) — in thread
+    ctx, err = _resolve_vault_ctx(app_state, _vault_id_from_body(data))
+    if err:
+        return err
+
+    vault_root = ctx.config.path
+    config = ctx.config.settings
+
+    old_node_ids = set(ctx.nodes.keys()) if ctx.nodes else set()
+    old_node_titles = {nid: n.get('title', '') for nid, n in (ctx.nodes or {}).items()}
+
     from bdh_graph_harness.graph.builder import build_graph
     nodes, edges = await asyncio.to_thread(build_graph, vault_root, False)
 
-    app_state['nodes'] = nodes
-    app_state['edges'] = edges
+    ctx.nodes = nodes
+    ctx.edges = edges
 
-    # 3. Detect new notes AND changed notes
     new_node_ids = set(nodes.keys()) - old_node_ids
     changed_nodes = []
     for nid in sorted(old_node_ids & set(nodes.keys())):
@@ -604,56 +669,58 @@ async def api_refresh_graph(request, app_state: dict, ws_clients: set) -> web.Re
     for nid in sorted(new_node_ids):
         node = nodes[nid]
         title = node.get('title', nid.split('/')[-1])
-        # Find source notes: existing nodes this new note links TO (outgoing wikilinks)
         source_notes = []
         node_links = edges.get(nid, [])
         node_edges = []
         for t in node_links:
             target_id = t['target'] if isinstance(t, dict) else t
             node_edges.append({'source': nid, 'target': target_id})
-            # Targets may lack wiki/ prefix — try both formats
-            resolved = target_id if target_id in old_node_ids else ('wiki/' + target_id if ('wiki/' + target_id) in old_node_ids else None)
+            if target_id in old_node_ids:
+                resolved = target_id
+            elif ('wiki/' + target_id) in old_node_ids:
+                resolved = 'wiki/' + target_id
+            else:
+                resolved = None
             if resolved:
                 src_node = nodes.get(resolved, {})
                 source_notes.append(src_node.get('title', resolved.split('/')[-1]))
-        new_concepts.append({
-            'id': nid,
-            'title': title,
-            'source_notes': source_notes[:5],  # cap at 5
-        })
+        new_concepts.append({'id': nid, 'title': title, 'source_notes': source_notes[:5]})
         added_node_data.append({
-            'id': nid,
-            'title': title,
-            'tags': node.get('tags', ''),
-            'text': node.get('text', ''),
-            'path': node.get('path', ''),
-            'edges': node_edges,
+            'id': nid, 'title': title,
+            'tags': node.get('tags', ''), 'text': node.get('text', ''),
+            'path': node.get('path', ''), 'edges': node_edges,
         })
 
-    # 4. Re-embed all notes — in thread
     from bdh_graph_harness.retrieval import compute_all_embeddings
-    coll = await asyncio.to_thread(compute_all_embeddings, nodes, vault_root, False)
-    app_state['collection'] = coll
+    coll = await asyncio.to_thread(
+        compute_all_embeddings, nodes, vault_root, False,
+        chroma_path=ctx.config.chroma_path,
+        collection_name=ctx.config.chroma_collection,
+        config=config,
+    )
+    ctx.collection = coll
 
-    # 5. Rebuild BM25 index if hybrid search is enabled
     if config.get('hybrid_search', False):
         from bdh_graph_harness.retrieval.bm25 import BM25Index
-        app_state['bm25_index'] = BM25Index(nodes)
+        ctx.bm25_index = BM25Index(nodes)
 
     new_count = len(nodes)
     delta = new_count - len(old_node_ids)
 
-    # 6. Notify all WebSocket clients with new_concepts for neurogenesis animation
     from bdh_graph_harness.api.ws import broadcast_activation
     event = {
         'type': 'graph_refresh',
+        'vault_id': ctx.config.id,
         'neurons': new_count,
         'synapses': len(edges),
         'delta': delta,
         'new_concepts': new_concepts,
         'changed_nodes': changed_nodes,
         'added_node_data': added_node_data,
-        'message': f'Graph refreshed: {new_count} neurons ({delta:+d}), {len(new_concepts)} new, {len(changed_nodes)} updated',
+        'message': (
+            f'Graph refreshed: {new_count} neurons ({delta:+d}), '
+            f'{len(new_concepts)} new, {len(changed_nodes)} updated'
+        ),
     }
     await broadcast_activation(event, ws_clients)
 
@@ -669,60 +736,50 @@ async def api_refresh_graph(request, app_state: dict, ws_clients: set) -> web.Re
 
 
 async def api_consolidate(request, app_state: dict, ws_clients: set) -> web.Response:
-    """Run a memory consolidation cycle (sleep phase).
+    """Run a memory consolidation cycle (sleep phase) on the selected vault.
 
     POST /api/consolidate
 
-    Triggers a full consolidation pass:
-      1. Synaptic downscaling (global weight reduction).
-      2. Structural pruning (delete weak synapses).
-      3. Quality re-evaluation.
-      4. Stale dormant node removal.
-
-    State is persisted after consolidation. A WebSocket event is broadcast
-    to all connected clients with the results.
-
     Optional JSON body:
       {
-        "dry_run": false  -- if true, compute results without mutating state
+        "vault_id": "hermes",
+        "dry_run": false
       }
     """
-    import asyncio
-
     dry_run = False
     try:
         data = await request.json()
         dry_run = data.get('dry_run', False)
     except Exception:
-        pass  # no body or invalid JSON — just run normally
+        data = {}
 
-    n = app_state['nodes']
-    e = app_state.get('edges', {})
-    config = app_state['config']
+    ctx, err = _resolve_vault_ctx(app_state, _vault_id_from_body(data))
+    if err:
+        return err
+
+    n = ctx.nodes
+    e = ctx.edges
+    config = ctx.config.settings
 
     if dry_run:
         from copy import deepcopy
-        state_copy = deepcopy(app_state['state'])
-        results = consolidate(state_copy, n, e)
+        state_copy = deepcopy(ctx.state)
+        results = consolidate(
+            state_copy, n, e,
+            config=config, collection=ctx.collection,
+        )
         results['dry_run'] = True
         return web.json_response(results)
 
-    # Real consolidation — mutate state in place (with lock for thread safety)
-    state_lock = app_state.get('state_lock')
-    if state_lock:
-        async with state_lock:
-            results = await asyncio.to_thread(consolidate, app_state['state'], n, e)
-            await asyncio.to_thread(save_state, config['vault_path'], app_state['state'])
-    else:
-        results = await asyncio.to_thread(consolidate, app_state['state'], n, e)
-        await asyncio.to_thread(save_state, config['vault_path'], app_state['state'])
+    async with ctx.state_lock:
+        results = await asyncio.to_thread(
+            consolidate, ctx.state, n, e,
+            config=config, collection=ctx.collection,
+        )
+        await asyncio.to_thread(save_state, ctx.config.path, ctx.state)
 
-    # Broadcast consolidation event to WebSocket clients
     from bdh_graph_harness.api.ws import broadcast_activation
-    event = {
-        'type': 'consolidation',
-        **results,
-    }
+    event = {'type': 'consolidation', 'vault_id': ctx.config.id, **results}
     await broadcast_activation(event, ws_clients)
 
     return web.json_response(results)
@@ -730,8 +787,60 @@ async def api_consolidate(request, app_state: dict, ws_clients: set) -> web.Resp
 
 async def api_consolidation_stats(request, app_state: dict) -> web.Response:
     """Return consolidation configuration and cycle count."""
-    stats = consolidation_stats(app_state['state'])
+    ctx, err = _resolve_vault_ctx(app_state, _vault_id_from_query(request))
+    if err:
+        return err
+    stats = consolidation_stats(ctx.state)
     return web.json_response(stats)
+
+
+async def api_vaults(request, app_state: dict) -> web.Response:
+    """List all configured vaults with graph statistics.
+
+    GET /api/vaults
+
+    Returns::
+
+        {
+          "default_vault": "hermes",
+          "vaults": [
+            {
+              "id": "hermes",
+              "name": "Hermes",
+              "path": "~/Documents/Hermes",
+              "neurons": 174,
+              "synapses": 312,
+              "embeddings": 174,
+              "queries_processed": 51
+            }
+          ]
+        }
+    """
+    registry = app_state.get('registry')
+    if registry is None:
+        return web.json_response({'error': 'VaultRegistry not initialised'}, status=500)
+
+    vaults_data = []
+    for ctx in registry.list():
+        try:
+            embeddings = ctx.collection.count() if ctx.collection else 0
+        except Exception:
+            embeddings = 0
+        vaults_data.append({
+            'id': ctx.config.id,
+            'name': ctx.config.name,
+            'path': ctx.config.path,
+            'chroma_collection': ctx.config.chroma_collection,
+            'neurons': len(ctx.nodes),
+            'synapses': sum(len(links) for links in ctx.edges.values()),
+            'embeddings': embeddings,
+            'queries_processed': ctx.state.get('queries', 0),
+        })
+
+    return web.json_response({
+        'default_vault': registry.default_id(),
+        'vaults': vaults_data,
+    })
 
 
 # ---------------------------------------------------------------------------
@@ -782,6 +891,9 @@ def setup_routes(app: web.Application, app_state: dict, ws_clients: set) -> None
     async def _consolidation_stats(request):
         return await api_consolidation_stats(request, app_state)
 
+    async def _vaults(request):
+        return await api_vaults(request, app_state)
+
     app.router.add_get('/', _index)
     app.router.add_get('/ws', _ws)
 
@@ -794,6 +906,7 @@ def setup_routes(app: web.Application, app_state: dict, ws_clients: set) -> None
     app.router.add_get('/api/hebbian', _hebbian)
     app.router.add_get('/api/quality', _quality)
     app.router.add_get('/api/consolidation-stats', _consolidation_stats)
+    app.router.add_get('/api/vaults', _vaults)
     app.router.add_post('/api/query', _query)
     app.router.add_post('/api/stream', _stream)
     app.router.add_post('/api/refresh', _refresh)

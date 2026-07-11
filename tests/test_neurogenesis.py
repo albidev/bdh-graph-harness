@@ -69,7 +69,10 @@ def test_create_note_creates_file(temp_vault):
     assert 'tags: [neurogenesis, auto-generated]' in content
     assert 'confidence: low' in content
     assert 'A test definition.' in content
-    assert 'test query' in content
+    assert 'created_by: bdh-neurogenesis' in content
+    assert 'generation_query: "test query"' in content
+    assert 'activated_from: "Source A, Source B"' in content
+    assert '## Origin' not in content
 
 
 def test_create_note_does_not_overwrite(temp_vault):

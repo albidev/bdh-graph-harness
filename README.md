@@ -19,12 +19,13 @@ Turns an Obsidian vault into a living knowledge graph where:
 - **Hebbian learning** — co-activated notes strengthen their synaptic weight over time (frequency + recency + activation correlation)
 - **Vector retrieval** — semantic search via embeddings (default). Optional BM25 hybrid mode for multilingual vaults (disabled by default — see `benchmarks/BM25_ANALYSIS.md`)
 - **Adaptive thresholding** — `max(Q75, mean+1std, 0.15)` to filter noise dynamically
-- **Neurogenesis** — LLM extracts new concepts from queries and creates notes in the vault, filtered by a 3-layer signal system (prompt engineering + regex blocklist + semantic dedup) to prevent noise
+- **Neurogenesis** — LLM extracts new concepts from queries and creates notes in the vault, filtered by a 3-layer signal system (prompt engineering + regex blocklist + semantic dedup) to prevent noise; generation provenance is kept in frontmatter so it does not pollute embeddings
 - **Node quality scoring** — composite score (strong edges + mean weight + frequency) auto-prunes dormant nodes from visualization; re-activates on strong re-encounter
 - **Sleep-cycle consolidation** — periodic synaptic downscaling (×0.9), structural pruning below weight floor, and stale dormant node removal — mirrors biological sleep consolidation
 - **Server-side file watcher** — mtime-based polling detects vault changes from any source (Obsidian, LLM, scripts) and triggers incremental graph updates
 - **LLM responses** — any OpenAI-compatible provider (OpenRouter, Ollama Cloud, local Ollama), with citations back to source notes
 - **Real-time visualization** — WebGL force-graph showing nodes activating, edges pulsing as Hebbian weights update during queries
+- **Multi-vault isolation** — optional `vaults:` configuration creates one graph state, watcher, BM25 index, lock, and ChromaDB collection per vault; requests select a vault explicitly without cross-contaminating embeddings or state
 
 For the theory behind these choices — why Hebbian plasticity, why Obsidian, why not just RAG — see [`docs/philosophy.md`](docs/philosophy.md).
 
@@ -59,6 +60,7 @@ Sleep Cycle (periodic):
 bdh_graph_harness/
 ├── __main__.py              # CLI entry point (--serve, --mcp, --query, --refresh)
 ├── config.py                # Config loading, env var expansion, retry logic
+├── vaults.py                # VaultConfig, VaultContext, VaultRegistry (multi-vault isolation)
 ├── mcp_server.py            # MCP server (FastMCP, stdio + HTTP transport)
 ├── graph/
 │   ├── parser.py            # Frontmatter + wikilink parsing
@@ -129,7 +131,30 @@ python -m bdh_graph_harness --refresh
 
 # Open visualization
 open http://localhost:8643
+
+# List configured vaults (multi-vault mode)
+python -m bdh_graph_harness --list-vaults
+
+# Target a configured vault from the CLI
+python -m bdh_graph_harness --vault-id research --stats
 ```
+
+### Multi-vault API
+
+Keep the legacy `vault_path` config for one vault, or use the `vaults:` list shown in [`bdh-config.yaml`](bdh-config.yaml). Each entry is isolated: it has its own graph, Hebbian state, watcher, BM25 index, lock, and ChromaDB collection.
+
+```bash
+# Query one vault explicitly
+curl -X POST http://localhost:8643/api/query \
+  -H 'Content-Type: application/json' \
+  -d '{"vault_id":"research","query":"How does retrieval work?"}'
+
+# Read stats for one vault, or discover configured vaults
+curl 'http://localhost:8643/api/stats?vault_id=research'
+curl http://localhost:8643/api/vaults
+```
+
+`vault_id` is also accepted by MCP tools such as `query(question="...", vault_id="research")`. Omitting it selects `default_vault` (or the first configured vault).
 
 ### Running as a service (macOS)
 
@@ -171,10 +196,19 @@ See `bdh-config.yaml` for all parameters. Key ones:
 ## Tests
 
 ```bash
-pytest tests/ -v
+# Install runtime + test tooling
+pip install -r requirements-dev.txt
+
+# Full suite
+python -m pytest -q
+
+# Include statement and branch coverage
+python -m pytest -q --cov=bdh_graph_harness --cov-branch --cov-report=term-missing
 ```
 
-180 tests covering graph building, attention spread, adaptive threshold, BM25, hybrid search (optional), Hebbian updates, LLM providers (Ollama + OpenAI-compatible), neurogenesis, consolidation (downscaling, pruning, stale removal), and API endpoints.
+The current `develop` baseline is **214 passing tests** and **50% package branch coverage**. The mobile/provenance branch has been verified with **222 passing tests**. The target is 100%, without excluding application modules just to manufacture a prettier number. Regression coverage is already complete for state persistence, consolidation, node quality, BM25, mobile visualization layout, and neurogenesis provenance; the remaining work focuses on API/WebSocket, CLI/MCP, graph/cache, embeddings, and provider failure paths.
+
+See [`docs/testing.md`](docs/testing.md) for the coverage policy, exact commands, and multi-vault regression requirements. [`docs/coverage.md`](docs/coverage.md) records the current versioned baseline; GitHub Actions keeps the XML and JSON report for every later `develop` or `main` run.
 
 ## Visualization
 
@@ -183,7 +217,7 @@ The web UI at `:8643` shows a real-time force-graph (WebGL) with:
 - **Wikilink edges** + **Hebbian synapses** + **Phantom links** with hover tooltips (weight, type, connected notes)
 - **Live neurogenesis** — new edges appear in real-time as concepts are created
 - **Hover highlighting** — node hover shows 1-hop subgraph, edge hover highlights the edge
-- **Node drag**, **viewport-preserving updates**, **manual collision force**
+- **Node drag**, **viewport-preserving updates**, **manual collision force**, and touch-first mobile graph interactions
 - **Z-order** — wikilinks (bottom) → phantom (middle) → hebbian (top)
 - **Orphan nodes toggle**, **tag legend overlay**, **dark theme**, **mobile responsive** (iPhone safe area, touch dismiss)
 - **Node quality** — dormant nodes dimmed (gray, 30% opacity) with 💤 tooltip; stats bar shows dormant count

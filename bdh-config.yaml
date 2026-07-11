@@ -1,5 +1,9 @@
 # BDH Graph Harness Configuration
 
+# ---------------------------------------------------------------------------
+# Single-vault mode (default — backward compatible)
+# ---------------------------------------------------------------------------
+
 # Vault
 vault_path: ./wiki  # path to your Obsidian vault
 
@@ -17,6 +21,51 @@ llm_timeout: 300
 # ChromaDB
 chroma_path: .bdh-chroma
 chroma_collection: notes
+
+# ---------------------------------------------------------------------------
+# Multi-vault mode (uncomment and adapt; remove vault_path above)
+# ---------------------------------------------------------------------------
+#
+# # Optional: vault used when vault_id is not specified in the API request.
+# default_vault: hermes
+#
+# # Shared ChromaDB directory. Each vault gets its own collection within it.
+# # If omitted, each vault keeps its own .bdh-chroma relative to its path.
+# chroma_path: ~/.bdh/chroma
+#
+# vaults:
+#   - id: hermes            # URL-safe: ^[a-zA-Z0-9_-]+$  (required, unique)
+#     name: Hermes          # Human-readable label
+#     path: ~/Documents/Hermes    # Must exist at startup
+#     # chroma_collection: vault_hermes_notes   # Default: vault_{id}_notes
+#     neurogenesis_dir: wiki/concepts
+#     graph_ignore:
+#       - wiki/index
+#       - wiki/log
+#       - wiki/raw/*
+#
+#   - id: research
+#     name: Research Vault
+#     path: ~/Documents/Research
+#     # chroma_collection: vault_research_notes
+#     neurogenesis_dir: concepts
+#
+# API vault selection:
+#   POST /api/query        → body: {"vault_id": "hermes", "query": "..."}
+#   GET  /api/stats        → query param: ?vault_id=hermes
+#   GET  /api/vaults       → lists all configured vaults
+#
+# CLI vault selection:
+#   python -m bdh_graph_harness --vault-id hermes --stats
+#   python -m bdh_graph_harness --list-vaults
+#
+# MCP vault selection (optional vault_id parameter on all tools):
+#   query(question="...", vault_id="hermes")
+#   stats(vault_id="hermes")
+
+# ---------------------------------------------------------------------------
+# Shared settings (apply to all vaults)
+# ---------------------------------------------------------------------------
 
 # Attention parameters
 seed_count: 5          # top-k embedding matches as seeds

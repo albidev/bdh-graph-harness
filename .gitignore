@@ -12,6 +12,12 @@ embeddings_cache/
 bdh_*.json
 !bdh-config.yaml
 
+# Test coverage artifacts (CI uploads these; do not commit generated snapshots)
+.coverage
+coverage.xml
+coverage.json
+htmlcov/
+
 # Logs
 *.log
 *.error.log

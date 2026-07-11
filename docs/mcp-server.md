@@ -34,11 +34,20 @@ pip install -r requirements.txt
 
 ### 2. Configure the vault
 
-Edit `bdh-config.yaml` to point at your Obsidian vault:
+For one vault, edit `bdh-config.yaml`:
 
 ```yaml
 vault_path: /path/to/your/vault
 ```
+
+For multiple isolated vaults, use the `vaults:` configuration shown in [`../bdh-config.yaml`](../bdh-config.yaml). Each MCP tool accepts an optional `vault_id` and routes to that vault's graph, ChromaDB collection, and state:
+
+```text
+query(question="Explain retrieval", vault_id="research")
+stats(vault_id="research")
+```
+
+Omit `vault_id` to use `default_vault` (or the first configured vault).
 
 ### 3. Start the MCP server
 
