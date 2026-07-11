@@ -169,7 +169,7 @@ def _get_recently_active_notes(hebbian_state):
 
 
 def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=None,
-              hebbian_state=None):
+              hebbian_state=None, routing_meta=None):
     """
     BDH-style attention: find relevant notes via ChromaDB KNN search (seed)
     + graph traversal (k-hop expansion). Returns active note set with scores.
@@ -230,10 +230,15 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
 
     # Hybrid search: combine vector + BM25 (with proper batch normalization)
     hybrid_enabled = CONFIG.get('hybrid_search', False) and bm25_index is not None
+    bm25_scores = {}
 
-    if hybrid_enabled:
-        candidate_ids = list(raw_vector_scores.keys())
-        # Compute BM25 scores ONCE for all candidates, normalized [0,1]
+    if hybrid_enabled and bm25_index is not None:
+        vector_candidate_ids = list(raw_vector_scores.keys())
+        bm25_candidate_ids = [
+            note_id for note_id, _score in bm25_index.search(query, top_k=overfetch)
+        ]
+        candidate_ids = list(dict.fromkeys(vector_candidate_ids + bm25_candidate_ids))
+        # Compute BM25 scores ONCE for the union of vector and lexical candidates.
         bm25_scores = bm25_index.score_batch(query, candidate_ids)
         alpha = CONFIG.get('hybrid_alpha', 0.7)
         beta = CONFIG.get('hybrid_beta', 0.3)
@@ -254,6 +259,30 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
                 dampen = 1.0 / (1.0 + 0.15 * (degree[note_id] - CONFIG['hub_degree_threshold']))
                 sim *= dampen
             scores[note_id] = sim
+
+    if routing_meta is not None:
+        ranked = sorted(scores.values(), reverse=True)
+        bm25_ranked = sorted(bm25_scores.items(), key=lambda item: -item[1])
+        bm25_top_id = bm25_ranked[0][0] if bm25_ranked else None
+        bm25_query_terms = (
+            bm25_index._tokenize(query)
+            if hybrid_enabled and bm25_index is not None else []
+        )
+        bm25_matched_terms = (
+            bm25_index.matched_terms(query, bm25_top_id)
+            if hybrid_enabled and bm25_index is not None and bm25_top_id is not None else []
+        )
+        routing_meta.update({
+            "vector_top_score": max(raw_vector_scores.values(), default=0.0),
+            "bm25_top_score": max(bm25_scores.values(), default=0.0),
+            "bm25_query_term_count": len(set(bm25_query_terms)),
+            "bm25_matched_term_count": len(bm25_matched_terms),
+            "bm25_matched_terms": bm25_matched_terms,
+            "hybrid_top_score": ranked[0] if ranked else 0.0,
+            "hybrid_second_score": ranked[1] if len(ranked) > 1 else 0.0,
+            "hybrid_margin": (ranked[0] - ranked[1]) if len(ranked) > 1 else ranked[0] if ranked else 0.0,
+            "hybrid_enabled": hybrid_enabled,
+        })
 
     # Phase 5: Hebbian-aware seed ranking
     # Boost candidates that have strong Hebbian synapses with recently active notes.
