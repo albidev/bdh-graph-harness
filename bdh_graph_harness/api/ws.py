@@ -118,6 +118,10 @@ async def broadcast_activation(event: dict, ws_clients: set = None) -> None:
         dead = []
         # Copy the set to avoid RuntimeError: Set changed size during iteration
         for ws in list(ws_clients):
+            target_vault = event.get('vault_id')
+            client_vault = getattr(ws, '_bdh_vault_id', None)
+            if target_vault and client_vault and client_vault != target_vault:
+                continue
             try:
                 await ws.send_str(msg)
             except Exception:
@@ -167,6 +171,11 @@ async def websocket_handler(request, app_state: dict, ws_clients: set = None) ->
         e = app_state.get('edges', {})
         s = app_state.get('state', {'synapses': {}})
         vault_id_label = app_state.get('vault_id', 'default')
+
+    try:
+        setattr(ws, '_bdh_vault_id', vault_id_label)
+    except Exception:
+        pass
 
     node_list = []
     for note_id, node in n.items():
