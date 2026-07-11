@@ -36,6 +36,18 @@ During a query, strengthened synapses get animated particles:
 - **Edge hover** — highlights only the hovered edge (color #d2a8ff, width 2.8, 2 particles), does NOT dim the graph
 - Rendering uses `autoPauseRedraw(false)` to stay active even after simulation cools
 
+### Activation explainability
+
+Each activated note now carries both its final activation score and its role in the retrieval graph:
+
+- **`seed`** — selected directly by vector/Hybrid retrieval (`hop: 0`)
+- **`graph_neighbor`** — reached through a wikilink expansion, with `hop` and `parent_id`
+- `vector_score`, `bm25_score`, and `hybrid_score` preserve retrieval evidence
+- `hebbian_boost` shows the contextual memory contribution
+- `final_score` is the score used for activation and visualization
+
+The side panel labels seeds and graph neighbors separately. This avoids presenting a directly retrieved note and a hop-2 contextual neighbor as if they had the same evidence.
+
 ### Viewport management
 
 - **zoomToFit** — graph is centered on first load

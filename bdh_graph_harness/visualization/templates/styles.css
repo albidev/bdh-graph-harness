@@ -193,6 +193,16 @@
     transition: all 0.3s;
   }
   #activated-list li.seed { border-left-color: #58a6ff; }
+  #activated-list li.graph_neighbor { border-left-color: #8b949e; opacity: 0.9; }
+  #activated-list .activation-role {
+    display: inline-block;
+    min-width: 42px;
+    margin-right: 4px;
+    color: #79c0ff;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+  }
   #activated-list li .score {
     color: #8b949e;
     font-size: 12px;

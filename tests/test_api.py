@@ -241,6 +241,12 @@ async def test_api_query_read_only_skips_learning_and_neurogenesis(mock_app_setu
             'hybrid_second_score', 'hybrid_margin', 'hybrid_enabled',
         }
         assert data['routing']['hybrid_enabled'] is True
+        assert data['activated_notes']
+        for note in data['activated_notes']:
+            assert note['role'] in {'seed', 'graph_neighbor'}
+            assert isinstance(note['hop'], int)
+            assert 'final_score' in note
+            assert 'hybrid_score' in note
         assert json.dumps(state, sort_keys=True) == before
     finally:
         await client.close()

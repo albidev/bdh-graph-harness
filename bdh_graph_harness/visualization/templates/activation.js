@@ -181,8 +181,13 @@ function handleActivation(event) {
   } else {
     activated.forEach(note => {
       const li = document.createElement('li');
-      if (note.id === seedId) li.className = 'seed';
-      li.innerHTML = '<span>' + escapeHtml(note.title) + '</span><span class="score">' + note.score.toFixed(4) + '</span>';
+      const role = note.role || (note.id === seedId ? 'seed' : 'graph_neighbor');
+      const roleLabel = role === 'seed' ? 'seed' : 'hop ' + (note.hop ?? 1);
+      li.className = role;
+      const score = Number(note.score || 0).toFixed(4);
+      const hybrid = Number(note.hybrid_score || 0).toFixed(3);
+      li.innerHTML = '<span><strong class="activation-role">' + escapeHtml(roleLabel) + '</strong> ' + escapeHtml(note.title) + '</span>' +
+        '<span class="score" title="final ' + score + ' · hybrid ' + hybrid + '">' + score + '</span>';
       listEl.appendChild(li);
     });
   }
