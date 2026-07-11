@@ -332,7 +332,10 @@ def run_neurogenesis(
             if not title or not definition:
                 continue
             vault_root = ctx.config.path
-            new_note_id = create_note(vault_root, title, definition, active_titles, query)
+            new_note_id = create_note(
+                vault_root, title, definition, active_titles, query,
+                neurogenesis_dir=ctx.config.settings.get('neurogenesis_dir'),
+            )
             if new_note_id:
                 new_concepts_list.append({
                     'id': new_note_id,
