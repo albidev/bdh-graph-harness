@@ -87,7 +87,8 @@ def _make_watcher_callback(ctx, app_state, ws_clients):
         old_nodes = ctx.nodes or {}
 
         new_nodes, new_edges = await asyncio.to_thread(
-            build_graph, vault_path, False
+            build_graph, vault_path, False,
+            ctx.config.settings.get('graph_ignore')
         )
 
         old_ids = set(old_nodes.keys())

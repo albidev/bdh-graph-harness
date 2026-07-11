@@ -564,7 +564,10 @@ async def api_node_update(request, app_state: dict, ws_clients: set) -> web.Resp
     old_edges = ctx.edges or {}
 
     from bdh_graph_harness.graph.builder import build_graph
-    new_nodes, new_edges = await asyncio.to_thread(build_graph, vault_root, False)
+    new_nodes, new_edges = await asyncio.to_thread(
+        build_graph, vault_root, False,
+        ctx.config.settings.get('graph_ignore')
+    )
 
     old_ids = set(old_nodes.keys())
     new_ids = set(new_nodes.keys())
@@ -679,7 +682,9 @@ async def api_refresh_graph(request, app_state: dict, ws_clients: set) -> web.Re
     old_node_titles = {nid: n.get('title', '') for nid, n in (ctx.nodes or {}).items()}
 
     from bdh_graph_harness.graph.builder import build_graph
-    nodes, edges = await asyncio.to_thread(build_graph, vault_root, False)
+    nodes, edges = await asyncio.to_thread(
+        build_graph, vault_root, False, config.get('graph_ignore')
+    )
 
     ctx.nodes = nodes
     ctx.edges = edges
