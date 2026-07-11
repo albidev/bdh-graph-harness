@@ -29,7 +29,7 @@ python -m pytest -q \
 
 ## Coverage status
 
-The current `develop` baseline is **214 passing tests** and **50% package branch coverage**. This is an honest baseline, not a badge with lipstick on it.
+The current `develop` baseline is **214 passing tests** and **50% package branch coverage**. The mobile/provenance branch is verified with **222 passing tests**. These are honest baselines, not badges with lipstick on them.
 
 Modules at 100% branch coverage:
 
@@ -37,6 +37,8 @@ Modules at 100% branch coverage:
 - `memory/consolidation.py` — downscaling, pruning, dry-run and phantom-link paths
 - `memory/quality.py` — dormancy and reactivation branches
 - `retrieval/bm25.py` — empty queries, normalization, no-results behavior
+- `tests/test_mobile_visualization.py` — compact layout and touch-first interaction contracts
+- `tests/test_neurogenesis.py` — provenance placement and sanitized frontmatter fields
 
 The remaining work is concentrated in infrastructure boundaries: REST/WebSocket routes, CLI/MCP dispatch, graph/cache rebuilds, ChromaDB/embedding failure modes, and provider clients.
 
