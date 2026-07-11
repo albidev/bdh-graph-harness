@@ -243,13 +243,18 @@ async def _run_attention_and_plasticity_unlocked(
     )
 
     activated_notes = []
+    activation_details = {
+        item['id']: item for item in routing.get('activation_details', [])
+    }
     if active:
         for note_id, score in sorted(active.items(), key=lambda x: -x[1]):
             node = n.get(note_id)
+            detail = activation_details.get(note_id, {})
             activated_notes.append({
                 'id': note_id,
                 'title': node['title'] if node else note_id,
                 'score': round(score, 4),
+                **{key: value for key, value in detail.items() if key != 'id'},
             })
 
     # Online plasticity: Hebbian update immediately after attention

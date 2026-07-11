@@ -282,6 +282,9 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
             "hybrid_enabled": hybrid_enabled,
         })
 
+    # Keep retrieval-only scores separate from Hebbian and hop propagation scores.
+    retrieval_scores = dict(scores)
+
     # Phase 5: Hebbian-aware seed ranking
     # Boost candidates that have strong Hebbian synapses with recently active notes.
     # This makes the graph "remember" what you're working on and prefer seeds
@@ -311,15 +314,30 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
 
     # Top-k seeds — always keep at least k regardless of threshold
     seeds = sorted(scores.items(), key=lambda x: -x[1])[:k]
+    seed_ids = {nid for nid, _score in seeds}
+    activation_details = {}
+    for note_id, score in seeds:
+        retrieval_score = retrieval_scores.get(note_id, 0.0)
+        boost = max(0.0, score / retrieval_score - 1.0) if retrieval_score > 0 else 0.0
+        activation_details[note_id] = {
+            'role': 'seed',
+            'hop': 0,
+            'parent_id': None,
+            'vector_score': round(raw_vector_scores.get(note_id, 0.0), 4),
+            'bm25_score': round(bm25_scores.get(note_id, 0.0), 4),
+            'hybrid_score': round(retrieval_score, 4),
+            'hebbian_boost': round(boost, 4),
+            'final_score': round(score, 4),
+        }
 
     # Step 2: Graph traversal — expand from seeds via wikilinks
     active = dict(seeds)
     queue = deque()
     for note_id, score in seeds:
-        queue.append((note_id, score, 0))
+        queue.append((note_id, score, 0, None))
 
     while queue:
-        current_id, score, hop = queue.popleft()
+        current_id, score, hop, parent_id = queue.popleft()
         if hop >= max_hop:
             continue
 
@@ -348,10 +366,34 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
                 new_score *= dampen
 
             if target_id in active:
-                active[target_id] = max(active[target_id], new_score)
+                if new_score > active[target_id]:
+                    active[target_id] = new_score
+                    if target_id not in seed_ids:
+                        activation_details[target_id].update({
+                            'hop': hop + 1,
+                            'parent_id': current_id,
+                            'final_score': round(new_score, 4),
+                        })
             elif new_score > CONFIG['active_threshold']:
                 active[target_id] = new_score
-                queue.append((target_id, new_score, hop + 1))
+                activation_details[target_id] = {
+                    'role': 'graph_neighbor',
+                    'hop': hop + 1,
+                    'parent_id': current_id,
+                    'vector_score': round(raw_vector_scores.get(target_id, 0.0), 4),
+                    'bm25_score': round(bm25_scores.get(target_id, 0.0), 4),
+                    'hybrid_score': round(retrieval_scores.get(target_id, 0.0), 4),
+                    'hebbian_boost': 0.0,
+                    'final_score': round(new_score, 4),
+                }
+                queue.append((target_id, new_score, hop + 1, current_id))
+
+    if routing_meta is not None:
+        routing_meta['activation_details'] = [
+            {'id': nid, **activation_details[nid]}
+            for nid, _score in sorted(active.items(), key=lambda item: -item[1])
+            if nid in activation_details
+        ]
 
     return active
 
