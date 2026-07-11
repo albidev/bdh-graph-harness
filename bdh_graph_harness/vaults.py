@@ -100,6 +100,7 @@ class VaultContext:
     state: dict
     bm25_index: Any | None = None
     state_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    runtime_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     watcher: Any | None = None
 
 
