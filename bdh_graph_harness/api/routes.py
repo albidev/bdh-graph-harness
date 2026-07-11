@@ -220,7 +220,7 @@ async def api_hebbian(request, app_state: dict) -> web.Response:
     })
 
 
-async def run_attention_and_plasticity(
+async def _run_attention_and_plasticity_unlocked(
     query: str, ctx, ws_clients: set, source: str | None = None,
     learn: bool = True,
 ) -> tuple[dict, list, list, dict]:
@@ -295,6 +295,17 @@ async def run_attention_and_plasticity(
     await broadcast_activation(activation_event, ws_clients)
 
     return active, activated_notes, hebbian_updates, routing
+
+
+async def run_attention_and_plasticity(
+    query: str, ctx, ws_clients: set, source: str | None = None,
+    learn: bool = True,
+) -> tuple[dict, list, list, dict]:
+    """Run one vault query against an atomic runtime snapshot."""
+    async with ctx.runtime_lock:
+        return await _run_attention_and_plasticity_unlocked(
+            query, ctx, ws_clients, source=source, learn=learn
+        )
 
 
 def run_neurogenesis(
@@ -564,17 +575,21 @@ async def api_node_update(request, app_state: dict, ws_clients: set) -> web.Resp
         if old_title != new_title or old_text != new_text:
             changed.append({'id': nid, 'title': new_title, 'old_title': old_title})
 
-    ctx.nodes = new_nodes
-    ctx.edges = new_edges
+    async with ctx.runtime_lock:
+        ctx.nodes = new_nodes
+        ctx.edges = new_edges
 
-    if added or changed:
-        from bdh_graph_harness.retrieval import compute_all_embeddings
-        ctx.collection = await asyncio.to_thread(
-            compute_all_embeddings, new_nodes, vault_root, False,
-            chroma_path=ctx.config.chroma_path,
-            collection_name=ctx.config.chroma_collection,
-            config=ctx.config.settings,
-        )
+        if added or changed or deleted:
+            from bdh_graph_harness.retrieval import compute_all_embeddings
+            ctx.collection = await asyncio.to_thread(
+                compute_all_embeddings, new_nodes, vault_root, False,
+                chroma_path=ctx.config.chroma_path,
+                collection_name=ctx.config.chroma_collection,
+                config=ctx.config.settings,
+            )
+            if ctx.config.settings.get('hybrid_search', False):
+                from bdh_graph_harness.retrieval.bm25 import BM25Index
+                ctx.bm25_index = BM25Index(new_nodes)
 
     from bdh_graph_harness.api.ws import broadcast_activation
 
