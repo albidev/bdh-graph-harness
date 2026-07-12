@@ -310,6 +310,17 @@ function handleActivation(event) {
 
     // Submit all new nodes/links at once
     setGraphDataPreservingView({ nodes: freshNodes, links: freshLinks }, { reheat: true });
+
+    // After all birth-pulse rebuilds, recover a usable viewport if the
+    // preserved camera ended up zoomed out/off-canvas.
+    const fitDelay = newConcepts.length * 200 + 800;
+    setTimeout(() => {
+      if (!graph || typeof graph.zoomToFit !== 'function') return;
+      if (graph.zoom() < 0.35) {
+        graph.zoomToFit(600, 50);
+        if (typeof syncZoomUI === 'function') syncZoomUI(false);
+      }
+    }, fitDelay);
   }
 
   // Update stats
