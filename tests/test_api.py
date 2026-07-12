@@ -2,6 +2,7 @@
 import os
 import json
 import tempfile
+import asyncio
 import pytest
 import chromadb
 import harness
@@ -310,5 +311,35 @@ async def test_api_index_page(mock_app_setup, monkeypatch):
         assert resp.status == 200
         text = await resp.text()
         assert 'BDH Graph Harness' in text
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_api_query_broadcasts_neurogenesis_after_activation(mock_app_setup, monkeypatch):
+    from aiohttp.test_utils import TestClient, TestServer
+
+    nodes, edges, collection, state, config, _ = mock_app_setup
+    events = []
+    app = _capture_app(monkeypatch, config, nodes, edges, collection, state)
+    monkeypatch.setattr(
+        bdh_routes, 'run_neurogenesis',
+        lambda *args: [{'id': 'wiki/concepts/test-concept', 'title': 'Test Concept'}],
+    )
+    async def capture(event, _clients):
+        events.append(event)
+    monkeypatch.setattr(bdh_routes, 'broadcast_activation', capture)
+
+    server = TestServer(app)
+    client = TestClient(server)
+    await client.start_server()
+    try:
+        resp = await client.post('/api/query', json={'query': 'test concept'})
+        assert resp.status == 200
+        data = await resp.json()
+        assert data['new_concepts'][0]['id'] == 'wiki/concepts/test-concept'
+        assert len(events) == 2
+        assert events[1]['new_concepts'][0]['id'] == 'wiki/concepts/test-concept'
+        assert events[1]['sequence'] > events[0]['sequence']
     finally:
         await client.close()

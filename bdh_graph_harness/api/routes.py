@@ -397,6 +397,26 @@ async def api_query(request, app_state: dict, ws_clients: set) -> web.Response:
         if learn and respond else []
     )
 
+    # Neurogenesis runs after the initial activation broadcast. Send a second
+    # ordered activation event so WebSocket clients render newly created notes
+    # immediately instead of waiting for the filesystem watcher refresh.
+    if new_concepts_list:
+        ctx.event_sequence += 1
+        await broadcast_activation({
+            'type': 'activation',
+            'sequence': ctx.event_sequence,
+            'vault_id': ctx.config.id,
+            'query': query,
+            'activated_notes': activated_notes,
+            'new_concepts': new_concepts_list,
+            'hebbian_updates': [],
+            'hebbian_synapses': len(ctx.state['synapses']),
+            'queries_processed': ctx.state.get('queries', 0),
+            'neuron_count': len(ctx.nodes),
+            'synapse_count': sum(len(links) for links in ctx.edges.values()),
+            'routing': routing,
+        }, ws_clients)
+
     return web.json_response({
         'response': response_text,
         'activated_notes': activated_notes,
