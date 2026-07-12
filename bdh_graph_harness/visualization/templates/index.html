@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>🐉 BDH Graph Harness</title>
-<link rel="stylesheet" href="/static/styles.css?v=neurogenesis-edges-v3">
+<link rel="stylesheet" href="/static/styles.css?v=neurogenesis-ui-v4">
 </head>
 <body class="graph-tab">
 <div id="titlebar">
@@ -116,6 +116,10 @@
       <h3>Activated Notes</h3>
       <ul id="activated-list"><div class="empty">No activations yet</div></ul>
     </div>
+    <div id="new-concepts-section" hidden>
+      <h3>New Concepts</h3>
+      <ul id="new-concepts-list"></ul>
+    </div>
     <div id="stats-section">
       <h3>Stats</h3>
       <div class="stat-row"><span>Queries processed</span><span class="val" id="stat-queries">0</span></div>
@@ -125,11 +129,11 @@
   </div>
 </div>
 <script src="https://unpkg.com/force-graph/dist/force-graph.min.js"></script>
-<script src="/static/graph-core.js?v=neurogenesis-edges-v3"></script>
-<script src="/static/graph-init.js?v=neurogenesis-edges-v3"></script>
-<script src="/static/activation.js?v=neurogenesis-edges-v3"></script>
+<script src="/static/graph-core.js?v=neurogenesis-ui-v4"></script>
+<script src="/static/graph-init.js?v=neurogenesis-ui-v4"></script>
+<script src="/static/activation.js?v=neurogenesis-ui-v4"></script>
 <script src="/static/vault-selector.js?v=multi-vault"></script>
-<script src="/static/websocket.js?v=node-bloom"></script>
-<script src="/static/ui-controls.js?v=node-bloom"></script>
+<script src="/static/websocket.js?v=ws-seq-v1"></script>
+<script src="/static/ui-controls.js?v=ws-seq-v1"></script>
 </body>
 </html>
