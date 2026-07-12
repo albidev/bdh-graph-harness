@@ -406,6 +406,29 @@ function showEdgeTooltip(link, evt) {
   positionTooltip(evt);
 }
 
+function showActivatedTooltip(note, evt) {
+  ensureTooltip();
+  if (!note) { hideTooltip(); return; }
+  const role = note.role === 'seed' ? 'Seed' : 'Graph neighbor';
+  const roleColor = note.role === 'seed' ? '#58a6ff' : '#8b949e';
+  let html = '<div style="max-width:300px">';
+  html += '<div style="font-weight:600;color:' + roleColor + ';margin-bottom:5px">' + escapeHtml(role) + '</div>';
+  html += '<div style="font-weight:600;color:#f0883e;margin-bottom:6px">' + escapeHtml(note.title || note.id) + '</div>';
+  html += '<div style="display:grid;grid-template-columns:auto auto;gap:3px 14px;font-size:11px;color:#8b949e">';
+  html += '<span>Final score</span><b>' + Number(note.final_score ?? note.score ?? 0).toFixed(4) + '</b>';
+  html += '<span>Hybrid</span><b>' + Number(note.hybrid_score || 0).toFixed(4) + '</b>';
+  html += '<span>Vector</span><b>' + Number(note.vector_score || 0).toFixed(4) + '</b>';
+  html += '<span>BM25</span><b>' + Number(note.bm25_score || 0).toFixed(4) + '</b>';
+  html += '<span>Hebbian boost</span><b>' + Number(note.hebbian_boost || 0).toFixed(4) + '</b>';
+  html += '<span>Hop</span><b>' + (note.hop ?? 0) + '</b>';
+  html += '</div>';
+  if (note.parent_id) html += '<div style="color:#6e7681;font-size:11px;border-top:1px solid #30363d;padding-top:5px;margin-top:6px">From: ' + escapeHtml(note.parent_id) + '</div>';
+  html += '</div>';
+  tooltipEl.innerHTML = html;
+  tooltipEl.style.display = 'block';
+  positionTooltip(evt);
+}
+
 function isMobile() {
   return window.matchMedia('(max-width: 768px)').matches;
 }
