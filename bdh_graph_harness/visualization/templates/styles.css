@@ -191,6 +191,7 @@
     justify-content: space-between;
     align-items: center;
     transition: all 0.3s;
+    cursor: pointer;
   }
   #activated-list li.seed { border-left-color: #58a6ff; }
   #activated-list li.graph_neighbor { border-left-color: #8b949e; opacity: 0.9; }
