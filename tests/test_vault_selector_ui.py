@@ -57,3 +57,5 @@ def test_vault_selector_template_wires_the_control_and_scoped_transport():
     assert 'vault_id: getActiveVaultId()' in websocket
     assert "vaultApiUrl('/ws')" in websocket
     assert 'isActiveVaultEvent(event)' in websocket
+    assert 'let lastEventSequence = null;' in websocket
+    assert 'lastEventSequence !== null' in websocket

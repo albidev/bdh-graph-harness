@@ -4,6 +4,7 @@
 // ============================================================================
 function handleActivation(event) {
   const activated = event.activated_notes || [];
+  const newConcepts = event.new_concepts || [];
   activatedNotesById.clear();
   activated.forEach(note => activatedNotesById.set(note.id, note));
   const activatedIds = new Set(activated.map(n => n.id));
@@ -198,9 +199,25 @@ function handleActivation(event) {
     });
   }
 
+  const conceptsSection = document.getElementById('new-concepts-section');
+  const conceptsList = document.getElementById('new-concepts-list');
+  if (conceptsSection && conceptsList) {
+    conceptsList.innerHTML = '';
+    conceptsSection.hidden = newConcepts.length === 0;
+    newConcepts.forEach(concept => {
+      const li = document.createElement('li');
+      li.className = 'new-concept';
+      li.innerHTML = '<span><strong>✦</strong> ' + escapeHtml(concept.title || concept.id) + '</span>' +
+        '<span class="concept-source">neurogenesis</span>';
+      li.addEventListener('click', () => focusActivatedNote({
+        id: concept.id, title: concept.title || concept.id, role: 'seed', hop: 0,
+      }));
+      conceptsList.appendChild(li);
+    });
+  }
+
   // Add new concept nodes (neurogenesis) with birth animation
   // Build fresh graph with new nodes — never mutate live data.
-  const newConcepts = event.new_concepts || [];
   if (newConcepts.length > 0) {
     // Clone current graph
     const freshNodes = currentData.nodes.map(n => ({
