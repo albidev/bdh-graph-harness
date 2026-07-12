@@ -188,6 +188,9 @@ function handleActivation(event) {
       const hybrid = Number(note.hybrid_score || 0).toFixed(3);
       li.innerHTML = '<span><strong class="activation-role">' + escapeHtml(roleLabel) + '</strong> ' + escapeHtml(note.title) + '</span>' +
         '<span class="score" title="final ' + score + ' · hybrid ' + hybrid + '">' + score + '</span>';
+      li.addEventListener('mouseenter', (evt) => showActivatedTooltip(note, evt));
+      li.addEventListener('mousemove', (evt) => positionTooltip(evt));
+      li.addEventListener('mouseleave', () => hideTooltip());
       listEl.appendChild(li);
     });
   }
