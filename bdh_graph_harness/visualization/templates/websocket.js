@@ -210,6 +210,13 @@ function connectWS() {
 
         // 4. Submit the fresh, complete graph
         setGraphDataPreservingView({ nodes: keepNodes, links: keepLinks }, { reheat: true });
+        if (newConcepts.length > 0 || addedNodeData.length > 0) {
+          setTimeout(() => {
+            if (!graph || typeof graph.zoomToFit !== 'function') return;
+            graph.zoomToFit(600, 50);
+            if (typeof syncZoomUI === 'function') syncZoomUI(false);
+          }, 900);
+        }
 
         // 5. Update stats
         if (event.neurons != null) document.getElementById('stat-neurons').textContent = event.neurons;
