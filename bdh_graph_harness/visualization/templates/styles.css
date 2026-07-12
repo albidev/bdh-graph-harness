@@ -210,15 +210,16 @@
     font-variant-numeric: tabular-nums;
   }
   #new-concepts-section {
-    padding: 18px 16px;
+    padding: 22px 18px 24px;
     border-bottom: 1px solid #30363d;
-    max-height: 200px;
+    max-height: 220px;
     overflow-y: auto;
   }
+  #new-concepts-section h3 { margin: 0 0 14px; }
   #new-concepts-list { list-style: none; }
   #new-concepts-list li.new-concept {
-    padding: 7px 10px;
-    margin-bottom: 5px;
+    padding: 10px 12px;
+    margin-bottom: 8px;
     background: rgba(63, 185, 80, 0.08);
     border-left: 3px solid #3fb950;
     border-radius: 6px;
