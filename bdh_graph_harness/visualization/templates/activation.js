@@ -4,6 +4,8 @@
 // ============================================================================
 function handleActivation(event) {
   const activated = event.activated_notes || [];
+  activatedNotesById.clear();
+  activated.forEach(note => activatedNotesById.set(note.id, note));
   const activatedIds = new Set(activated.map(n => n.id));
   const seedId = activated.length > 0 ? activated[0].id : null;
   const hasActivation = activatedIds.size > 0;
@@ -191,6 +193,7 @@ function handleActivation(event) {
       li.addEventListener('mouseenter', (evt) => showActivatedTooltip(note, evt));
       li.addEventListener('mousemove', (evt) => positionTooltip(evt));
       li.addEventListener('mouseleave', () => hideTooltip());
+      li.addEventListener('click', () => focusActivatedNote(note));
       listEl.appendChild(li);
     });
   }

@@ -317,6 +317,7 @@ let hoverEdgeId = null;           // edge-only hover cue; does not dim/highlight
 // Custom HTML tooltip
 // ============================================================================
 let tooltipEl = null;
+const activatedNotesById = new Map();
 
 function ensureTooltip() {
   if (tooltipEl) return;
@@ -427,6 +428,46 @@ function showActivatedTooltip(note, evt) {
   tooltipEl.innerHTML = html;
   tooltipEl.style.display = 'block';
   positionTooltip(evt);
+}
+
+function focusActivatedNote(note) {
+  if (!graph || !note) return;
+  const data = graph.graphData();
+  const target = data.nodes.find(node => node.id === note.id);
+  if (!target) return;
+
+  const path = [note.id];
+  let current = note;
+  const seen = new Set(path);
+  while (current && current.parent_id && !seen.has(current.parent_id)) {
+    path.push(current.parent_id);
+    seen.add(current.parent_id);
+    current = activatedNotesById.get(current.parent_id);
+  }
+  setPathHighlight(path);
+  graph.centerAt(target.x, target.y, 600);
+  graph.zoom(note.role === 'seed' ? 2.5 : 3.0, 600);
+  showActivatedTooltip(note, lastMouseEvent || { clientX: 200, clientY: 200 });
+}
+
+function setPathHighlight(pathIds = []) {
+  if (!graph || !pathIds.length) return;
+  const pathSet = new Set(pathIds);
+  const pathPairs = new Set();
+  for (let i = 0; i < pathIds.length - 1; i++) {
+    const a = pathIds[i], b = pathIds[i + 1];
+    pathPairs.add(a < b ? a + '→' + b : b + '→' + a);
+  }
+  const linkIds = new Set();
+  graph.graphData().links.forEach(link => {
+    const source = linkEndpointId(link.source);
+    const target = linkEndpointId(link.target);
+    const pair = source < target ? source + '→' + target : target + '→' + source;
+    if (pathPairs.has(pair)) linkIds.add(link._id);
+  });
+  hoverHighlight = { nodeIds: pathSet, linkIds, hoverNodeId: pathIds[0], hoverLinkId: null };
+  hoverHighlightKey = 'path::' + pathIds.join('→');
+  requestGraphRedraw();
 }
 
 function isMobile() {
