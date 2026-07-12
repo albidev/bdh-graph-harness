@@ -208,16 +208,17 @@ function applyEdgeFilters() {
   linkVisibilityState.clear();
   currentData.links.forEach(l => {
     const info = edgeInfoMap[l._id] || {};
+    const type = info.type || l.type || 'wikilink';
     let visible = true;
     if (directOnly) {
-      visible = info.type === 'wikilink';
+      visible = type === 'wikilink';
     } else {
       // Check edge type toggle first
-      if (!edgeTypeVisible[info.type]) {
+      if (edgeTypeVisible[type] === false) {
         visible = false;
-      } else if (info.type === 'hebbian') {
-        visible = (info.weight || 0) >= hebbianThreshold;
-      } else if (info.type === 'phantom') {
+      } else if (type === 'hebbian') {
+        visible = (info.weight ?? l.weight ?? 0) >= hebbianThreshold;
+      } else if (type === 'phantom') {
         visible = showPhantom;
       }
     }
@@ -241,15 +242,16 @@ function initEdgeVisibility() {
   linkVisibilityState.clear();
   currentData.links.forEach(l => {
     const info = edgeInfoMap[l._id] || {};
+    const type = info.type || l.type || 'wikilink';
     let visible = true;
     if (directOnly) {
-      visible = info.type === 'wikilink';
+      visible = type === 'wikilink';
     } else {
-      if (!edgeTypeVisible[info.type]) {
+      if (edgeTypeVisible[type] === false) {
         visible = false;
-      } else if (info.type === 'hebbian') {
-        visible = (info.weight || 0) >= hebbianThreshold;
-      } else if (info.type === 'phantom') {
+      } else if (type === 'hebbian') {
+        visible = (info.weight ?? l.weight ?? 0) >= hebbianThreshold;
+      } else if (type === 'phantom') {
         visible = showPhantom;
       }
     }
