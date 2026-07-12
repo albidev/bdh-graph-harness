@@ -50,6 +50,7 @@ def test_vault_selector_template_wires_the_control_and_scoped_transport():
     html = (ROOT / "bdh_graph_harness/visualization/templates/index.html").read_text()
     websocket = (ROOT / "bdh_graph_harness/visualization/templates/websocket.js").read_text()
     styles = (ROOT / "bdh_graph_harness/visualization/templates/styles.css").read_text()
+    controls = (ROOT / "bdh_graph_harness/visualization/templates/ui-controls.js").read_text()
 
     assert 'id="vault-selector"' in html
     assert '#vault-control[hidden]' in styles
@@ -59,3 +60,5 @@ def test_vault_selector_template_wires_the_control_and_scoped_transport():
     assert 'isActiveVaultEvent(event)' in websocket
     assert 'let lastEventSequence = null;' in websocket
     assert 'lastEventSequence !== null' in websocket
+    assert 'const type = info.type || l.type || \'wikilink\';' in controls
+    assert 'edgeTypeVisible[type] === false' in controls
