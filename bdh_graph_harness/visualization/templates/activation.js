@@ -86,56 +86,21 @@ function handleActivation(event) {
     const delay = idx * 120;
     const newWidth = Math.min(1 + h.weight * 3, 5);
 
-    // New Hebbian link that doesn't exist yet — add via graph data rebuild
+    // A new Hebbian edge is persisted by the server and will arrive in the
+    // following graph_refresh/node_update. Do not rebuild force-graph here:
+    // rebuilding once per update resets drag/pick handlers and can strand the
+    // canvas after an otherwise normal query.
     if (!targetLink && (activatedIds.has(a) || activatedIds.has(b))) {
       const eid = 'hebb_' + a + '→' + b;
-      const srcTitle = (nodeDataMap[a] || {}).title || a;
-      const tgtTitle = (nodeDataMap[b] || {}).title || b;
-      edgeInfoMap[eid] = { source_title: srcTitle, target_title: tgtTitle, type: 'hebbian', weight: h.weight, frequency: h.frequency };
-
-      // Add via setGraphDataPreservingView (creates fresh link, no readonly issues)
-      const newData = {
-        nodes: currentData.nodes.map(n => ({ id: n.id, name: n.name, color: n.color, val: n.val, _opacity: n._opacity, _shape: n._shape, _dormant: n._dormant, _mass: n._mass, _synapticGlow: n._synapticGlow, _tags: n._tags, _title: n._title, _path: n._path, _text: n._text, _hidden: n._hidden })),
-        links: [...currentData.links.map(l => ({
-          source: linkEndpointId(l.source), target: linkEndpointId(l.target),
-          color: l.color, width: l.width, type: l.type, particles: l.particles,
-          _id: l._id, _visible: l._visible, _dashes: l._dashes,
-          weight: l.weight, frequency: l.frequency, particleColor: l.particleColor,
-        })), {
-          source: a, target: b,
-          color: COLORS.edgeHebbianPulse, width: newWidth + 5,
-          type: 'hebbian', weight: h.weight, frequency: h.frequency,
-          particles: 4, particleColor: COLORS.edgeHebbianPulse,
-          _id: eid, _visible: true,
-        }],
+      edgeInfoMap[eid] = {
+        source_title: (nodeDataMap[a] || {}).title || a,
+        target_title: (nodeDataMap[b] || {}).title || b,
+        type: 'hebbian', weight: h.weight, frequency: h.frequency,
       };
-      setGraphDataPreservingView(newData, { reheat: true });
-
-      // Settle animation via Maps
-      setTimeout(() => {
-        linkWidthState.set(eid, newWidth + 4);
-        linkActivationVisible.set(eid, true);
-        linkParticlesState.set(eid, 8);
-        linkActivationColor.set(eid, COLORS.edgeHebbianPulse);
-        requestGraphRedraw();
-      }, delay + 600);
-      setTimeout(() => {
-        linkWidthState.set(eid, newWidth + 1.5);
-        linkActivationColor.set(eid, weightColor(h.weight));
-        requestGraphRedraw();
-      }, delay + 1400);
-      setTimeout(() => {
-        linkWidthState.delete(eid);
-        linkParticlesState.delete(eid);
-        linkParticleColorState.delete(eid);
-        linkActivationColor.delete(eid);
-        // No applyEdgeFilters here — would rebuild graph and cause flash
-      }, delay + 2500);
       return;
     }
 
     if (!targetLink) return;
-
     const key = linkKey(targetLink);
 
     // Pulse: use Maps for particles/width/color
