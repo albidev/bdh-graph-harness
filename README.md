@@ -22,7 +22,7 @@ Turns an Obsidian vault into a living knowledge graph where:
 - **Neurogenesis** — LLM extracts new concepts from queries and creates notes in the vault, filtered by a 3-layer signal system (prompt engineering + regex blocklist + semantic dedup) to prevent noise; generation provenance is kept in frontmatter so it does not pollute embeddings
 - **Node quality scoring** — composite score (strong edges + mean weight + frequency) auto-prunes dormant nodes from visualization; re-activates on strong re-encounter
 - **Sleep-cycle consolidation** — periodic synaptic downscaling (×0.9), structural pruning below weight floor, and stale dormant node removal — mirrors biological sleep consolidation
-- **Server-side file watcher** — mtime-based polling detects vault changes from any source (Obsidian, LLM, scripts) and triggers incremental graph updates
+- **Server-side file watcher** — source-aware polling detects vault and configured external Markdown changes, debounces editor bursts, and triggers incremental graph/embedding updates with source-safe pruning
 - **LLM responses** — any OpenAI-compatible provider (OpenRouter, Ollama Cloud, local Ollama), with citations back to source notes
 - **Real-time visualization** — WebGL force-graph showing nodes activating, edges pulsing as Hebbian weights update during queries
 - **Multi-vault isolation** — optional `vaults:` configuration creates one graph state, watcher, BM25 index, lock, and ChromaDB collection per vault; requests select a vault explicitly without cross-contaminating embeddings or state
@@ -92,7 +92,7 @@ bdh_graph_harness/
 │   ├── server.py            # aiohttp app setup + WebSocket
 │   ├── routes.py            # REST endpoints
 │   ├── ws.py                # WebSocket handlers
-│   └── watcher.py           # Server-side vault file watcher (mtime polling)
+│   └── watcher.py           # Source-aware polling watcher with debounce
 └── visualization/
     └── templates/index.html # force-graph (WebGL) real-time graph UI
 ```
