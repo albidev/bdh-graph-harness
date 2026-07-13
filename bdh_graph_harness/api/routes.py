@@ -24,6 +24,7 @@ from bdh_graph_harness.memory.semantic_consolidation import (
     mark_processed,
     save_checkpoint_atomic,
     select_candidate_notes,
+    select_candidate_sessions,
 )
 from bdh_graph_harness.llm import llm_respond, llm_stream
 from bdh_graph_harness.neurogenesis import extract_new_concepts, create_note
@@ -822,8 +823,9 @@ async def _run_semantic_source(source: dict, ctx, ws_clients: set, *, dry_run: b
         'semantic_consolidation_source', 'nightly_semantic_consolidation'
     )
     content = source['content']
+    source_label = source.get('title') or source['path']
     query = (
-        f"Semantic consolidation of {source['path']}\n"
+        f"Semantic consolidation of {source_label}\n"
         f"{content[:2000]}"
     )
     max_batch_chars = int(config.get('semantic_consolidation_max_batch_chars', 16000))
@@ -903,12 +905,25 @@ async def api_semantic_consolidate(request, app_state: dict, ws_clients: set) ->
 
     max_concepts = int(config.get('semantic_consolidation_max_concepts', 5))
     checkpoint = load_checkpoint(ctx.config.path, config)
-    sources = select_candidate_notes(
+    file_sources = select_candidate_notes(
         ctx.config.path,
         config,
         checkpoint,
         max_sources=max_sources,
     )
+    session_sources = select_candidate_sessions(
+        config,
+        checkpoint,
+        max_sessions=max_sources,
+    )
+    sources = sorted(
+        file_sources + session_sources,
+        key=lambda item: (item['mtime_ns'], item['source_id']),
+    )
+    if max_sources is not None:
+        sources = sources[:max_sources]
+    else:
+        sources = sources[:int(config.get('semantic_consolidation_max_sources', 3))]
     summary = {
         'vault_id': ctx.config.id,
         'dry_run': dry_run,

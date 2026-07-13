@@ -3,6 +3,7 @@
 import asyncio
 import json
 import os
+import sqlite3
 import time
 from types import SimpleNamespace
 
@@ -12,6 +13,7 @@ from bdh_graph_harness.memory.semantic_consolidation import (
     load_checkpoint,
     save_checkpoint_atomic,
     select_candidate_notes,
+    select_candidate_sessions,
 )
 import bdh_graph_harness.api.routes as routes
 
@@ -38,6 +40,7 @@ def _config(**overrides):
         "semantic_consolidation_max_sources": 3,
         "semantic_consolidation_max_source_chars": 8000,
         "semantic_consolidation_max_concepts": 5,
+        "semantic_consolidation_session_enabled": False,
     }
     config.update(overrides)
     return config
@@ -70,6 +73,57 @@ def test_select_candidate_notes_uses_content_hash_and_excludes_noise(tmp_path):
 
     os.utime(source, (time.time() - 72 * 3600, time.time() - 72 * 3600))
     assert select_candidate_notes(tmp_path, config, checkpoint) == []
+
+
+def test_select_candidate_sessions_ignores_cron_and_tool_output(tmp_path):
+    db_path = tmp_path / "state.db"
+    db = sqlite3.connect(db_path)
+    db.executescript(
+        """
+        CREATE TABLE sessions (
+            id TEXT PRIMARY KEY, source TEXT, title TEXT,
+            started_at REAL, ended_at REAL
+        );
+        CREATE TABLE messages (
+            id INTEGER PRIMARY KEY, session_id TEXT, role TEXT,
+            content TEXT, timestamp REAL
+        );
+        """
+    )
+    now = time.time()
+    db.executemany(
+        "INSERT INTO sessions VALUES (?, ?, ?, ?, ?)",
+        [
+            ("human-1", "discord", "Architecture discussion", now, now),
+            ("cron-1", "cron", "Cron noise", now, now),
+        ],
+    )
+    db.executemany(
+        "INSERT INTO messages VALUES (?, ?, ?, ?, ?)",
+        [
+            (1, "human-1", "user", "We decided to isolate episodic memory from the core vault because cross-vault retrieval can contaminate durable concepts and make provenance ambiguous.", now),
+            (2, "human-1", "tool", "Ignore this tool output", now),
+            (3, "human-1", "assistant", "The durable decision is to keep vault boundaries explicit, record the source vault, and require an intentional promotion step before core neurogenesis.", now),
+            (4, "cron-1", "user", "A cron status message", now),
+        ],
+    )
+    db.commit()
+    db.close()
+
+    config = _config(
+        semantic_consolidation_session_db_path=str(db_path),
+        semantic_consolidation_session_enabled=True,
+        semantic_consolidation_include_cron_sessions=False,
+        semantic_consolidation_max_session_chars=12000,
+    )
+    candidates = select_candidate_sessions(config, {"sessions": {}}, max_sessions=5)
+    assert len(candidates) == 1
+    assert candidates[0]["session_id"] == "human-1"
+    assert "Ignore this tool output" not in candidates[0]["content"]
+    assert "durable decision" in candidates[0]["content"]
+
+    checkpoint = {"sessions": {"human-1": {"last_message_id": 3}}}
+    assert select_candidate_sessions(config, checkpoint, max_sessions=5) == []
 
 
 def test_checkpoint_save_is_atomic_and_reloadable(tmp_path):

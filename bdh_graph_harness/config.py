@@ -98,6 +98,10 @@ CONFIG = {
     'semantic_consolidation_max_source_chars': 8000,
     'semantic_consolidation_max_batch_chars': 16000,
     'semantic_consolidation_max_concepts': 5,
+    'semantic_consolidation_session_enabled': True,
+    'semantic_consolidation_session_db_path': '~/.hermes/state.db',
+    'semantic_consolidation_max_session_chars': 12000,
+    'semantic_consolidation_include_cron_sessions': False,
     'semantic_consolidation_source_globs': [
         'wiki/**/*.md',
         'projects/**/*.md',

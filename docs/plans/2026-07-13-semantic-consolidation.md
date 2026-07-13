@@ -30,6 +30,8 @@ learn=true AND respond=true
 
 Le note nuove vengono quindi indicizzate dal watcher, ma non vengono mai sottoposte automaticamente a una fase notturna di rilettura semantica.
 
+Le sessioni Hermes sono una seconda sorgente necessaria: contengono decisioni e lezioni che possono non essere state salvate in un file. Il session adapter legge solo messaggi `user` e `assistant` recenti dal DB, esclude `source=cron` e ignora completamente tool output. Le sessioni vengono sottoposte allo stesso filtro di salienza, checkpoint e deduplica delle fonti file.
+
 ## Non-goals
 
 - Non sostituire o modificare il pruning strutturale esistente.
@@ -88,7 +90,10 @@ semantic_consolidation_max_age_hours: 48
 semantic_consolidation_max_source_chars: 8000
 semantic_consolidation_max_batch_chars: 16000
 semantic_consolidation_max_concepts: 5
-semantic_consolidation_min_interval_minutes: 60
+semantic_consolidation_session_enabled: true
+semantic_consolidation_session_db_path: ~/.hermes/state.db
+semantic_consolidation_max_session_chars: 12000
+semantic_consolidation_include_cron_sessions: false
 semantic_consolidation_source_globs:
   - wiki/**/*.md
   - projects/**/*.md
@@ -463,6 +468,8 @@ python3 -m py_compile bdh_graph_harness/memory/semantic_consolidation.py
 - Una nota nuova viene processata una volta sola per hash.
 - Una nota invariata non viene riprocessata.
 - Una nota modificata viene processata nuovamente.
+- Le sessioni recenti sostanziali vengono candidate tramite cursore `last_message_id`.
+- Le sessioni `source=cron` e i messaggi `tool` non entrano nel semantic prompt.
 - Errori LLM/API non avanzano il checkpoint della fonte fallita.
 - `learn=false` non produce Hebbian update né neurogenesis.
 - Semantic sleep può produrre concetti nuovi, ma solo tramite i filtri neurogenesis esistenti.
