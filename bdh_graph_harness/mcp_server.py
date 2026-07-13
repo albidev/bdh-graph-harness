@@ -112,7 +112,7 @@ def _init_fallback(config_path: str | None = None, vault_id: str | None = None) 
 
     Returns the fallback dict for the resolved vault.
     """
-    from bdh_graph_harness.graph import build_graph
+    from bdh_graph_harness.graph import build_configured_graph, migrate_legacy_state_ids
     from bdh_graph_harness.retrieval import compute_all_embeddings, BM25Index
     from bdh_graph_harness.memory import load_state
     from bdh_graph_harness.vaults import normalize_vault_configs
@@ -140,7 +140,10 @@ def _init_fallback(config_path: str | None = None, vault_id: str | None = None) 
     if not os.path.isdir(vault_root):
         raise FileNotFoundError(f"Vault path '{vault_root}' not found")
 
-    nodes, edges = build_graph(vault_root, use_cache=True)
+    nodes, edges, unresolved = build_configured_graph(
+        target_cfg.settings,
+        use_cache=True,
+    )
     collection = compute_all_embeddings(
         nodes, vault_root,
         chroma_path=target_cfg.chroma_path,
@@ -164,7 +167,8 @@ def _init_fallback(config_path: str | None = None, vault_id: str | None = None) 
         "edges": edges,
         "collection": collection,
         "bm25_index": bm25_index,
-        "hebbian_state": load_state(vault_root),
+        "hebbian_state": migrate_legacy_state_ids(load_state(vault_root), nodes),
+        "unresolved_links": unresolved,
     }
     _fallback_by_vault[effective_id] = fb
 
@@ -358,7 +362,7 @@ def _fallback_graph(vault_id: str | None = None) -> str:
 
 def _fallback_refresh(vault_id: str | None = None) -> str:
     """Force refresh via in-process pipeline."""
-    from bdh_graph_harness.graph import build_graph
+    from bdh_graph_harness.graph import build_configured_graph, migrate_legacy_state_ids
     from bdh_graph_harness.retrieval import compute_all_embeddings, BM25Index
     from bdh_graph_harness.memory import load_state
     from bdh_graph_harness.vaults import normalize_vault_configs
@@ -382,9 +386,13 @@ def _fallback_refresh(vault_id: str | None = None) -> str:
     cfg = target_cfg.settings
     vault_root = target_cfg.path
 
-    nodes, edges = build_graph(vault_root, use_cache=False)
+    nodes, edges, unresolved = build_configured_graph(
+        cfg,
+        use_cache=False,
+    )
     fb["nodes"] = nodes
     fb["edges"] = edges
+    fb["unresolved_links"] = unresolved
 
     collection = compute_all_embeddings(
         nodes, vault_root, force_refresh=True,

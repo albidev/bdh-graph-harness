@@ -26,6 +26,7 @@ Turns an Obsidian vault into a living knowledge graph where:
 - **LLM responses** — any OpenAI-compatible provider (OpenRouter, Ollama Cloud, local Ollama), with citations back to source notes
 - **Real-time visualization** — WebGL force-graph showing nodes activating, edges pulsing as Hebbian weights update during queries
 - **Multi-vault isolation** — optional `vaults:` configuration creates one graph state, watcher, BM25 index, lock, and ChromaDB collection per vault; requests select a vault explicitly without cross-contaminating embeddings or state
+- **Federated Markdown sources** — optional read-only `external_sources` merge selected Markdown trees into the primary graph with source-aware IDs, cross-source wikilinks, and configurable `include`/`exclude` globs
 
 For the theory behind these choices — why Hebbian plasticity, why Obsidian, why not just RAG — see [`docs/philosophy.md`](docs/philosophy.md).
 
@@ -64,7 +65,9 @@ bdh_graph_harness/
 ├── mcp_server.py            # MCP server (FastMCP, stdio + HTTP transport)
 ├── graph/
 │   ├── parser.py            # Frontmatter + wikilink parsing
-│   ├── builder.py           # Graph construction + incremental cache
+│   ├── builder.py           # Legacy graph construction + incremental cache
+│   ├── sources.py           # Vault/external Markdown source scanners
+│   ├── federated.py         # Source-aware IDs + federated graph builder
 │   └── cache.py             # Graph cache serialization
 ├── retrieval/
 │   ├── embeddings.py        # Ollama embedding client
@@ -188,6 +191,7 @@ See `bdh-config.yaml` for all parameters. Key ones:
 | `quality_reactivation_score` | 0.50 | Activation score to re-awaken a dormant node |
 | `quality_prune_interval` | 50 | Re-evaluate node quality every N queries |
 | `graph_ignore` | `[]` | fnmatch patterns to exclude nodes from the graph (e.g. `[".bdh-*"]`) |
+| `external_sources` | `[]` | Read-only Markdown sources with per-source `include`/`exclude` glob lists |
 | `consolidation_downscale_factor` | 0.90 | Global weight multiplier per sleep cycle |
 | `consolidation_prune_weight_floor` | 0.02 | Delete synapses below this weight after downscaling |
 | `consolidation_dormant_persist_cycles` | 3 | Remove nodes dormant for N+ consolidation cycles |

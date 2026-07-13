@@ -25,6 +25,18 @@ from bdh_graph_harness.graph.cache import (
     load_graph_cache,
     save_graph_cache,
 )
+from bdh_graph_harness.graph.sources import (
+    Document,
+    DocumentSource,
+    ExternalMarkdownSource,
+    VaultMarkdownSource,
+    sources_from_config,
+)
+from bdh_graph_harness.graph.federated import (
+    build_configured_graph,
+    build_federated_graph,
+    migrate_legacy_state_ids,
+)
 
 __all__ = [
     'WIKILINK_RE',
@@ -42,4 +54,12 @@ __all__ = [
     '_resolve_target',
     'load_graph_cache',
     'save_graph_cache',
+    'Document',
+    'DocumentSource',
+    'ExternalMarkdownSource',
+    'VaultMarkdownSource',
+    'sources_from_config',
+    'build_configured_graph',
+    'build_federated_graph',
+    'migrate_legacy_state_ids',
 ]

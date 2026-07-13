@@ -162,6 +162,11 @@ async def api_graph(request, app_state: dict) -> web.Response:
             'title': node['title'],
             'tags': node['tags'],
             'path': node.get('path', ''),
+            'absolute_path': node.get('absolute_path', node.get('path', '')),
+            'relative_path': node.get('relative_path', ''),
+            'source_id': node.get('source_id', 'vault'),
+            'source_type': node.get('source_type', 'vault'),
+            'writable': node.get('writable', True),
             'text': node.get('text', '')[:200],
             'dormant': note_id in dormant,
             'quality_score': quality.get('score', 0.0),
@@ -176,6 +181,9 @@ async def api_graph(request, app_state: dict) -> web.Response:
                     'source': src,
                     'target': target_id,
                     'display': link['display'],
+                    'type': link.get('type', 'wikilink'),
+                    'weight': link.get('weight', 1.0),
+                    'explicit': link.get('explicit', True),
                 })
 
     hebbian_list = []
@@ -186,6 +194,7 @@ async def api_graph(request, app_state: dict) -> web.Response:
             'note_b': b,
             'weight': syn['weight'],
             'frequency': syn.get('frequency', 0),
+            'type': 'hebbian',
         })
 
     phantom_list = s.get('phantom_links', [])
@@ -195,6 +204,7 @@ async def api_graph(request, app_state: dict) -> web.Response:
         'edges': edge_list,
         'hebbian': hebbian_list,
         'phantom': phantom_list,
+        'unresolved': s.get('unresolved_links', []),
         'stats': {
             'neurons': len(n),
             'synapses': sum(len(links) for links in e.values()),
@@ -352,8 +362,12 @@ def run_neurogenesis(
                 neurogenesis_dir=ctx.config.settings.get('neurogenesis_dir'),
             )
             if new_note_id:
+                reported_id = new_note_id
+                if config.get('external_sources'):
+                    relative_id = new_note_id if new_note_id.endswith('.md') else f'{new_note_id}.md'
+                    reported_id = f'vault:{relative_id}'
                 new_concepts_list.append({
-                    'id': new_note_id,
+                    'id': reported_id,
                     'title': title,
                     'source_notes': active_titles[:3],
                 })
@@ -598,10 +612,11 @@ async def api_node_update(request, app_state: dict, ws_clients: set) -> web.Resp
     old_nodes = ctx.nodes or {}
     old_edges = ctx.edges or {}
 
-    from bdh_graph_harness.graph.builder import build_graph
-    new_nodes, new_edges = await asyncio.to_thread(
-        build_graph, vault_root, False,
-        ctx.config.settings.get('graph_ignore')
+    from bdh_graph_harness.graph.federated import build_configured_graph
+    new_nodes, new_edges, unresolved = await asyncio.to_thread(
+        build_configured_graph,
+        ctx.config.settings,
+        use_cache=False,
     )
 
     old_ids = set(old_nodes.keys())
@@ -621,6 +636,7 @@ async def api_node_update(request, app_state: dict, ws_clients: set) -> web.Resp
     async with ctx.runtime_lock:
         ctx.nodes = new_nodes
         ctx.edges = new_edges
+        ctx.state['unresolved_links'] = unresolved
 
         if added or changed or deleted:
             from bdh_graph_harness.retrieval import compute_all_embeddings
@@ -659,6 +675,11 @@ async def api_node_update(request, app_state: dict, ws_clients: set) -> web.Resp
                 'tags': node.get('tags', ''),
                 'text': node.get('text', ''),
                 'path': node.get('path', ''),
+                'absolute_path': node.get('absolute_path', node.get('path', '')),
+                'relative_path': node.get('relative_path', ''),
+                'source_id': node.get('source_id', 'vault'),
+                'source_type': node.get('source_type', 'vault'),
+                'writable': node.get('writable', True),
                 'edges': node_edges,
             })
         ctx.event_sequence += 1
@@ -716,13 +737,16 @@ async def _api_refresh_graph_unlocked(request, app_state: dict, ws_clients: set)
     old_node_ids = set(ctx.nodes.keys()) if ctx.nodes else set()
     old_node_titles = {nid: n.get('title', '') for nid, n in (ctx.nodes or {}).items()}
 
-    from bdh_graph_harness.graph.builder import build_graph
-    nodes, edges = await asyncio.to_thread(
-        build_graph, vault_root, False, config.get('graph_ignore')
+    from bdh_graph_harness.graph.federated import build_configured_graph
+    nodes, edges, unresolved = await asyncio.to_thread(
+        build_configured_graph,
+        config,
+        use_cache=False,
     )
 
     ctx.nodes = nodes
     ctx.edges = edges
+    ctx.state['unresolved_links'] = unresolved
 
     new_node_ids = set(nodes.keys()) - old_node_ids
     changed_nodes = []
@@ -755,7 +779,13 @@ async def _api_refresh_graph_unlocked(request, app_state: dict, ws_clients: set)
         added_node_data.append({
             'id': nid, 'title': title,
             'tags': node.get('tags', ''), 'text': node.get('text', ''),
-            'path': node.get('path', ''), 'edges': node_edges,
+            'path': node.get('path', ''),
+            'absolute_path': node.get('absolute_path', node.get('path', '')),
+            'relative_path': node.get('relative_path', ''),
+            'source_id': node.get('source_id', 'vault'),
+            'source_type': node.get('source_type', 'vault'),
+            'writable': node.get('writable', True),
+            'edges': node_edges,
         })
 
     from bdh_graph_harness.retrieval import compute_all_embeddings

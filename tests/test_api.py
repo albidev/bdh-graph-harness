@@ -143,9 +143,44 @@ async def test_api_graph(mock_app_setup, monkeypatch):
         await client.close()
 
 
-# ---------------------------------------------------------------------------
-# GET /api/hebbian
-# ---------------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_api_graph_exposes_source_metadata_and_unresolved_links(mock_app_setup, monkeypatch):
+    from aiohttp.test_utils import TestClient, TestServer
+
+    nodes, edges, collection, state, config, _ = mock_app_setup
+    nodes['alpha'].update({
+        'source_id': 'projects',
+        'source_type': 'external',
+        'relative_path': 'demo/README.md',
+        'absolute_path': '/tmp/projects/demo/README.md',
+        'writable': False,
+    })
+    edges['alpha'][0].update({'type': 'wikilink', 'weight': 1.0, 'explicit': True})
+    state['unresolved_links'] = [{
+        'source': 'alpha',
+        'target': 'missing',
+        'display': 'missing',
+        'source_path': 'demo/README.md',
+    }]
+    app = _capture_app(monkeypatch, config, nodes, edges, collection, state)
+
+    server = TestServer(app)
+    client = TestClient(server)
+    await client.start_server()
+    try:
+        resp = await client.get('/api/graph')
+        assert resp.status == 200
+        data = await resp.json()
+        external = next(node for node in data['nodes'] if node['id'] == 'alpha')
+        assert external['source_type'] == 'external'
+        assert external['source_id'] == 'projects'
+        assert external['relative_path'] == 'demo/README.md'
+        assert external['writable'] is False
+        assert data['edges'][0]['type'] == 'wikilink'
+        assert data['unresolved'][0]['target'] == 'missing'
+    finally:
+        await client.close()
+
 
 @pytest.mark.asyncio
 async def test_api_hebbian(mock_app_setup, monkeypatch):

@@ -15,6 +15,14 @@
       <select id="vault-selector" onchange="switchVault(this.value)" aria-label="Select vault"></select>
       <span id="vault-selector-status" class="vault-selector-status" aria-live="polite"></span>
     </div>
+    <div id="source-filter-control" class="source-filter-control">
+      <label for="source-filter">Source</label>
+      <select id="source-filter" onchange="setSourceFilter(this.value)">
+        <option value="all">All</option>
+        <option value="vault">Vault</option>
+        <option value="external">External</option>
+      </select>
+    </div>
     <label class="toggle-label" title="Show orphan nodes (no connections)">
       <input type="checkbox" id="orphan-toggle" checked onchange="toggleOrphans(this.checked)">
       <span class="toggle-text">Orphans</span>

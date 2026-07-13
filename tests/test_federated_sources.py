@@ -1,0 +1,143 @@
+"""Tests for source-aware Markdown ingestion and federated graph construction."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from bdh_graph_harness.graph.federated import build_federated_graph, migrate_legacy_state_ids
+from bdh_graph_harness.graph.sources import (
+    ExternalMarkdownSource,
+    VaultMarkdownSource,
+    sources_from_config,
+)
+
+
+def _write(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+
+
+def test_external_source_include_exclude_and_cross_source_links(tmp_path):
+    vault = tmp_path / "vault"
+    projects = tmp_path / "projects"
+    _write(
+        vault / "wiki/concepts/bdh.md",
+        "# BDH\nSee [[external:projects/demo/README]].",
+    )
+    _write(
+        projects / "demo/README.md",
+        "# Demo\nSee [[docs/design]] and [[vault:wiki/concepts/bdh]].",
+    )
+    _write(
+        projects / "demo/docs/design.md",
+        "# Design\nSee [[missing-note]].",
+    )
+    _write(projects / "demo/skip.md", "# Skip\nNot part of the graph.")
+    _write(projects / ".hidden.md", "# Hidden\nNever scanned.")
+
+    before = sorted(str(path.relative_to(tmp_path)) for path in tmp_path.rglob("*"))
+    nodes, edges, unresolved = build_federated_graph(
+        [
+            VaultMarkdownSource(str(vault)),
+            ExternalMarkdownSource(
+                str(projects),
+                source_id="projects",
+                exclude=["demo/skip.md"],
+            ),
+        ]
+    )
+    after = sorted(str(path.relative_to(tmp_path)) for path in tmp_path.rglob("*"))
+
+    assert before == after, "source scan must not copy or generate files"
+    assert set(nodes) == {
+        "vault:wiki/concepts/bdh.md",
+        "external:projects/demo/README.md",
+        "external:projects/demo/docs/design.md",
+    }
+    assert nodes["external:projects/demo/README.md"]["source_type"] == "external"
+    assert nodes["external:projects/demo/README.md"]["source_id"] == "projects"
+    assert nodes["external:projects/demo/README.md"]["relative_path"] == "demo/README.md"
+    assert nodes["external:projects/demo/README.md"]["writable"] is False
+
+    vault_targets = [link["target"] for link in edges["vault:wiki/concepts/bdh.md"]]
+    readme_targets = [link["target"] for link in edges["external:projects/demo/README.md"]]
+    assert vault_targets == ["external:projects/demo/README.md"]
+    assert set(readme_targets) == {
+        "external:projects/demo/docs/design.md",
+        "vault:wiki/concepts/bdh.md",
+    }
+    assert unresolved == [{
+        "source": "external:projects/demo/docs/design.md",
+        "target": "missing-note",
+        "display": "missing-note",
+        "source_path": "demo/docs/design.md",
+    }]
+
+
+def test_sources_from_config_supports_include_exclude_and_read_only_defaults(tmp_path):
+    vault = tmp_path / "vault"
+    projects = tmp_path / "projects"
+    vault.mkdir()
+    projects.mkdir()
+    _write(projects / "docs/root.md", "# Root")
+    _write(projects / "docs/private.md", "# Private")
+    _write(projects / "other.md", "# Other")
+    sources = sources_from_config({
+        "vault_path": str(vault),
+        "external_sources": [{
+            "id": "selected",
+            "path": str(projects),
+            "include": ["docs/*.md"],
+            "exclude": ["docs/private.md"],
+        }],
+    })
+
+    assert len(sources) == 2
+    assert sources[0].source_type == "vault"
+    assert sources[0].writable is True
+    assert sources[1].source_id == "selected"
+    assert sources[1].source_type == "external"
+    assert sources[1].writable is False
+    scanned = [document.relative_path for document in sources[1].scan()]
+    assert scanned == ["docs/root.md"]
+
+
+def test_sources_from_config_rejects_duplicate_ids(tmp_path):
+    vault = tmp_path / "vault"
+    projects = tmp_path / "projects"
+    vault.mkdir()
+    projects.mkdir()
+    config = {
+        "vault_path": str(vault),
+        "external_sources": [
+            {"id": "projects", "path": str(projects)},
+            {"id": "projects", "path": str(projects)},
+        ],
+    }
+
+    import pytest
+    with pytest.raises(ValueError, match="Duplicate document source id"):
+        sources_from_config(config)
+
+
+def test_migrate_legacy_state_ids_to_federated_vault_ids():
+    state = {
+        "synapses": {
+            "wiki/concepts/bdh|wiki/concepts/other": {
+                "weight": 0.72,
+                "frequency": 4,
+            }
+        },
+        "node_quality": {"wiki/concepts/bdh": {"score": 0.8}},
+        "dormant_nodes": ["wiki/concepts/other"],
+    }
+    nodes = {
+        "vault:wiki/concepts/bdh.md": {},
+        "vault:wiki/concepts/other.md": {},
+    }
+
+    migrated = migrate_legacy_state_ids(state, nodes)
+
+    assert "vault:wiki/concepts/bdh.md|vault:wiki/concepts/other.md" in migrated["synapses"]
+    assert "vault:wiki/concepts/bdh.md" in migrated["node_quality"]
+    assert migrated["dormant_nodes"] == ["vault:wiki/concepts/other.md"]

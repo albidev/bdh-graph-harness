@@ -48,6 +48,11 @@ class WebSocketManager:
                 'title': node['title'],
                 'tags': node.get('tags', []),
                 'path': node.get('path', ''),
+                'absolute_path': node.get('absolute_path', node.get('path', '')),
+                'relative_path': node.get('relative_path', ''),
+                'source_id': node.get('source_id', 'vault'),
+                'source_type': node.get('source_type', 'vault'),
+                'writable': node.get('writable', True),
                 'text': node.get('text', '')[:200],
             })
 
@@ -63,6 +68,9 @@ class WebSocketManager:
                         'source': src,
                         'target': target_id,
                         'display': link.get('display', ''),
+                        'type': link.get('type', 'wikilink'),
+                        'weight': link.get('weight', 1.0),
+                        'explicit': link.get('explicit', True),
                     })
 
         hebbian_list = []
@@ -184,6 +192,11 @@ async def websocket_handler(request, app_state: dict, ws_clients: set = None) ->
             'title': node['title'],
             'tags': node.get('tags', []),
             'path': node.get('path', ''),
+            'absolute_path': node.get('absolute_path', node.get('path', '')),
+            'relative_path': node.get('relative_path', ''),
+            'source_id': node.get('source_id', 'vault'),
+            'source_type': node.get('source_type', 'vault'),
+            'writable': node.get('writable', True),
             'text': node.get('text', '')[:200],
         })
 
@@ -198,6 +211,9 @@ async def websocket_handler(request, app_state: dict, ws_clients: set = None) ->
                     'source': src,
                     'target': target_id,
                     'display': link.get('display', ''),
+                    'type': link.get('type', 'wikilink'),
+                    'weight': link.get('weight', 1.0),
+                    'explicit': link.get('explicit', True),
                 })
 
     hebbian_list = []
