@@ -553,10 +553,12 @@ function initNetwork(graphData) {
 
   // onZoom callback handles slider sync (no polling needed)
 
-  // Update stats
-  document.getElementById('stat-neurons').textContent = graphData.stats.neurons;
-  document.getElementById('stat-synapses').textContent = graphData.stats.synapses;
-  document.getElementById('stat-hebbian').textContent = graphData.stats.hebbian_synapses;
+  // Update stats using the currently rendered source-filtered graph.
+  const renderedWikilinks = fgLinks.filter(link => link.type === 'wikilink').length;
+  const renderedHebbian = fgLinks.filter(link => link.type === 'hebbian').length;
+  document.getElementById('stat-neurons').textContent = fgNodes.length;
+  document.getElementById('stat-synapses').textContent = renderedWikilinks;
+  document.getElementById('stat-hebbian').textContent = renderedHebbian;
 
   // NOTE: applyEdgeFilters() is NOT called here — it calls setGraphDataPreservingView
   // which calls graph.graphData() again, breaking all interactions (drag/zoom/click).
