@@ -60,11 +60,33 @@ def test_vault_id_helpers_ignore_empty_values():
 
 
 @pytest.mark.asyncio
+async def test_attention_read_only_does_not_mutate_hebbian_state(monkeypatch):
+    ctx = make_context("research")
+    calls = []
+
+    monkeypatch.setattr(routes, "attention", lambda *args, **kwargs: {"note": 0.9})
+    monkeypatch.setattr(
+        routes, "hebbian_update", lambda *args: calls.append(args) or pytest.fail("learn=false called Hebbian update")
+    )
+    monkeypatch.setattr(routes, "broadcast_activation", lambda *_args: asyncio.sleep(0))
+
+    active, notes, updates, routing = await routes.run_attention_and_plasticity(
+        "technical query", ctx, set(), source="automatic_retrieval", learn=False
+    )
+
+    assert active == {"note": 0.9}
+    assert notes[0]["title"] == "Scoped note"
+    assert updates == []
+    assert calls == []
+    assert ctx.state == {"synapses": {}, "queries": 2}
+
+
+@pytest.mark.asyncio
 async def test_attention_and_plasticity_only_mutates_resolved_vault(monkeypatch):
     ctx = make_context("research")
     calls = []
 
-    def fake_attention(query, nodes, edges, collection, *args):
+    def fake_attention(query, nodes, edges, collection, *args, **kwargs):
         assert nodes is ctx.nodes
         assert collection is ctx.collection
         return {"note": 0.9}
@@ -83,7 +105,7 @@ async def test_attention_and_plasticity_only_mutates_resolved_vault(monkeypatch)
     monkeypatch.setattr(routes, "save_state", lambda *_args: None)
     monkeypatch.setattr(routes, "broadcast_activation", no_broadcast)
 
-    active, notes, updates = await routes.run_attention_and_plasticity(
+    active, notes, updates, routing = await routes.run_attention_and_plasticity(
         "scoped query", ctx, set(), source="assistant_response"
     )
 
@@ -97,21 +119,25 @@ async def test_attention_and_plasticity_only_mutates_resolved_vault(monkeypatch)
 async def test_neurogenesis_is_scoped_to_context_path(monkeypatch):
     ctx = make_context("research")
     ctx.config.settings["neurogenesis_enabled"] = True
+    ctx.config.settings["neurogenesis_dir"] = "research-concepts"
     monkeypatch.setattr(routes, "extract_new_concepts", lambda *_args: [
         {"title": "New concept", "definition": "A definition"},
         {"title": "", "definition": "ignored"},
     ])
     captured = []
 
-    def fake_create(path, title, definition, source_notes, query):
-        captured.append((path, title, definition, source_notes, query))
+    def fake_create(path, title, definition, source_notes, query, **kwargs):
+        captured.append((path, title, definition, source_notes, query, kwargs))
         return "wiki/concepts/new-concept"
 
     monkeypatch.setattr(routes, "create_note", fake_create)
 
     result = routes.run_neurogenesis("response", "query", {"note": 0.8}, ctx)
 
-    assert captured == [("/tmp/research", "New concept", "A definition", ["Scoped note"], "query")]
+    assert captured == [(
+        "/tmp/research", "New concept", "A definition", ["Scoped note"],
+        "query", {"neurogenesis_dir": "research-concepts"},
+    )]
     assert result == [{
         "id": "wiki/concepts/new-concept",
         "title": "New concept",

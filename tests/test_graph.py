@@ -143,6 +143,12 @@ def test_build_graph_node_count(mock_vault):
     assert 'concepts/gamma' in nodes
 
 
+def test_build_graph_accepts_per_vault_ignore_patterns(mock_vault):
+    nodes, _ = harness.build_graph(mock_vault, use_cache=False, graph_ignore=['beta'])
+    assert 'beta' not in nodes
+    assert 'alpha' in nodes
+
+
 def test_build_graph_node_titles(mock_vault):
     nodes, _ = harness.build_graph(mock_vault)
     assert nodes['alpha']['title'] == 'Alpha Note'

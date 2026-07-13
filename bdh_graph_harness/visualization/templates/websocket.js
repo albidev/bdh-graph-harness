@@ -2,6 +2,7 @@
 // Query — HTTP POST to /api/query
 // ============================================================================
 let activeWebSocket = null;
+let lastEventSequence = null;
 
 function closeActiveWebSocket() {
   if (!activeWebSocket) return;
@@ -83,6 +84,7 @@ function connectWS() {
   const ind = document.getElementById('status-indicator');
 
   ws.onopen = () => {
+    lastEventSequence = null;
     ind.classList.add('connected');
     setVaultSelectorStatus('');
   };
@@ -91,6 +93,10 @@ function connectWS() {
     try {
       const event = JSON.parse(msg.data);
       if (!isActiveVaultEvent(event)) return;
+      if (Number.isFinite(event.sequence)) {
+        if (lastEventSequence !== null && event.sequence <= lastEventSequence) return;
+        lastEventSequence = event.sequence;
+      }
       if (event.type === 'graph') {
         initNetwork(event);
         if (showTagColors) toggleTagColors(true);
@@ -204,6 +210,13 @@ function connectWS() {
 
         // 4. Submit the fresh, complete graph
         setGraphDataPreservingView({ nodes: keepNodes, links: keepLinks }, { reheat: true });
+        if (newConcepts.length > 0 || addedNodeData.length > 0) {
+          setTimeout(() => {
+            if (!graph || typeof graph.zoomToFit !== 'function') return;
+            graph.zoomToFit(600, 50);
+            if (typeof syncZoomUI === 'function') syncZoomUI(false);
+          }, 900);
+        }
 
         // 5. Update stats
         if (event.neurons != null) document.getElementById('stat-neurons').textContent = event.neurons;

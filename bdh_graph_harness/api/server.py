@@ -78,7 +78,7 @@ def _build_registry(config, nodes, edges, collection, state):
 def _make_watcher_callback(ctx, app_state, ws_clients):
     """Factory for the vault watcher callback — avoids closure capture bugs."""
 
-    async def trigger_node_update():
+    async def _trigger_node_update_unlocked():
         from bdh_graph_harness.graph.builder import build_graph
         from bdh_graph_harness.api.ws import broadcast_activation
         from bdh_graph_harness.retrieval import compute_all_embeddings
@@ -87,7 +87,8 @@ def _make_watcher_callback(ctx, app_state, ws_clients):
         old_nodes = ctx.nodes or {}
 
         new_nodes, new_edges = await asyncio.to_thread(
-            build_graph, vault_path, False
+            build_graph, vault_path, False,
+            ctx.config.settings.get('graph_ignore')
         )
 
         old_ids = set(old_nodes.keys())
@@ -115,13 +116,16 @@ def _make_watcher_callback(ctx, app_state, ws_clients):
         ctx.nodes = new_nodes
         ctx.edges = new_edges
 
-        if added or changed:
+        if added or changed or deleted:
             ctx.collection = await asyncio.to_thread(
                 compute_all_embeddings, new_nodes, vault_path, False,
                 chroma_path=ctx.config.chroma_path,
                 collection_name=ctx.config.chroma_collection,
                 config=ctx.config.settings,
             )
+            if ctx.config.settings.get('hybrid_search', False):
+                from bdh_graph_harness.retrieval.bm25 import BM25Index
+                ctx.bm25_index = BM25Index(new_nodes)
 
         if added:
             added_node_data = []
@@ -148,8 +152,10 @@ def _make_watcher_callback(ctx, app_state, ws_clients):
                     'title': node.get('title', nid.split('/')[-1]),
                     'source_notes': source_notes[:5],
                 })
+            ctx.event_sequence += 1
             await broadcast_activation({
                 'type': 'graph_refresh',
+                'sequence': ctx.event_sequence,
                 'vault_id': ctx.config.id,
                 'neurons': len(new_nodes),
                 'synapses': sum(len(links) for links in new_edges.values()),
@@ -161,8 +167,10 @@ def _make_watcher_callback(ctx, app_state, ws_clients):
                 'message': f'{len(added)} new, {len(changed)} changed, {len(deleted)} deleted',
             }, ws_clients)
         elif changed or deleted:
+            ctx.event_sequence += 1
             await broadcast_activation({
                 'type': 'node_update',
+                'sequence': ctx.event_sequence,
                 'vault_id': ctx.config.id,
                 'changed_nodes': changed,
                 'deleted_nodes': deleted,
@@ -173,6 +181,10 @@ def _make_watcher_callback(ctx, app_state, ws_clients):
             f"Vault watcher [{ctx.config.id}]: "
             f"{len(added)} new, {len(changed)} changed, {len(deleted)} deleted"
         )
+
+    async def trigger_node_update():
+        async with ctx.runtime_lock:
+            return await _trigger_node_update_unlocked()
 
     return trigger_node_update
 

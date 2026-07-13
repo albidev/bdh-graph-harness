@@ -109,7 +109,7 @@ def _compute_hebbian_boost(candidate_id, hebbian_state, recently_active):
     return min(total_weight * weight_factor, max_boost)
 
 
-def _get_recently_active_notes(hebbian_state):
+def _get_recently_active_notes(hebbian_state, valid_node_ids=None):
     """Get notes activated in recent queries from Hebbian state.
 
     Uses last_coactivated timestamps on synapses to determine which notes
@@ -142,8 +142,6 @@ def _get_recently_active_notes(hebbian_state):
     min_weight = CONFIG.get('hebbian_boost_min_weight', 0.15)
 
     # Get the set of valid note IDs (to filter dead synapses)
-    # This is passed via hebbian_state if available, else we skip the check
-    valid_node_ids = hebbian_state.get('_valid_node_ids', None)
 
     recent_notes = set()
     for key, syn in synapses.items():
@@ -169,7 +167,7 @@ def _get_recently_active_notes(hebbian_state):
 
 
 def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=None,
-              hebbian_state=None):
+              hebbian_state=None, routing_meta=None):
     """
     BDH-style attention: find relevant notes via ChromaDB KNN search (seed)
     + graph traversal (k-hop expansion). Returns active note set with scores.
@@ -230,10 +228,15 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
 
     # Hybrid search: combine vector + BM25 (with proper batch normalization)
     hybrid_enabled = CONFIG.get('hybrid_search', False) and bm25_index is not None
+    bm25_scores = {}
 
-    if hybrid_enabled:
-        candidate_ids = list(raw_vector_scores.keys())
-        # Compute BM25 scores ONCE for all candidates, normalized [0,1]
+    if hybrid_enabled and bm25_index is not None:
+        vector_candidate_ids = list(raw_vector_scores.keys())
+        bm25_candidate_ids = [
+            note_id for note_id, _score in bm25_index.search(query, top_k=overfetch)
+        ]
+        candidate_ids = list(dict.fromkeys(vector_candidate_ids + bm25_candidate_ids))
+        # Compute BM25 scores ONCE for the union of vector and lexical candidates.
         bm25_scores = bm25_index.score_batch(query, candidate_ids)
         alpha = CONFIG.get('hybrid_alpha', 0.7)
         beta = CONFIG.get('hybrid_beta', 0.3)
@@ -255,16 +258,42 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
                 sim *= dampen
             scores[note_id] = sim
 
+    if routing_meta is not None:
+        ranked = sorted(scores.values(), reverse=True)
+        bm25_ranked = sorted(bm25_scores.items(), key=lambda item: -item[1])
+        bm25_top_id = bm25_ranked[0][0] if bm25_ranked else None
+        bm25_query_terms = (
+            bm25_index._tokenize(query)
+            if hybrid_enabled and bm25_index is not None else []
+        )
+        bm25_matched_terms = (
+            bm25_index.matched_terms(query, bm25_top_id)
+            if hybrid_enabled and bm25_index is not None and bm25_top_id is not None else []
+        )
+        routing_meta.update({
+            "vector_top_score": max(raw_vector_scores.values(), default=0.0),
+            "bm25_top_score": max(bm25_scores.values(), default=0.0),
+            "bm25_query_term_count": len(set(bm25_query_terms)),
+            "bm25_matched_term_count": len(bm25_matched_terms),
+            "bm25_matched_terms": bm25_matched_terms,
+            "hybrid_top_score": ranked[0] if ranked else 0.0,
+            "hybrid_second_score": ranked[1] if len(ranked) > 1 else 0.0,
+            "hybrid_margin": (ranked[0] - ranked[1]) if len(ranked) > 1 else ranked[0] if ranked else 0.0,
+            "hybrid_enabled": hybrid_enabled,
+        })
+
+    # Keep retrieval-only scores separate from Hebbian and hop propagation scores.
+    retrieval_scores = dict(scores)
+
     # Phase 5: Hebbian-aware seed ranking
     # Boost candidates that have strong Hebbian synapses with recently active notes.
     # This makes the graph "remember" what you're working on and prefer seeds
     # in the same context, even if their pure cosine similarity is slightly lower.
     if hebbian_state and CONFIG.get('hebbian_seed_boost', True):
-        # Inject valid node IDs so dead synapses (to deleted notes) are filtered
-        hebbian_state['_valid_node_ids'] = set(nodes.keys())
-        recently_active = _get_recently_active_notes(hebbian_state)
-        # Clean up the temporary key
-        hebbian_state.pop('_valid_node_ids', None)
+        valid_node_ids = set(nodes.keys())
+        recently_active = _get_recently_active_notes(
+            hebbian_state, valid_node_ids=valid_node_ids
+        )
         if recently_active:
             logger.info(f"Phase 5: {len(recently_active)} recently active notes, boosting seeds")
             boosted = {}
@@ -285,15 +314,30 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
 
     # Top-k seeds — always keep at least k regardless of threshold
     seeds = sorted(scores.items(), key=lambda x: -x[1])[:k]
+    seed_ids = {nid for nid, _score in seeds}
+    activation_details = {}
+    for note_id, score in seeds:
+        retrieval_score = retrieval_scores.get(note_id, 0.0)
+        boost = max(0.0, score / retrieval_score - 1.0) if retrieval_score > 0 else 0.0
+        activation_details[note_id] = {
+            'role': 'seed',
+            'hop': 0,
+            'parent_id': None,
+            'vector_score': round(raw_vector_scores.get(note_id, 0.0), 4),
+            'bm25_score': round(bm25_scores.get(note_id, 0.0), 4),
+            'hybrid_score': round(retrieval_score, 4),
+            'hebbian_boost': round(boost, 4),
+            'final_score': round(score, 4),
+        }
 
     # Step 2: Graph traversal — expand from seeds via wikilinks
     active = dict(seeds)
     queue = deque()
     for note_id, score in seeds:
-        queue.append((note_id, score, 0))
+        queue.append((note_id, score, 0, None))
 
     while queue:
-        current_id, score, hop = queue.popleft()
+        current_id, score, hop, parent_id = queue.popleft()
         if hop >= max_hop:
             continue
 
@@ -322,10 +366,34 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
                 new_score *= dampen
 
             if target_id in active:
-                active[target_id] = max(active[target_id], new_score)
+                if new_score > active[target_id]:
+                    active[target_id] = new_score
+                    if target_id not in seed_ids:
+                        activation_details[target_id].update({
+                            'hop': hop + 1,
+                            'parent_id': current_id,
+                            'final_score': round(new_score, 4),
+                        })
             elif new_score > CONFIG['active_threshold']:
                 active[target_id] = new_score
-                queue.append((target_id, new_score, hop + 1))
+                activation_details[target_id] = {
+                    'role': 'graph_neighbor',
+                    'hop': hop + 1,
+                    'parent_id': current_id,
+                    'vector_score': round(raw_vector_scores.get(target_id, 0.0), 4),
+                    'bm25_score': round(bm25_scores.get(target_id, 0.0), 4),
+                    'hybrid_score': round(retrieval_scores.get(target_id, 0.0), 4),
+                    'hebbian_boost': 0.0,
+                    'final_score': round(new_score, 4),
+                }
+                queue.append((target_id, new_score, hop + 1, current_id))
+
+    if routing_meta is not None:
+        routing_meta['activation_details'] = [
+            {'id': nid, **activation_details[nid]}
+            for nid, _score in sorted(active.items(), key=lambda item: -item[1])
+            if nid in activation_details
+        ]
 
     return active
 

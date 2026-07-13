@@ -57,4 +57,4 @@ def test_mobile_mode_and_cached_assets_share_the_mobile_breakpoint_and_revision(
     html = (ROOT / "bdh_graph_harness/visualization/templates/index.html").read_text()
 
     assert "return window.matchMedia('(max-width: 768px)').matches;" in core
-    assert "?v=mobile-v2" in html
+    assert "?v=activation-stable-v7" in html

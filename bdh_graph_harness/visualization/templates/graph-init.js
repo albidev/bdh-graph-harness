@@ -567,6 +567,10 @@ function requestGraphRedraw() {
 // user's current pan/zoom so live updates don't throw the graph off-screen.
 function setGraphDataPreservingView(data, opts = {}) {
   if (!graph) return;
+  if (!data || !Array.isArray(data.nodes) || data.nodes.length === 0) {
+    console.warn('Ignoring empty graph structural update');
+    return;
+  }
   const center = typeof graph.centerAt === 'function' ? graph.centerAt() : null;
   const zoom = typeof graph.zoom === 'function' ? graph.zoom() : null;
   const liveData = graph.graphData ? graph.graphData() : { nodes: [] };
@@ -597,10 +601,16 @@ function setGraphDataPreservingView(data, opts = {}) {
     links: (data.links || []).map(link => {
       const s = typeof link.source === 'object' ? link.source.id : link.source;
       const t = typeof link.target === 'object' ? link.target.id : link.target;
+      const type = link.type || 'wikilink';
+      const fallbackColor = type === 'wikilink' ? COLORS.edgeWikilink :
+        (type === 'phantom' ? COLORS.edgePhantom : COLORS.edgeHebbianMid);
       return {
         source: s, target: t,
-        color: link.color, width: link.width, type: link.type,
-        particles: link.particles, _id: link._id, _visible: link._visible,
+        color: link.color || fallbackColor,
+        width: Number.isFinite(link.width) ? link.width : (type === 'wikilink' ? 0.5 : 1),
+        type,
+        particles: link.particles || 0, _id: link._id || (s + '→' + t),
+        _visible: link._visible !== false,
         _dashes: link._dashes, weight: link.weight, frequency: link.frequency,
         particleColor: link.particleColor,
       };
@@ -612,6 +622,7 @@ function setGraphDataPreservingView(data, opts = {}) {
     return (order[a.type] || 0) - (order[b.type] || 0);
   });
   graph.graphData(safeData);
+  if (typeof initEdgeVisibility === 'function') initEdgeVisibility();
   if (opts.reheat && typeof graph.d3ReheatSimulation === 'function') graph.d3ReheatSimulation();
   requestAnimationFrame(() => {
     if (center && typeof graph.centerAt === 'function') graph.centerAt(center.x, center.y, 0);

@@ -34,6 +34,20 @@ def mock_nodes():
     }
 
 
+def test_bm25_indexes_title_tags_and_abstract():
+    idx = harness.BM25Index({
+        'note': {
+            'title': 'Hebbian Learning',
+            'tags': 'neuroscience memory',
+            'abstract': 'Co-activated neurons reinforce connections.',
+            'text': 'body without the title terms',
+        },
+    })
+
+    assert idx.score('Hebbian', 'note') > 0
+    assert idx.matched_terms('Hebbian memory', 'note') == ['hebbian', 'memory']
+
+
 def test_bm25_build(mock_nodes):
     """BM25 index builds correctly with right doc count and terms."""
     idx = harness.BM25Index(mock_nodes)

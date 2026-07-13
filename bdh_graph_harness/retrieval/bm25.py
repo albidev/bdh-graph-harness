@@ -72,14 +72,20 @@ class BM25Index:
         return [t for t in tokens if t not in _IT_STOP_WORDS and len(t) > 1]
 
     def _build(self, nodes):
-        """Build the BM25 index from graph nodes."""
+        """Build the BM25 index from title, metadata, and note content."""
         self.N = len(nodes)
         if self.N == 0:
             return
 
         total_len = 0
         for note_id, node in nodes.items():
-            text = node.get('text', '')
+            text = " ".join(filter(None, [
+                node.get('title', ''),
+                node.get('tags', ''),
+                node.get('abstract', ''),
+                node.get('description', ''),
+                node.get('text', ''),
+            ]))
             tokens = self._tokenize(text)
             self.docs[note_id] = tokens
             self.doc_len[note_id] = len(tokens)
@@ -130,6 +136,14 @@ class BM25Index:
             score += idf * f * (self.k1 + 1) / denom
 
         return score
+
+    def matched_terms(self, query, note_id):
+        """Return unique query terms present in a note's indexed fields."""
+        if note_id not in self.tf:
+            return []
+        query_terms = set(self._tokenize(query))
+        tf_map = self.tf.get(note_id, {})
+        return sorted(term for term in query_terms if tf_map.get(term, 0) > 0)
 
     def score_normalized(self, query, note_id, max_score=None):
         """Compute normalized BM25 score [0, 1] for a note.
