@@ -33,9 +33,15 @@ def hebbian_update(active_notes, state, nodes=None, source=None):
     """
     min_score = CONFIG.get('hebbian_min_score', 0.15)
 
-    # Dampening for assistant responses: reduce frequency increment
-    # to prevent echo loops (Hermes repeats BDH context → same nodes reinforced)
-    freq_increment = 0.3 if source == "assistant_response" else 1.0
+    # Dampening for assistant responses and semantic sleep: both are
+    # derived/secondary signals and must not reinforce the graph like a direct
+    # user-driven query.
+    if source == "assistant_response":
+        freq_increment = 0.3
+    elif source == "nightly_semantic_consolidation":
+        freq_increment = CONFIG.get('semantic_consolidation_frequency_increment', 0.3)
+    else:
+        freq_increment = 1.0
 
     # Filter to only notes above threshold
     strong = {nid: s for nid, s in active_notes.items() if s >= min_score}
@@ -64,12 +70,15 @@ def hebbian_update(active_notes, state, nodes=None, source=None):
             # Recency: 1.0 if just activated, decays over time
             syn['weight'] = CONFIG['alpha'] * min(syn['frequency'] / 10.0, 1.0) + CONFIG['beta'] * 1.0
 
-    # Decay unused synapses (check against ALL active, not just strong)
-    for key, syn in list(state['synapses'].items()):
-        if key.split('|')[0] not in active_notes and key.split('|')[1] not in active_notes:
-            syn['weight'] *= CONFIG['decay']
-            if syn['weight'] < 0.01:
-                del state['synapses'][key]
+    # Decay unused synapses only during ordinary waking queries. Semantic sleep
+    # must not globally weaken unrelated memory: structural consolidation owns
+    # downscaling and pruning for the whole graph.
+    if source != "nightly_semantic_consolidation":
+        for key, syn in list(state['synapses'].items()):
+            if key.split('|')[0] not in active_notes and key.split('|')[1] not in active_notes:
+                syn['weight'] *= CONFIG['decay']
+                if syn['weight'] < 0.01:
+                    del state['synapses'][key]
 
     # Try to re-activate dormant nodes with strong activation
     reactivated = 0
