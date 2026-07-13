@@ -79,16 +79,17 @@ def _make_watcher_callback(ctx, app_state, ws_clients):
     """Factory for the vault watcher callback — avoids closure capture bugs."""
 
     async def _trigger_node_update_unlocked():
-        from bdh_graph_harness.graph.builder import build_graph
+        from bdh_graph_harness.graph.federated import build_configured_graph
         from bdh_graph_harness.api.ws import broadcast_activation
         from bdh_graph_harness.retrieval import compute_all_embeddings
 
         vault_path = ctx.config.path
         old_nodes = ctx.nodes or {}
 
-        new_nodes, new_edges = await asyncio.to_thread(
-            build_graph, vault_path, False,
-            ctx.config.settings.get('graph_ignore')
+        new_nodes, new_edges, unresolved = await asyncio.to_thread(
+            build_configured_graph,
+            ctx.config.settings,
+            use_cache=False,
         )
 
         old_ids = set(old_nodes.keys())
@@ -115,6 +116,7 @@ def _make_watcher_callback(ctx, app_state, ws_clients):
 
         ctx.nodes = new_nodes
         ctx.edges = new_edges
+        ctx.state['unresolved_links'] = unresolved
 
         if added or changed or deleted:
             ctx.collection = await asyncio.to_thread(
@@ -145,6 +147,11 @@ def _make_watcher_callback(ctx, app_state, ws_clients):
                     'tags': node.get('tags', ''),
                     'text': node.get('text', ''),
                     'path': node.get('path', ''),
+                    'absolute_path': node.get('absolute_path', node.get('path', '')),
+                    'relative_path': node.get('relative_path', ''),
+                    'source_id': node.get('source_id', 'vault'),
+                    'source_type': node.get('source_type', 'vault'),
+                    'writable': node.get('writable', True),
                     'edges': node_edges,
                 })
                 new_concepts.append({

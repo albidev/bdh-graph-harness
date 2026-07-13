@@ -16,7 +16,7 @@ import sys
 import argparse
 
 from bdh_graph_harness.config import CONFIG, load_config
-from bdh_graph_harness.graph import build_graph
+from bdh_graph_harness.graph import build_graph, build_configured_graph, migrate_legacy_state_ids
 from bdh_graph_harness.retrieval.attention import attention
 from bdh_graph_harness.retrieval import compute_all_embeddings, BM25Index
 from bdh_graph_harness.memory import load_state, save_state, hebbian_update
@@ -197,7 +197,7 @@ def main():
             neurons = 0
             embeddings = 0
             try:
-                nodes, _ = build_graph(vc.path, use_cache=True)
+                nodes, _, _ = build_configured_graph(vc.settings, use_cache=True)
                 neurons = len(nodes)
             except Exception:
                 pass
@@ -212,6 +212,7 @@ def main():
         return
 
     # Resolve vault (--vault-id takes precedence over --vault)
+    effective_config = dict(config)
     if args.vault_id:
         from bdh_graph_harness.vaults import normalize_vault_configs
         vault_cfgs = normalize_vault_configs(config)
@@ -220,10 +221,12 @@ def main():
             available = [v.id for v in vault_cfgs]
             print(f"Error: vault-id '{args.vault_id}' not found. Available: {available}")
             sys.exit(1)
+        effective_config = dict(matched[0].settings)
         vault_root = matched[0].path
     else:
         vault_root = args.vault or config['vault_path']
         vault_root = os.path.expanduser(vault_root)
+        effective_config['vault_path'] = vault_root
 
     if not os.path.isdir(vault_root):
         print(f"Error: vault path '{vault_root}' not found")
@@ -232,11 +235,27 @@ def main():
     print(f"🐉 BDH Graph Harness — Building graph from vault...")
     print(f"   Vault: {vault_root}")
 
-    nodes, edges = build_graph(vault_root, use_cache=not args.no_cache)
+    if effective_config.get('external_sources'):
+        nodes, edges, unresolved = build_configured_graph(
+            effective_config,
+            use_cache=not args.no_cache,
+        )
+    else:
+        nodes, edges = build_graph(vault_root, use_cache=not args.no_cache)
+        unresolved = []
     print(f"   ✓ {len(nodes)} neurons, {sum(len(e) for e in edges.values())} synapses")
 
     # Compute embeddings
-    collection = compute_all_embeddings(nodes, vault_root)
+    if effective_config.get('external_sources'):
+        collection = compute_all_embeddings(
+            nodes,
+            vault_root,
+            chroma_path=effective_config.get('chroma_path'),
+            collection_name=effective_config.get('chroma_collection'),
+            config=effective_config,
+        )
+    else:
+        collection = compute_all_embeddings(nodes, vault_root)
 
     # Build BM25 index for hybrid search (Phase 3.1)
     # Skip if --serve: the server builds its own index
@@ -248,6 +267,8 @@ def main():
 
     # Load state
     state = load_state(vault_root)
+    state = migrate_legacy_state_ids(state, nodes)
+    state['unresolved_links'] = unresolved
 
     # --- Mode dispatch ---
 

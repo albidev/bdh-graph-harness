@@ -16,6 +16,8 @@ const COLORS = {
   edgeHebbianPulse: '#d2a8ff',
   edgeNeurogenesis: '#3fb950',  // green dashed edges for new connections
   edgePhantom: '#1f6feb',       // blue dashed edges for phantom links
+  sourceVault: '#58a6ff',
+  sourceExternal: '#f0883e',
   bg: '#0d1117',
 };
 
@@ -88,6 +90,17 @@ function weightColor(weight) {
   return COLORS.edgeHebbianHigh;
 }
 
+function sourceColor(node) {
+  return (node && node.source_type === 'external')
+    ? COLORS.sourceExternal
+    : COLORS.sourceVault;
+}
+
+function nodeMatchesSourceFilter(node) {
+  if (sourceFilter === 'all') return true;
+  return (node && (node.source_type || 'vault')) === sourceFilter;
+}
+
 // Tag-based color palette (distinct, readable on dark bg)
 const TAG_COLORS = [
   '#f97583', // red (entities)
@@ -108,6 +121,7 @@ const STORAGE_KEYS = {
   hebbianThreshold: 'bdh-graph-hebbian-threshold-v2',
   spacing: 'bdh-graph-spacing',
   edgeLength: 'bdh-graph-edge-length',
+  sourceFilter: 'bdh-graph-source-filter',
   zoom: 'bdh-graph-zoom',
 };
 
@@ -305,6 +319,8 @@ let edgeLengthMultiplier = 10; // default: 10px per degree unit
 let spacingValue = 50;        // default: balanced graph spacing
 let restoredZoom = null;      // saved zoom slider value, applied after graph init
 let showOrphans = true;
+let sourceFilter = 'all';
+let sourceGraphData = null;
 let zoomPollTimer = null;
 let lastMouseEvent = { clientX: 0, clientY: 0 }; // tracked for tooltip positioning
 let mouseTrackingInstalled = false;
@@ -335,7 +351,13 @@ function showTooltip(node, evt) {
 
   const title = escapeHtml(n.title || n.id);
   const path = n._path || n.path || '';
-  const shortPath = path.replace(/.*\/Documents\/Hermes\//, '').replace(/.*\/wiki\//, 'wiki/');
+  const sourceType = n.source_type || 'vault';
+  const sourceId = n.source_id || sourceType;
+  const sourceColorValue = sourceColor(n);
+  const openUrl = sourceType === 'vault'
+    ? 'obsidian://open?path=' + encodeURIComponent(path)
+    : 'file://' + path;
+  const shortPath = n.relative_path || path;
   const text = (n._text || n.text || '').replace(/\n/g, ' ').substring(0, mobile ? 80 : 150);
   const deg = degreeMap[n.id] || 0;
 
@@ -359,8 +381,10 @@ function showTooltip(node, evt) {
 
   let html = mobile ? '<button class="mobile-sheet-close" onclick="dismissMobileSheet()" aria-label="Close node details">×</button>' : '';
   html += '<div style="font-weight:600;color:#f0883e;margin-bottom:4px;font-size:13px">' + title + '</div>';
+  html += '<div style="color:' + sourceColorValue + ';font-size:11px;margin-bottom:4px">' + escapeHtml(sourceType) + ' · ' + escapeHtml(sourceId) + '</div>';
   if (tagHtml) html += '<div style="margin-bottom:6px">' + tagHtml + '</div>';
   if (shortPath) html += '<div style="color:#8b949e;font-size:11px;margin-bottom:3px">📄 ' + escapeHtml(shortPath) + '</div>';
+  if (path) html += '<a href="' + escapeHtml(openUrl) + '" target="_blank" rel="noopener" style="color:#79c0ff;font-size:11px">Open file ↗</a>';
   html += '<div style="color:#8b949e;font-size:11px;margin-bottom:3px">🔗 ' + deg + ' connection' + (deg !== 1 ? 's' : '') + '</div>';
   if (neighborHtml) html += '<div style="color:#6e7681;font-size:11px;margin-bottom:4px;border-top:1px solid #30363d;padding-top:4px">→ ' + neighborHtml + '</div>';
   if (text) html += '<div style="color:#6e7681;font-size:11px;border-top:1px solid #30363d;padding-top:4px">' + escapeHtml(text) + '…</div>';

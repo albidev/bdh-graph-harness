@@ -141,6 +141,10 @@ def compute_all_embeddings(
                     'title': nodes[nid]['title'],
                     'tags': nodes[nid]['tags'],
                     'type': nodes[nid].get('type', 'concept'),
+                    'source_id': nodes[nid].get('source_id', 'vault'),
+                    'source_type': nodes[nid].get('source_type', 'vault'),
+                    'relative_path': nodes[nid].get('relative_path', ''),
+                    'writable': str(nodes[nid].get('writable', True)).lower(),
                 }],
             )
         print(f"  ChromaDB: {collection.count()} notes stored")

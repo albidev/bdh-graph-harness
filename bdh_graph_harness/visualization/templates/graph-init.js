@@ -2,8 +2,16 @@
 // Graph initialization
 // ============================================================================
 function initNetwork(graphData) {
+  // Keep the server payload so source filters can rebuild the view without
+  // losing hidden nodes or cross-source edges.
+  sourceGraphData = JSON.parse(JSON.stringify(graphData));
   // Store full node list for orphan toggle + build fast lookup map
   allGraphNodes = graphData.nodes;
+  const sourceVisibleIds = new Set(
+    graphData.nodes
+      .filter(nodeMatchesSourceFilter)
+      .map(node => node.id)
+  );
   nodeDataMap = {};
   graphData.nodes.forEach(n => { nodeDataMap[n.id] = n; });
 
@@ -38,6 +46,7 @@ function initNetwork(graphData) {
   neighborMap = {};
 
   graphData.edges.forEach(e => {
+    if (!sourceVisibleIds.has(e.source) || !sourceVisibleIds.has(e.target)) return;
     const eid = e.source + '→' + e.target;
     if (edgeSet.has(eid)) return;
     edgeSet.add(eid);
@@ -56,6 +65,7 @@ function initNetwork(graphData) {
   // Add hebbian edges to degree count
   hebbianMap = {};
   graphData.hebbian.forEach(h => {
+    if (!sourceVisibleIds.has(h.note_a) || !sourceVisibleIds.has(h.note_b)) return;
     const key = h.note_a + '|' + h.note_b;
     hebbianMap[key] = h.weight;
     connectedNodes.add(h.note_a);
@@ -66,6 +76,7 @@ function initNetwork(graphData) {
 
   // Phantom edges degree count
   (graphData.phantom || []).forEach(p => {
+    if (!sourceVisibleIds.has(p.source) || !sourceVisibleIds.has(p.target)) return;
     connectedNodes.add(p.source);
     connectedNodes.add(p.target);
     degreeMap[p.source] = (degreeMap[p.source] || 0) + 1;
@@ -83,8 +94,8 @@ function initNetwork(graphData) {
   // Build force-graph nodes
   fgNodes = [];
   const activeNodeIds = showOrphans
-    ? graphData.nodes.map(n => n.id)
-    : graphData.nodes.filter(n => connectedSet.has(n.id)).map(n => n.id);
+    ? graphData.nodes.filter(n => sourceVisibleIds.has(n.id)).map(n => n.id)
+    : graphData.nodes.filter(n => sourceVisibleIds.has(n.id) && connectedSet.has(n.id)).map(n => n.id);
 
   // Synaptic aura score: nodes attached to strong rendered Hebbian edges glow a
   // little more, so the visual density follows learned plasticity instead of
@@ -128,6 +139,8 @@ function initNetwork(graphData) {
       if (primaryTag && tagColorMap[primaryTag]) {
         color = tagColorMap[primaryTag];
       }
+    } else {
+      color = sourceColor(n);
     }
     nodeTagColorMap[n.id] = color;
     const mass = computeNodeMass(n, deg, maxDeg);

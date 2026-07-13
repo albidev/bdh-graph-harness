@@ -11,6 +11,17 @@ function switchTab(tabClass) {
 }
 
 // ============================================================================
+// Source filter — Vault / External / All
+// ============================================================================
+function setSourceFilter(value, persist = true) {
+  sourceFilter = ['all', 'vault', 'external'].includes(value) ? value : 'all';
+  const select = document.getElementById('source-filter');
+  if (select) select.value = sourceFilter;
+  if (persist) saveControlValue(STORAGE_KEYS.sourceFilter, sourceFilter);
+  if (sourceGraphData) initNetwork(sourceGraphData);
+}
+
+// ============================================================================
 // Orphan nodes toggle
 // ============================================================================
 function toggleOrphans(show) {
@@ -127,8 +138,8 @@ function toggleTagColors(enabled) {
         nodeTagColorMap[node.id] = COLORS.inactive;
       }
     } else {
-      node.color = COLORS.inactive;
-      nodeTagColorMap[node.id] = COLORS.inactive;
+      node.color = sourceColor(n);
+      nodeTagColorMap[node.id] = sourceColor(n);
     }
   });
   requestGraphRedraw();
@@ -141,6 +152,8 @@ function restoreGraphControlState() {
   hebbianThreshold = clampNumber(loadControlValue(STORAGE_KEYS.hebbianThreshold, hebbianThreshold), 0, 1, hebbianThreshold);
   spacingValue = clampNumber(loadControlValue(STORAGE_KEYS.spacing, spacingValue), 0, 100, spacingValue);
   edgeLengthMultiplier = clampNumber(loadControlValue(STORAGE_KEYS.edgeLength, edgeLengthMultiplier), 0, 100, edgeLengthMultiplier);
+  const savedSourceFilter = loadControlValue(STORAGE_KEYS.sourceFilter, sourceFilter);
+  if (['all', 'vault', 'external'].includes(savedSourceFilter)) sourceFilter = savedSourceFilter;
   restoredZoom = clampNumber(loadControlValue(STORAGE_KEYS.zoom, ''), ZOOM_MIN, ZOOM_MAX, null);
 
   const thresholdSlider = document.getElementById('hebbian-threshold');
@@ -148,6 +161,8 @@ function restoreGraphControlState() {
   const spacingSlider = document.getElementById('spacing-slider');
   const edgeLengthSlider = document.getElementById('edge-length-slider');
   const edgeLengthVal = document.getElementById('el-val');
+  const sourceFilterSelect = document.getElementById('source-filter');
+  if (sourceFilterSelect) sourceFilterSelect.value = sourceFilter;
   if (thresholdSlider) thresholdSlider.value = hebbianThreshold;
   if (thresholdVal) thresholdVal.textContent = hebbianThreshold;
   if (spacingSlider) spacingSlider.value = spacingValue;

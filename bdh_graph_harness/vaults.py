@@ -202,7 +202,7 @@ def _normalise_multi_vault(cfg: dict) -> list[VaultConfig]:
         settings['chroma_path'] = resolved_cp
         settings['chroma_collection'] = chroma_collection
         # Per-vault overrides for vault-specific keys
-        for key in ('neurogenesis_dir', 'graph_ignore', 'neurogenesis_enabled'):
+        for key in ('neurogenesis_dir', 'graph_ignore', 'neurogenesis_enabled', 'external_sources'):
             if key in entry:
                 settings[key] = entry[key]
 
@@ -253,14 +253,17 @@ class VaultRegistry:
         Called at server startup in multi-vault mode.  For single-vault legacy
         mode, prefer :meth:`register_context` with pre-built data.
         """
-        from bdh_graph_harness.graph.builder import build_graph
+        from bdh_graph_harness.graph.federated import (
+            build_configured_graph,
+            migrate_legacy_state_ids,
+        )
         from bdh_graph_harness.retrieval.chroma_store import compute_all_embeddings
         from bdh_graph_harness.retrieval.bm25 import BM25Index
         from bdh_graph_harness.memory.state_store import load_state
 
         for vc in self._vault_configs:
             print(f"   Loading vault '{vc.id}' from {vc.path} …")
-            nodes, edges = build_graph(vc.path, use_cache=True)
+            nodes, edges, unresolved = build_configured_graph(vc.settings, use_cache=True)
             collection = compute_all_embeddings(
                 nodes, vc.path,
                 chroma_path=vc.chroma_path,
@@ -268,6 +271,9 @@ class VaultRegistry:
                 config=vc.settings,
             )
             state = load_state(vc.path)
+            state = migrate_legacy_state_ids(state, nodes)
+            # Unresolved links are observable metadata, never phantom nodes.
+            state['unresolved_links'] = unresolved
 
             bm25_idx = None
             if vc.settings.get('hybrid_search', False):
