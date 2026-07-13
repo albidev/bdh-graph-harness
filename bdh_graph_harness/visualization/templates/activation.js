@@ -69,6 +69,7 @@ function handleActivation(event) {
 
   // Pulse Hebbian synapses that were strengthened in this query
   const hebbianUpdates = event.hebbian_updates || [];
+  const pendingHebbianLinks = [];
 
   hebbianUpdates.forEach((h, idx) => {
     const parts = h.pair.split('|');
@@ -97,6 +98,18 @@ function handleActivation(event) {
         target_title: (nodeDataMap[b] || {}).title || b,
         type: 'hebbian', weight: h.weight, frequency: h.frequency,
       };
+      pendingHebbianLinks.push({
+        source: a,
+        target: b,
+        color: weightColor(h.weight),
+        width: newWidth,
+        type: 'hebbian',
+        weight: h.weight,
+        frequency: h.frequency,
+        particles: 0,
+        _id: eid,
+        _visible: true,
+      });
       return;
     }
 
@@ -132,6 +145,20 @@ function handleActivation(event) {
       // No applyEdgeFilters here — would rebuild graph and cause flash
     }, delay + 2500);
   });
+
+  // The server persists new Hebbian pairs immediately, but no graph_refresh is
+  // emitted for a normal query. Add all missing pairs in one structural update
+  // so they become visible without resetting the graph once per synapse.
+  if (pendingHebbianLinks.length > 0) {
+    const existingKeys = new Set(currentData.links.map(linkKey));
+    const newLinks = pendingHebbianLinks.filter(link => !existingKeys.has(linkKey(link)));
+    if (newLinks.length > 0) {
+      setGraphDataPreservingView(
+        { nodes: currentData.nodes, links: currentData.links.concat(newLinks) },
+        { reheat: true },
+      );
+    }
+  }
 
   // Reset activation state after all Hebbian settle animations finish
   const activationTimeoutMs = Math.max(5000, (hebbianUpdates.length - 1) * 120 + 3000);
