@@ -137,8 +137,20 @@ def _make_watcher_callback(ctx, app_state, ws_clients):
                 node_edges = []
                 source_notes = []
                 for link in new_edges.get(nid, []):
-                    target_id = link['target'] if isinstance(link, dict) else link
-                    node_edges.append({'source': nid, 'target': target_id})
+                    if isinstance(link, dict):
+                        target_id = link['target']
+                        edge_payload = {
+                            'source': nid,
+                            'target': target_id,
+                            'type': link.get('type', 'wikilink'),
+                            'weight': link.get('weight', 1.0),
+                            'relation': link.get('relation'),
+                            'group_id': link.get('group_id'),
+                        }
+                    else:
+                        target_id = link
+                        edge_payload = {'source': nid, 'target': target_id, 'type': 'wikilink'}
+                    node_edges.append(edge_payload)
                     if target_id in old_ids:
                         source_notes.append(old_nodes.get(target_id, {}).get('title', target_id))
                 added_node_data.append({
@@ -151,6 +163,7 @@ def _make_watcher_callback(ctx, app_state, ws_clients):
                     'relative_path': node.get('relative_path', ''),
                     'source_id': node.get('source_id', 'vault'),
                     'source_type': node.get('source_type', 'vault'),
+                    'project_group': node.get('project_group'),
                     'writable': node.get('writable', True),
                     'edges': node_edges,
                 })
@@ -265,7 +278,13 @@ def start_api_server(config, nodes, edges, collection, state):
         for ctx in registry.list():
             try:
                 callback = _make_watcher_callback(ctx, app_state, ws_clients)
-                watcher = VaultWatcher(ctx.config.path, callback)
+                from bdh_graph_harness.graph.sources import sources_from_config
+                watcher_sources = sources_from_config(ctx.config.settings)
+                watcher = VaultWatcher(
+                    ctx.config.path,
+                    callback,
+                    sources=watcher_sources,
+                )
                 ctx.watcher = watcher
                 watchers.append((ctx, watcher))
             except Exception as e:

@@ -68,6 +68,9 @@ class DocumentSource(Protocol):
     root_path: str
     writable: bool
 
+    def iter_paths(self) -> Iterable[tuple[str, str]]:
+        ...
+
     def scan(self) -> Iterable[Document]:
         ...
 
@@ -131,8 +134,8 @@ class _MarkdownSource:
         self.include = tuple(include or DEFAULT_MARKDOWN_INCLUDE)
         self.exclude = tuple(exclude or ())
 
-    def scan(self) -> Iterable[Document]:
-        """Yield matching Markdown documents in deterministic path order."""
+    def iter_paths(self) -> Iterable[tuple[str, str]]:
+        """Yield matching ``(relative_path, absolute_path)`` pairs."""
         if not os.path.isdir(self.root_path):
             raise FileNotFoundError(
                 f"{self.source_type.title()} source path not found: {self.root_path}"
@@ -142,10 +145,7 @@ class _MarkdownSource:
         for root, dirs, files in os.walk(self.root_path):
             # Hidden directories are operational data in practice (.git,
             # .obsidian, caches). They are never part of the Markdown corpus.
-            dirs[:] = sorted(
-                d for d in dirs
-                if not d.startswith(".")
-            )
+            dirs[:] = sorted(d for d in dirs if not d.startswith("."))
             for filename in files:
                 if filename.startswith(".") or not filename.lower().endswith(".md"):
                     continue
@@ -156,8 +156,11 @@ class _MarkdownSource:
                 if _matches_any(relative, self.exclude):
                     continue
                 discovered.append((relative, absolute))
+        yield from sorted(discovered)
 
-        for relative, absolute in sorted(discovered):
+    def scan(self) -> Iterable[Document]:
+        """Yield matching Markdown documents in deterministic path order."""
+        for relative, absolute in self.iter_paths():
             with open(absolute, "r", encoding="utf-8") as handle:
                 content = handle.read()
             yield Document(
