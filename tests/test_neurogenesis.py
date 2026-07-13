@@ -254,3 +254,89 @@ def test_extract_new_concepts_json_with_fences(monkeypatch):
     result = harness.extract_new_concepts('response', 'query', {}, nodes)
     assert len(result) == 1
     assert result[0]['title'] == 'Test'
+
+
+def test_extract_new_concepts_openrouter_object_wrapper(monkeypatch):
+    """OpenRouter's json_object contract uses a concepts wrapper."""
+    raw_content = json.dumps({
+        'concepts': [
+            {'title': 'Contrastive Learning', 'definition': 'Learns by comparing pairs.'},
+        ],
+    })
+
+    class MockResp:
+        def read(self):
+            return json.dumps({'choices': [{'message': {'content': raw_content}}]}).encode()
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            pass
+
+    import urllib.request as urlreq
+    monkeypatch.setattr(urlreq, 'urlopen', lambda req, timeout=120: MockResp())
+    monkeypatch.setattr(bdh_config, 'OLLAMA_LLM_URL', 'https://openrouter.ai/api/v1/chat/completions')
+    monkeypatch.setattr(bdh_creator, 'retry_with_backoff', lambda fn: fn())
+    monkeypatch.setattr(bdh_creator, 'is_semantic_duplicate', lambda *args: False)
+    monkeypatch.setitem(bdh_creator.CONFIG, 'llm_provider', 'openrouter')
+
+    result = harness.extract_new_concepts('Contrastive learning response', 'query', {}, {})
+    assert result == [{'title': 'Contrastive Learning', 'definition': 'Learns by comparing pairs.'}]
+
+
+def test_extract_new_concepts_accepts_openrouter_single_object(monkeypatch):
+    """Tolerate the object OpenRouter returned during the live contract test."""
+    raw_content = json.dumps({
+        'title': 'Contrastive Learning',
+        'definition': 'Learns by comparing pairs.',
+    })
+
+    class MockResp:
+        def read(self):
+            return json.dumps({'choices': [{'message': {'content': raw_content}}]}).encode()
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            pass
+
+    import urllib.request as urlreq
+    monkeypatch.setattr(urlreq, 'urlopen', lambda req, timeout=120: MockResp())
+    monkeypatch.setattr(bdh_config, 'OLLAMA_LLM_URL', 'https://openrouter.ai/api/v1/chat/completions')
+    monkeypatch.setattr(bdh_creator, 'retry_with_backoff', lambda fn: fn())
+    monkeypatch.setattr(bdh_creator, 'is_semantic_duplicate', lambda *args: False)
+    monkeypatch.setitem(bdh_creator.CONFIG, 'llm_provider', 'openrouter')
+
+    result = harness.extract_new_concepts('Contrastive learning response', 'query', {}, {})
+    assert result == [{'title': 'Contrastive Learning', 'definition': 'Learns by comparing pairs.'}]
+
+
+def test_extract_new_concepts_prompt_is_signal_first_and_bounded(monkeypatch):
+    """Prompt requests explicit evidence, conservative extraction, and max five concepts."""
+    captured = {}
+
+    class MockResp:
+        def read(self):
+            return json.dumps({'message': {'content': '{"concepts": []}'}}).encode()
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            pass
+
+    import urllib.request as urlreq
+    def capture_request(req, timeout=120):
+        captured['payload'] = json.loads(req.data)
+        return MockResp()
+
+    monkeypatch.setattr(urlreq, 'urlopen', capture_request)
+    monkeypatch.setattr(bdh_config, 'OLLAMA_LLM_URL', 'http://localhost:11434/api/chat')
+    monkeypatch.setattr(bdh_creator, 'retry_with_backoff', lambda fn: fn())
+    monkeypatch.setitem(bdh_creator.CONFIG, 'llm_provider', 'openrouter')
+
+    harness.extract_new_concepts('response', 'query', {}, {})
+    system_prompt = captured['payload']['messages'][0]['content']
+    assert 'explicitly present in the response' in system_prompt
+    assert 'The knowledge graph may contain information from any domain' in system_prompt
+    assert 'Infer the relevant domain from the response' in system_prompt
+    assert 'about AI, software, and neuroscience' not in system_prompt
+    assert 'Return at most 5 concepts' in system_prompt
+    assert 'When evidence is weak, return []' in system_prompt
+    assert captured['payload']['response_format'] == {'type': 'json_object'}

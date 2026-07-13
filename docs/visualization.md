@@ -36,10 +36,23 @@ During a query, strengthened synapses get animated particles:
 - **Edge hover** — highlights only the hovered edge (color #d2a8ff, width 2.8, 2 particles), does NOT dim the graph
 - Rendering uses `autoPauseRedraw(false)` to stay active even after simulation cools
 
+### Activation explainability
+
+Each activated note now carries both its final activation score and its role in the retrieval graph:
+
+- **`seed`** — selected directly by vector/Hybrid retrieval (`hop: 0`)
+- **`graph_neighbor`** — reached through a wikilink expansion, with `hop` and `parent_id`
+- `vector_score`, `bm25_score`, and `hybrid_score` preserve retrieval evidence
+- `hebbian_boost` shows the contextual memory contribution
+- `final_score` is the score used for activation and visualization
+
+The side panel labels seeds and graph neighbors separately. This avoids presenting a directly retrieved note and a hop-2 contextual neighbor as if they had the same evidence.
+
 ### Viewport management
 
 - **zoomToFit** — graph is centered on first load
 - **Viewport-preserving updates** — `setGraphDataPreservingView` saves and restores camera position (center + zoom) across graph rebuilds
+- **Safe structural updates** — empty or malformed node datasets are ignored instead of clearing the live graph; activation events received before graph initialization are ignored safely
 - **Node drag** — nodes can be repositioned by dragging
 - **Manual collision force** — a lightweight loop (every 50ms) pushes overlapping nodes apart by 15% when border distance < 8px
 
@@ -104,7 +117,19 @@ The visualization connects to the server via WebSocket for real-time updates:
 - **Initial payload** — on connect, sends full graph (nodes with id/title/tags/path/text, edges, hebbian synapses, stats) to populate the visualization
 - Auto-reconnect with status indicator
 - Receives activation cascades, Hebbian updates, and neurogenesis events as they happen
+- Structural events (`graph_refresh`, `node_update`) rebuild the dataset through `setGraphDataPreservingView` so the viewport is preserved
+- Empty structural updates are ignored defensively; this prevents a transient empty payload during a refresh/reconnect from clearing the force-graph
+- Activation events are ignored safely until the initial graph payload has created the force-graph instance
 - Falls back to polling if WebSocket is unavailable
+
+## Visualization update safety
+
+The browser treats graph updates as two separate classes:
+
+- **Activation updates** change opacity, color, particles, and pulse state through external Maps. They must not replace `graphData()`.
+- **Structural updates** add/remove nodes or links and are the only updates allowed to call `setGraphDataPreservingView()`.
+
+The client rejects empty structural payloads and safely ignores activation events received before graph initialization. This protects the current graph during transient WebSocket reconnects or vault-refresh races. The original intermittent disappearance report is tracked in [issue #12](https://github.com/albidev/bdh-graph-harness/issues/12).
 
 ## Dark theme
 

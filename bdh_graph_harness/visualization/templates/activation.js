@@ -4,9 +4,17 @@
 // ============================================================================
 function handleActivation(event) {
   const activated = event.activated_notes || [];
+  const newConcepts = event.new_concepts || [];
+  activatedNotesById.clear();
+  activated.forEach(note => activatedNotesById.set(note.id, note));
   const activatedIds = new Set(activated.map(n => n.id));
   const seedId = activated.length > 0 ? activated[0].id : null;
   const hasActivation = activatedIds.size > 0;
+
+  if (!graph || typeof graph.graphData !== 'function') {
+    console.warn('Activation received before graph initialization; skipping visual update');
+    return;
+  }
 
   const currentData = graph.graphData();
 
@@ -61,6 +69,7 @@ function handleActivation(event) {
 
   // Pulse Hebbian synapses that were strengthened in this query
   const hebbianUpdates = event.hebbian_updates || [];
+  const pendingHebbianLinks = [];
 
   hebbianUpdates.forEach((h, idx) => {
     const parts = h.pair.split('|');
@@ -78,56 +87,33 @@ function handleActivation(event) {
     const delay = idx * 120;
     const newWidth = Math.min(1 + h.weight * 3, 5);
 
-    // New Hebbian link that doesn't exist yet — add via graph data rebuild
+    // A new Hebbian edge is persisted by the server and will arrive in the
+    // following graph_refresh/node_update. Do not rebuild force-graph here:
+    // rebuilding once per update resets drag/pick handlers and can strand the
+    // canvas after an otherwise normal query.
     if (!targetLink && (activatedIds.has(a) || activatedIds.has(b))) {
       const eid = 'hebb_' + a + '→' + b;
-      const srcTitle = (nodeDataMap[a] || {}).title || a;
-      const tgtTitle = (nodeDataMap[b] || {}).title || b;
-      edgeInfoMap[eid] = { source_title: srcTitle, target_title: tgtTitle, type: 'hebbian', weight: h.weight, frequency: h.frequency };
-
-      // Add via setGraphDataPreservingView (creates fresh link, no readonly issues)
-      const newData = {
-        nodes: currentData.nodes.map(n => ({ id: n.id, name: n.name, color: n.color, val: n.val, _opacity: n._opacity, _shape: n._shape, _dormant: n._dormant, _mass: n._mass, _synapticGlow: n._synapticGlow, _tags: n._tags, _title: n._title, _path: n._path, _text: n._text, _hidden: n._hidden })),
-        links: [...currentData.links.map(l => ({
-          source: linkEndpointId(l.source), target: linkEndpointId(l.target),
-          color: l.color, width: l.width, type: l.type, particles: l.particles,
-          _id: l._id, _visible: l._visible, _dashes: l._dashes,
-          weight: l.weight, frequency: l.frequency, particleColor: l.particleColor,
-        })), {
-          source: a, target: b,
-          color: COLORS.edgeHebbianPulse, width: newWidth + 5,
-          type: 'hebbian', weight: h.weight, frequency: h.frequency,
-          particles: 4, particleColor: COLORS.edgeHebbianPulse,
-          _id: eid, _visible: true,
-        }],
+      edgeInfoMap[eid] = {
+        source_title: (nodeDataMap[a] || {}).title || a,
+        target_title: (nodeDataMap[b] || {}).title || b,
+        type: 'hebbian', weight: h.weight, frequency: h.frequency,
       };
-      setGraphDataPreservingView(newData, { reheat: true });
-
-      // Settle animation via Maps
-      setTimeout(() => {
-        linkWidthState.set(eid, newWidth + 4);
-        linkActivationVisible.set(eid, true);
-        linkParticlesState.set(eid, 8);
-        linkActivationColor.set(eid, COLORS.edgeHebbianPulse);
-        requestGraphRedraw();
-      }, delay + 600);
-      setTimeout(() => {
-        linkWidthState.set(eid, newWidth + 1.5);
-        linkActivationColor.set(eid, weightColor(h.weight));
-        requestGraphRedraw();
-      }, delay + 1400);
-      setTimeout(() => {
-        linkWidthState.delete(eid);
-        linkParticlesState.delete(eid);
-        linkParticleColorState.delete(eid);
-        linkActivationColor.delete(eid);
-        // No applyEdgeFilters here — would rebuild graph and cause flash
-      }, delay + 2500);
+      pendingHebbianLinks.push({
+        source: a,
+        target: b,
+        color: weightColor(h.weight),
+        width: newWidth,
+        type: 'hebbian',
+        weight: h.weight,
+        frequency: h.frequency,
+        particles: 0,
+        _id: eid,
+        _visible: true,
+      });
       return;
     }
 
     if (!targetLink) return;
-
     const key = linkKey(targetLink);
 
     // Pulse: use Maps for particles/width/color
@@ -160,6 +146,20 @@ function handleActivation(event) {
     }, delay + 2500);
   });
 
+  // The server persists new Hebbian pairs immediately, but no graph_refresh is
+  // emitted for a normal query. Add all missing pairs in one structural update
+  // so they become visible without resetting the graph once per synapse.
+  if (pendingHebbianLinks.length > 0) {
+    const existingKeys = new Set(currentData.links.map(linkKey));
+    const newLinks = pendingHebbianLinks.filter(link => !existingKeys.has(linkKey(link)));
+    if (newLinks.length > 0) {
+      setGraphDataPreservingView(
+        { nodes: currentData.nodes, links: currentData.links.concat(newLinks) },
+        { reheat: true },
+      );
+    }
+  }
+
   // Reset activation state after all Hebbian settle animations finish
   const activationTimeoutMs = Math.max(5000, (hebbianUpdates.length - 1) * 120 + 3000);
   setTimeout(() => {
@@ -176,15 +176,40 @@ function handleActivation(event) {
   } else {
     activated.forEach(note => {
       const li = document.createElement('li');
-      if (note.id === seedId) li.className = 'seed';
-      li.innerHTML = '<span>' + escapeHtml(note.title) + '</span><span class="score">' + note.score.toFixed(4) + '</span>';
+      const role = note.role || (note.id === seedId ? 'seed' : 'graph_neighbor');
+      const roleLabel = role === 'seed' ? 'seed' : 'hop ' + (note.hop ?? 1);
+      li.className = role;
+      const score = Number(note.score || 0).toFixed(4);
+      const hybrid = Number(note.hybrid_score || 0).toFixed(3);
+      li.innerHTML = '<span><strong class="activation-role">' + escapeHtml(roleLabel) + '</strong> ' + escapeHtml(note.title) + '</span>' +
+        '<span class="score" title="final ' + score + ' · hybrid ' + hybrid + '">' + score + '</span>';
+      li.addEventListener('mouseenter', (evt) => showActivatedTooltip(note, evt));
+      li.addEventListener('mousemove', (evt) => positionTooltip(evt));
+      li.addEventListener('mouseleave', () => hideTooltip());
+      li.addEventListener('click', () => focusActivatedNote(note));
       listEl.appendChild(li);
+    });
+  }
+
+  const conceptsSection = document.getElementById('new-concepts-section');
+  const conceptsList = document.getElementById('new-concepts-list');
+  if (conceptsSection && conceptsList) {
+    conceptsList.innerHTML = '';
+    conceptsSection.hidden = newConcepts.length === 0;
+    newConcepts.forEach(concept => {
+      const li = document.createElement('li');
+      li.className = 'new-concept';
+      li.innerHTML = '<span><strong>✦</strong> ' + escapeHtml(concept.title || concept.id) + '</span>' +
+        '<span class="concept-source">neurogenesis</span>';
+      li.addEventListener('click', () => focusActivatedNote({
+        id: concept.id, title: concept.title || concept.id, role: 'seed', hop: 0,
+      }));
+      conceptsList.appendChild(li);
     });
   }
 
   // Add new concept nodes (neurogenesis) with birth animation
   // Build fresh graph with new nodes — never mutate live data.
-  const newConcepts = event.new_concepts || [];
   if (newConcepts.length > 0) {
     // Clone current graph
     const freshNodes = currentData.nodes.map(n => ({
@@ -277,6 +302,17 @@ function handleActivation(event) {
 
     // Submit all new nodes/links at once
     setGraphDataPreservingView({ nodes: freshNodes, links: freshLinks }, { reheat: true });
+
+    // After all birth-pulse rebuilds, recover a usable viewport if the
+    // preserved camera ended up zoomed out/off-canvas.
+    const fitDelay = newConcepts.length * 200 + 800;
+    setTimeout(() => {
+      if (!graph || typeof graph.zoomToFit !== 'function') return;
+      if (graph.zoom() < 0.35) {
+        graph.zoomToFit(600, 50);
+        if (typeof syncZoomUI === 'function') syncZoomUI(false);
+      }
+    }, fitDelay);
   }
 
   // Update stats
