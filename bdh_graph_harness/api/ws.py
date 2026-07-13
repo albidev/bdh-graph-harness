@@ -118,6 +118,10 @@ async def broadcast_activation(event: dict, ws_clients: set = None) -> None:
         dead = []
         # Copy the set to avoid RuntimeError: Set changed size during iteration
         for ws in list(ws_clients):
+            target_vault = event.get('vault_id')
+            client_vault = getattr(ws, '_bdh_vault_id', None)
+            if target_vault and client_vault and client_vault != target_vault:
+                continue
             try:
                 await ws.send_str(msg)
             except Exception:
@@ -150,6 +154,7 @@ async def websocket_handler(request, app_state: dict, ws_clients: set = None) ->
     # Resolve vault context (default if vault_id not specified)
     vault_id = request.query.get('vault_id') or None
     registry = app_state.get('registry')
+    event_sequence = 0
     if registry is not None:
         try:
             ctx = registry.get(vault_id)
@@ -159,12 +164,18 @@ async def websocket_handler(request, app_state: dict, ws_clients: set = None) ->
         e = ctx.edges
         s = ctx.state
         vault_id_label = ctx.config.id
+        event_sequence = ctx.event_sequence
     else:
         # Legacy fallback (app_state has flat structure)
         n = app_state.get('nodes', {})
         e = app_state.get('edges', {})
         s = app_state.get('state', {'synapses': {}})
         vault_id_label = app_state.get('vault_id', 'default')
+
+    try:
+        setattr(ws, '_bdh_vault_id', vault_id_label)
+    except Exception:
+        pass
 
     node_list = []
     for note_id, node in n.items():
@@ -201,6 +212,7 @@ async def websocket_handler(request, app_state: dict, ws_clients: set = None) ->
 
     init_msg = {
         'type': 'graph',
+        'sequence': event_sequence,
         'vault_id': vault_id_label,
         'nodes': node_list,
         'edges': edge_list,

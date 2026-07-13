@@ -210,13 +210,14 @@ def _sanitize_for_note(text, max_len=200):
     return text[:max_len]
 
 
-def create_note(vault_root, title, definition, source_notes, query):
+def create_note(vault_root, title, definition, source_notes, query, neurogenesis_dir=None):
     """Create a new atomic note in the vault (neurogenesis)."""
     from datetime import datetime
 
+    neurogenesis_dir = neurogenesis_dir or CONFIG['neurogenesis_dir']
     now = datetime.now().isoformat()
     slug = slugify(title)
-    note_path = os.path.join(vault_root, CONFIG['neurogenesis_dir'], f"{slug}.md")
+    note_path = os.path.join(vault_root, neurogenesis_dir, f"{slug}.md")
 
     # Don't overwrite existing notes
     if os.path.isfile(note_path):
@@ -259,10 +260,10 @@ activated_from: {safe_sources}
     with open(note_path, 'w', encoding='utf-8') as f:
         f.write(content)
 
-    note_id = f"{CONFIG['neurogenesis_dir']}/{slug}"
+    note_id = f"{neurogenesis_dir}/{slug}"
 
     # Update vault index and log
-    update_vault_index(vault_root, note_id, title, section=CONFIG['neurogenesis_dir'])
+    update_vault_index(vault_root, note_id, title, section=neurogenesis_dir)
     append_to_vault_log(vault_root, f"Neurogenesis: created '{title}' ({note_id}) from query '{query[:80]}'")
 
     return note_id

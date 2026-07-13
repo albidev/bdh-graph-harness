@@ -8,43 +8,39 @@ from datetime import datetime
 from bdh_graph_harness.config import STATE_FILE, LOCK_FILE
 
 
+def _empty_state():
+    return {
+        'synapses': {},
+        'created': datetime.now().isoformat(),
+        'updated': datetime.now().isoformat(),
+        'queries': 0,
+    }
+
+
+def _read_state_unlocked(state_path):
+    if not os.path.isfile(state_path):
+        return _empty_state()
+    try:
+        with open(state_path, 'r') as f:
+            return json.load(f)
+    except (json.JSONDecodeError, ValueError):
+        import logging
+        logging.getLogger('bdh').warning(
+            f"Corrupt state file at {state_path}, starting fresh"
+        )
+        return _empty_state()
+
+
 def load_state(vault_root):
-    """Load persisted BDH state (synaptic weights, co-activation history).
-    Uses fcntl.flock for concurrency safety.
-    """
+    """Load persisted BDH state while holding the vault file lock."""
     state_path = os.path.join(vault_root, STATE_FILE)
     lock_path = os.path.join(vault_root, LOCK_FILE)
-
     with open(lock_path, 'w') as lock_f:
         fcntl.flock(lock_f, fcntl.LOCK_EX)
         try:
-            if os.path.isfile(state_path):
-                with open(state_path, 'r') as f:
-                    try:
-                        state = json.load(f)
-                    except (json.JSONDecodeError, ValueError):
-                        # Corrupt state file — start fresh, don't crash
-                        import logging
-                        logging.getLogger('bdh').warning(
-                            f"Corrupt state file at {state_path}, starting fresh"
-                        )
-                        state = {
-                            'synapses': {},
-                            'created': datetime.now().isoformat(),
-                            'updated': datetime.now().isoformat(),
-                            'queries': 0,
-                        }
-            else:
-                state = {
-                    'synapses': {},  # "note_a|note_b" -> {weight, frequency, last_coactivated}
-                    'created': datetime.now().isoformat(),
-                    'updated': datetime.now().isoformat(),
-                    'queries': 0,
-                }
+            return _read_state_unlocked(state_path)
         finally:
             fcntl.flock(lock_f, fcntl.LOCK_UN)
-
-    return state
 
 
 def merge_states(disk_state, mem_state):
@@ -109,19 +105,17 @@ def save_state(vault_root, state):
     lock_path = os.path.join(vault_root, LOCK_FILE)
     tmp_path = state_path + '.tmp'
 
-    # Reload disk state and merge to avoid clobbering concurrent writes.
-    disk_state = load_state(vault_root)
-    merged = merge_states(disk_state, state)
-
     with open(lock_path, 'w') as lock_f:
         fcntl.flock(lock_f, fcntl.LOCK_EX)
         try:
-            # Write to temp file first, then atomically replace
+            # Keep read, merge, and atomic replace under one lock: otherwise
+            # two writers can both merge against the same stale disk snapshot.
+            disk_state = _read_state_unlocked(state_path)
+            merged = merge_states(disk_state, state)
             with open(tmp_path, 'w') as f:
                 json.dump(merged, f, indent=2)
             os.replace(tmp_path, state_path)
         except Exception:
-            # Clean up temp file on failure
             if os.path.isfile(tmp_path):
                 os.unlink(tmp_path)
             raise

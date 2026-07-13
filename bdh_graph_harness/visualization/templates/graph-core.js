@@ -317,6 +317,7 @@ let hoverEdgeId = null;           // edge-only hover cue; does not dim/highlight
 // Custom HTML tooltip
 // ============================================================================
 let tooltipEl = null;
+const activatedNotesById = new Map();
 
 function ensureTooltip() {
   if (tooltipEl) return;
@@ -404,6 +405,69 @@ function showEdgeTooltip(link, evt) {
   tooltipEl.innerHTML = html;
   tooltipEl.style.display = 'block';
   positionTooltip(evt);
+}
+
+function showActivatedTooltip(note, evt) {
+  ensureTooltip();
+  if (!note) { hideTooltip(); return; }
+  const role = note.role === 'seed' ? 'Seed' : 'Graph neighbor';
+  const roleColor = note.role === 'seed' ? '#58a6ff' : '#8b949e';
+  let html = '<div style="max-width:300px">';
+  html += '<div style="font-weight:600;color:' + roleColor + ';margin-bottom:5px">' + escapeHtml(role) + '</div>';
+  html += '<div style="font-weight:600;color:#f0883e;margin-bottom:6px">' + escapeHtml(note.title || note.id) + '</div>';
+  html += '<div style="display:grid;grid-template-columns:auto auto;gap:3px 14px;font-size:11px;color:#8b949e">';
+  html += '<span>Final score</span><b>' + Number(note.final_score ?? note.score ?? 0).toFixed(4) + '</b>';
+  html += '<span>Hybrid</span><b>' + Number(note.hybrid_score || 0).toFixed(4) + '</b>';
+  html += '<span>Vector</span><b>' + Number(note.vector_score || 0).toFixed(4) + '</b>';
+  html += '<span>BM25</span><b>' + Number(note.bm25_score || 0).toFixed(4) + '</b>';
+  html += '<span>Hebbian boost</span><b>' + Number(note.hebbian_boost || 0).toFixed(4) + '</b>';
+  html += '<span>Hop</span><b>' + (note.hop ?? 0) + '</b>';
+  html += '</div>';
+  if (note.parent_id) html += '<div style="color:#6e7681;font-size:11px;border-top:1px solid #30363d;padding-top:5px;margin-top:6px">From: ' + escapeHtml(note.parent_id) + '</div>';
+  html += '</div>';
+  tooltipEl.innerHTML = html;
+  tooltipEl.style.display = 'block';
+  positionTooltip(evt);
+}
+
+function focusActivatedNote(note) {
+  if (!graph || !note) return;
+  const data = graph.graphData();
+  const target = data.nodes.find(node => node.id === note.id);
+  if (!target) return;
+
+  const path = [note.id];
+  let current = note;
+  const seen = new Set(path);
+  while (current && current.parent_id && !seen.has(current.parent_id)) {
+    path.push(current.parent_id);
+    seen.add(current.parent_id);
+    current = activatedNotesById.get(current.parent_id);
+  }
+  setPathHighlight(path);
+  graph.centerAt(target.x, target.y, 600);
+  graph.zoom(note.role === 'seed' ? 2.5 : 3.0, 600);
+  showActivatedTooltip(note, lastMouseEvent || { clientX: 200, clientY: 200 });
+}
+
+function setPathHighlight(pathIds = []) {
+  if (!graph || !pathIds.length) return;
+  const pathSet = new Set(pathIds);
+  const pathPairs = new Set();
+  for (let i = 0; i < pathIds.length - 1; i++) {
+    const a = pathIds[i], b = pathIds[i + 1];
+    pathPairs.add(a < b ? a + '→' + b : b + '→' + a);
+  }
+  const linkIds = new Set();
+  graph.graphData().links.forEach(link => {
+    const source = linkEndpointId(link.source);
+    const target = linkEndpointId(link.target);
+    const pair = source < target ? source + '→' + target : target + '→' + source;
+    if (pathPairs.has(pair)) linkIds.add(link._id);
+  });
+  hoverHighlight = { nodeIds: pathSet, linkIds, hoverNodeId: pathIds[0], hoverLinkId: null };
+  hoverHighlightKey = 'path::' + pathIds.join('→');
+  requestGraphRedraw();
 }
 
 function isMobile() {
