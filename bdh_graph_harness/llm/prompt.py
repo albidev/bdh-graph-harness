@@ -9,7 +9,7 @@ def format_context(active_notes, nodes):
         node = nodes.get(note_id)
         if not node:
             continue
-        parts.append(f"### {node['title']} (activation: {score:.3f})\n{node['text'][:300]}\n")
+        parts.append(f"### {node['title']} (activation: {score:.3f})\n{node['text'][:2000]}\n")
     return "\n---\n".join(parts)
 
 
