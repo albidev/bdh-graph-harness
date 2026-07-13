@@ -535,7 +535,7 @@ function searchNode(query) {
 // ============================================================================
 // Edge type filtering — toggle visibility by edge type (wikilink/hebbian/phantom)
 // ============================================================================
-const edgeTypeVisible = { wikilink: true, hebbian: true, phantom: true };
+const edgeTypeVisible = { wikilink: true, counterpart: true, hebbian: true, phantom: true };
 
 function toggleEdgeType(type, btn) {
   edgeTypeVisible[type] = !edgeTypeVisible[type];

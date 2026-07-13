@@ -78,7 +78,7 @@ def show_hebbian(state):
 def show_source_scan(config: dict, vault_id: str | None = None, vault_override: str | None = None) -> dict:
     """Run a completely read-only federated Markdown scan and print a report."""
     from bdh_graph_harness.graph.federated import build_federated_graph
-    from bdh_graph_harness.graph.sources import sources_from_config
+    from bdh_graph_harness.graph.sources import counterpart_specs_from_config, sources_from_config
     from bdh_graph_harness.vaults import normalize_vault_configs
 
     effective_config = dict(config)
@@ -98,12 +98,24 @@ def show_source_scan(config: dict, vault_id: str | None = None, vault_override: 
     nodes, edges, unresolved = build_federated_graph(
         sources,
         graph_ignore=effective_config.get('graph_ignore', []),
+        counterparts=counterpart_specs_from_config(effective_config),
     )
     source_counts = Counter(
         (node.get('source_type', 'vault'), node.get('source_id', 'vault'))
         for node in nodes.values()
     )
-    resolved_links = sum(len(links) for links in edges.values())
+    resolved_links = sum(
+        1
+        for links in edges.values()
+        for link in links
+        if link.get('type', 'wikilink') == 'wikilink'
+    )
+    counterpart_edges = sum(
+        1
+        for links in edges.values()
+        for link in links
+        if link.get('type') == 'counterpart'
+    )
 
     print("🔎 BDH Markdown source scan (read-only)")
     print(f"   Vault: {effective_config['vault_path']}")
@@ -112,6 +124,7 @@ def show_source_scan(config: dict, vault_id: str | None = None, vault_override: 
         print(f"   {source.source_type}:{source.source_id}: {source_counts.get(key, 0)} Markdown")
     print(f"   ✓ Nodes: {len(nodes)}")
     print(f"   ✓ Resolved wikilinks: {resolved_links}")
+    print(f"   ✓ Counterpart edges: {counterpart_edges}")
     print(f"   ! Unresolved wikilinks: {len(unresolved)}")
     if unresolved:
         for link in unresolved[:10]:
@@ -124,6 +137,7 @@ def show_source_scan(config: dict, vault_id: str | None = None, vault_override: 
         'edges': edges,
         'unresolved': unresolved,
         'source_counts': dict(source_counts),
+        'counterpart_edges': counterpart_edges,
     }
 
 

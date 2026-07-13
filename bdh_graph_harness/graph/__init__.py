@@ -26,10 +26,12 @@ from bdh_graph_harness.graph.cache import (
     save_graph_cache,
 )
 from bdh_graph_harness.graph.sources import (
+    CounterpartSpec,
     Document,
     DocumentSource,
     ExternalMarkdownSource,
     VaultMarkdownSource,
+    counterpart_specs_from_config,
     sources_from_config,
 )
 from bdh_graph_harness.graph.federated import (
@@ -56,9 +58,11 @@ __all__ = [
     'save_graph_cache',
     'Document',
     'DocumentSource',
+    'CounterpartSpec',
     'ExternalMarkdownSource',
     'VaultMarkdownSource',
     'sources_from_config',
+    'counterpart_specs_from_config',
     'build_configured_graph',
     'build_federated_graph',
     'migrate_legacy_state_ids',

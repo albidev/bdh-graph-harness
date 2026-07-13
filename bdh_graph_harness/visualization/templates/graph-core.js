@@ -16,6 +16,7 @@ const COLORS = {
   edgeHebbianPulse: '#d2a8ff',
   edgeNeurogenesis: '#3fb950',  // green dashed edges for new connections
   edgePhantom: '#1f6feb',       // blue dashed edges for phantom links
+  edgeCounterpart: '#56d4dd',   // cyan dashed edges between project anchors
   sourceVault: '#58a6ff',
   sourceExternal: '#f0883e',
   bg: '#0d1117',
@@ -60,6 +61,8 @@ function massAwareLinkDistance(link, baseDistance) {
     typeScale = 1.35;
   } else if (link.type === 'wikilink') {
     typeScale = 1.05;
+  } else if (link.type === 'counterpart') {
+    typeScale = 1.15;
   }
   const massSpread = 1 + Math.max(0, avgMass - 1) * 0.12;
   return baseDistance * typeScale * massSpread;
@@ -79,6 +82,7 @@ const EDGE_OPACITY = {
   wikilink: 0.45,
   hebbian: 0.22,
   phantom: 0.35,
+  counterpart: 0.75,
   neurogenesis: 0.7,
 };
 const HEBBIAN_MIN_RENDER_WEIGHT = 0.15;
@@ -401,13 +405,14 @@ function showEdgeTooltip(link, evt) {
   if (!info) { hideTooltip(); return; }
 
   const isHebbian = info.type === 'hebbian';
-  const icon = isHebbian ? '⚡' : (info.type === 'phantom' ? '👻' : '🔗');
-  const typeLabel = isHebbian ? 'Hebbian Synapse' : (info.type === 'phantom' ? 'Phantom Link' : 'Wikilink');
+  const isCounterpart = info.type === 'counterpart';
+  const icon = isHebbian ? '⚡' : (info.type === 'phantom' ? '👻' : (isCounterpart ? '⇄' : '🔗'));
+  const typeLabel = isHebbian ? 'Hebbian Synapse' : (info.type === 'phantom' ? 'Phantom Link' : (isCounterpart ? 'Project Counterpart' : 'Wikilink'));
 
   let html = '<div style="max-width:280px">';
   html += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">';
   html += '<span style="font-size:14px">' + icon + '</span>';
-  html += '<span style="font-weight:600;color:' + (isHebbian ? weightColor(info.weight || 0) : '#8b949e') + '">' + typeLabel + '</span>';
+  html += '<span style="font-weight:600;color:' + (isHebbian ? weightColor(info.weight || 0) : (isCounterpart ? COLORS.edgeCounterpart : '#8b949e')) + '">' + typeLabel + '</span>';
   html += '</div>';
   html += '<div style="margin-bottom:4px">';
   html += '<span style="color:#58a6ff">' + escapeHtml(info.source_title) + '</span>';
@@ -422,6 +427,10 @@ function showEdgeTooltip(link, evt) {
     html += '</div>';
   } else if (info.type === 'phantom') {
     html += '<div style="font-size:11px;color:#8b949e">Similarity: <b>' + (info.similarity || 0).toFixed(2) + '</b></div>';
+  } else if (isCounterpart) {
+    html += '<div style="font-size:11px;color:' + COLORS.edgeCounterpart + '">Same project';
+    if (info.group_id) html += ': <b>' + escapeHtml(info.group_id) + '</b>';
+    html += '</div>';
   }
 
   html += '</div>';

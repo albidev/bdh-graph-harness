@@ -153,9 +153,19 @@ async def test_api_graph_exposes_source_metadata_and_unresolved_links(mock_app_s
         'source_type': 'external',
         'relative_path': 'demo/README.md',
         'absolute_path': '/tmp/projects/demo/README.md',
+        'project_group': 'demo',
         'writable': False,
     })
     edges['alpha'][0].update({'type': 'wikilink', 'weight': 1.0, 'explicit': True})
+    edges['alpha'].append({
+        'target': 'beta',
+        'type': 'counterpart',
+        'relation': 'same_project',
+        'group_id': 'demo',
+        'weight': 1.0,
+        'explicit': False,
+        'generated': True,
+    })
     state['unresolved_links'] = [{
         'source': 'alpha',
         'target': 'missing',
@@ -175,8 +185,13 @@ async def test_api_graph_exposes_source_metadata_and_unresolved_links(mock_app_s
         assert external['source_type'] == 'external'
         assert external['source_id'] == 'projects'
         assert external['relative_path'] == 'demo/README.md'
+        assert external['project_group'] == 'demo'
         assert external['writable'] is False
         assert data['edges'][0]['type'] == 'wikilink'
+        counterpart = next(edge for edge in data['edges'] if edge['type'] == 'counterpart')
+        assert counterpart['relation'] == 'same_project'
+        assert counterpart['group_id'] == 'demo'
+        assert counterpart['generated'] is True
         assert data['unresolved'][0]['target'] == 'missing'
     finally:
         await client.close()

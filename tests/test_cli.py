@@ -70,5 +70,6 @@ def test_scan_sources_is_read_only_and_skips_runtime_pipeline(monkeypatch, tmp_p
     assert "vault:vault: 1 Markdown" in output
     assert "✓ Nodes: 2" in output
     assert "✓ Resolved wikilinks: 2" in output
+    assert "✓ Counterpart edges: 0" in output
     assert not (vault / ".bdh-graph-cache.json").exists()
     assert not (projects / ".bdh-graph-cache.json").exists()

@@ -65,6 +65,7 @@ The side panel labels seeds and graph neighbors separately. This avoids presenti
 | **Source** selector | Show all, vault-only, or external-only nodes |
 | **Orphans** toggle | Show/hide nodes with no connections |
 | **Direct-only** toggle | Show only wikilink edges |
+| **Counterpart** toggle | Show/hide reciprocal vault ↔ external project-anchor edges |
 | **Phantom** toggle | Show/hide semantic similarity edges |
 | **Hebbian threshold** slider | Minimum weight for Hebbian edges to show (0–1, default 0.3) |
 | **Spacing** slider | Network spacing — distance between nodes |

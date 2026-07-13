@@ -166,6 +166,7 @@ async def api_graph(request, app_state: dict) -> web.Response:
             'relative_path': node.get('relative_path', ''),
             'source_id': node.get('source_id', 'vault'),
             'source_type': node.get('source_type', 'vault'),
+            'project_group': node.get('project_group'),
             'writable': node.get('writable', True),
             'text': node.get('text', '')[:200],
             'dormant': note_id in dormant,
@@ -180,10 +181,13 @@ async def api_graph(request, app_state: dict) -> web.Response:
                 edge_list.append({
                     'source': src,
                     'target': target_id,
-                    'display': link['display'],
+                    'display': link.get('display', link.get('relation', '')),
                     'type': link.get('type', 'wikilink'),
                     'weight': link.get('weight', 1.0),
                     'explicit': link.get('explicit', True),
+                    'relation': link.get('relation'),
+                    'group_id': link.get('group_id'),
+                    'generated': link.get('generated', False),
                 })
 
     hebbian_list = []
@@ -660,8 +664,20 @@ async def api_node_update(request, app_state: dict, ws_clients: set) -> web.Resp
             source_notes = []
             node_edges = []
             for link in new_edges.get(nid, []):
-                target_id = link['target'] if isinstance(link, dict) else link
-                node_edges.append({'source': nid, 'target': target_id})
+                if isinstance(link, dict):
+                    target_id = link['target']
+                    edge_payload = {
+                        'source': nid,
+                        'target': target_id,
+                        'type': link.get('type', 'wikilink'),
+                        'weight': link.get('weight', 1.0),
+                        'relation': link.get('relation'),
+                        'group_id': link.get('group_id'),
+                    }
+                else:
+                    target_id = link
+                    edge_payload = {'source': nid, 'target': target_id, 'type': 'wikilink'}
+                node_edges.append(edge_payload)
                 if target_id in old_ids:
                     source_notes.append(old_nodes.get(target_id, {}).get('title', target_id))
             new_concepts.append({
@@ -679,6 +695,7 @@ async def api_node_update(request, app_state: dict, ws_clients: set) -> web.Resp
                 'relative_path': node.get('relative_path', ''),
                 'source_id': node.get('source_id', 'vault'),
                 'source_type': node.get('source_type', 'vault'),
+                'project_group': node.get('project_group'),
                 'writable': node.get('writable', True),
                 'edges': node_edges,
             })
@@ -764,8 +781,20 @@ async def _api_refresh_graph_unlocked(request, app_state: dict, ws_clients: set)
         node_links = edges.get(nid, [])
         node_edges = []
         for t in node_links:
-            target_id = t['target'] if isinstance(t, dict) else t
-            node_edges.append({'source': nid, 'target': target_id})
+            if isinstance(t, dict):
+                target_id = t['target']
+                edge_payload = {
+                    'source': nid,
+                    'target': target_id,
+                    'type': t.get('type', 'wikilink'),
+                    'weight': t.get('weight', 1.0),
+                    'relation': t.get('relation'),
+                    'group_id': t.get('group_id'),
+                }
+            else:
+                target_id = t
+                edge_payload = {'source': nid, 'target': target_id, 'type': 'wikilink'}
+            node_edges.append(edge_payload)
             if target_id in old_node_ids:
                 resolved = target_id
             elif ('wiki/' + target_id) in old_node_ids:
@@ -784,6 +813,7 @@ async def _api_refresh_graph_unlocked(request, app_state: dict, ws_clients: set)
             'relative_path': node.get('relative_path', ''),
             'source_id': node.get('source_id', 'vault'),
             'source_type': node.get('source_type', 'vault'),
+            'project_group': node.get('project_group'),
             'writable': node.get('writable', True),
             'edges': node_edges,
         })
