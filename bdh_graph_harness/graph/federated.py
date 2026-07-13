@@ -87,11 +87,20 @@ def _resolve_target(
         return by_source_path.get(explicit)
 
     target = target.lstrip("/")
-    parent = str(PurePosixPath(document.relative_path).parent)
-    candidates = [
-        _with_md(target),
-        _with_md(str(PurePosixPath(parent) / target)) if parent != "." else None,
-    ]
+    parent_path = PurePosixPath(document.relative_path).parent
+    candidates = [_with_md(target)]
+    ancestor = parent_path
+    while str(ancestor) != ".":
+        candidates.append(_with_md(str(ancestor / target)))
+        ancestor = ancestor.parent
+    # Existing vault notes commonly omit the ``wiki/`` namespace. Preserve
+    # those explicit structural aliases for the primary vault only; external
+    # sources stay strict and never fall back to global/basename matching.
+    if document.source_type == "vault":
+        candidates.extend(
+            _with_md(f"{prefix}{target}")
+            for prefix in ("wiki/", "concepts/", "entities/", "comparisons/", "queries/")
+        )
     for candidate in candidates:
         if not candidate:
             continue
