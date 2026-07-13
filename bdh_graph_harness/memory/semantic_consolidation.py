@@ -14,11 +14,9 @@ from typing import Any
 from bdh_graph_harness.config import CONFIG, logger
 
 DEFAULT_SOURCE_GLOBS = (
-    "memory/daily/*.md",
+    "wiki/**/*.md",
+    "projects/**/*.md",
     "memory/learned/*.md",
-    "wiki/queries/*.md",
-    "wiki/entities/*.md",
-    "wiki/lessons/*.md",
 )
 DEFAULT_EXCLUDE_GLOBS = (
     "wiki/index.md",

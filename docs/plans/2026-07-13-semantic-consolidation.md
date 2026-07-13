@@ -90,12 +90,11 @@ semantic_consolidation_max_batch_chars: 16000
 semantic_consolidation_max_concepts: 5
 semantic_consolidation_min_interval_minutes: 60
 semantic_consolidation_source_globs:
-  - memory/daily/*.md
+  - wiki/**/*.md
+  - projects/**/*.md
   - memory/learned/*.md
-  - wiki/queries/*.md
-  - wiki/entities/*.md
-  - wiki/lessons/*.md
 semantic_consolidation_exclude_globs:
+  - memory/daily/*
   - wiki/index.md
   - wiki/log.md
   - wiki/raw/*
@@ -124,7 +123,7 @@ Esempio:
   "version": 1,
   "last_run_at": "2026-07-13T02:30:00",
   "processed": {
-    "memory/daily/2026-07-13.md": {
+    "wiki/entities/glm-5-2-full-mlx-colibri.md": {
       "sha256": "...",
       "processed_at": "2026-07-13T02:31:12",
       "new_concepts": [],
@@ -515,7 +514,7 @@ python3 -m py_compile bdh_graph_harness/memory/semantic_consolidation.py
 
 ## Decisioni da confermare prima dell’implementazione
 
-1. Il semantic sleep deve processare solo `memory/daily`/`memory/learned` oppure anche `wiki/entities`, `wiki/queries` e `wiki/lessons`?
+1. Il semantic sleep deve processare fonti di conoscenza modificate nelle ultime 48 ore (`wiki`, `projects`, `memory/learned`) ed escludere sempre `memory/daily`?
 2. Quanti source massimi per notte: default proposto `3`.
 3. Quanti concetti massimi per notte: default proposto `5`.
 4. La prima fase deve essere `dry_run` per almeno una notte?

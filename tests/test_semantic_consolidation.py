@@ -32,7 +32,7 @@ def _config(**overrides):
     config = {
         "semantic_consolidation_enabled": True,
         "semantic_consolidation_checkpoint": ".checkpoint.json",
-        "semantic_consolidation_source_globs": ["memory/daily/*.md"],
+        "semantic_consolidation_source_globs": ["wiki/entities/*.md"],
         "semantic_consolidation_max_age_hours": 48,
         "semantic_consolidation_exclude_globs": ["wiki/concepts/*", ".bdh-*"],
         "semantic_consolidation_max_sources": 3,
@@ -44,7 +44,7 @@ def _config(**overrides):
 
 
 def test_select_candidate_notes_uses_content_hash_and_excludes_noise(tmp_path):
-    daily = tmp_path / "memory" / "daily"
+    daily = tmp_path / "wiki" / "entities"
     daily.mkdir(parents=True)
     source = daily / "2026-07-13.md"
     source.write_text("durable decision", encoding="utf-8")
@@ -55,7 +55,7 @@ def test_select_candidate_notes_uses_content_hash_and_excludes_noise(tmp_path):
     config = _config()
     checkpoint = load_checkpoint(tmp_path, config)
     candidates = select_candidate_notes(tmp_path, config, checkpoint)
-    assert [item["path"] for item in candidates] == ["memory/daily/2026-07-13.md"]
+    assert [item["path"] for item in candidates] == ["wiki/entities/2026-07-13.md"]
     assert len(candidates[0]["sha256"]) == 64
 
     checkpoint["processed"] = {
@@ -86,7 +86,7 @@ def test_checkpoint_save_is_atomic_and_reloadable(tmp_path):
 
 @pytest.mark.asyncio
 async def test_semantic_endpoint_is_idempotent(monkeypatch, tmp_path):
-    source_dir = tmp_path / "memory" / "daily"
+    source_dir = tmp_path / "wiki" / "entities"
     source_dir.mkdir(parents=True)
     (source_dir / "daily.md").write_text("A durable architectural decision", encoding="utf-8")
     config = _config()
@@ -126,7 +126,7 @@ async def test_semantic_endpoint_is_idempotent(monkeypatch, tmp_path):
 
 @pytest.mark.asyncio
 async def test_semantic_endpoint_dry_run_does_not_write_checkpoint(monkeypatch, tmp_path):
-    source_dir = tmp_path / "memory" / "daily"
+    source_dir = tmp_path / "wiki" / "entities"
     source_dir.mkdir(parents=True)
     (source_dir / "daily.md").write_text("A source", encoding="utf-8")
     config = _config()

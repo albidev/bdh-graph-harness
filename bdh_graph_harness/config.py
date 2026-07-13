@@ -99,13 +99,12 @@ CONFIG = {
     'semantic_consolidation_max_batch_chars': 16000,
     'semantic_consolidation_max_concepts': 5,
     'semantic_consolidation_source_globs': [
-        'memory/daily/*.md',
+        'wiki/**/*.md',
+        'projects/**/*.md',
         'memory/learned/*.md',
-        'wiki/queries/*.md',
-        'wiki/entities/*.md',
-        'wiki/lessons/*.md',
     ],
     'semantic_consolidation_exclude_globs': [
+        'memory/daily/*',
         'wiki/index.md',
         'wiki/log.md',
         'wiki/raw/*',
