@@ -90,6 +90,30 @@ CONFIG = {
     'consolidation_prune_weight_floor': 0.02,  # delete synapses below this weight
     'consolidation_dormant_persist_cycles': 3, # remove nodes dormant for N+ cycles
     'consolidation_prune_dormant_nodes': True,  # actually delete stale dormant nodes
+    # Semantic sleep — disabled until explicitly enabled in the vault config.
+    'semantic_consolidation_enabled': False,
+    'semantic_consolidation_checkpoint': '.bdh-semantic-consolidation.json',
+    'semantic_consolidation_max_sources': 3,
+    'semantic_consolidation_max_age_hours': 48,
+    'semantic_consolidation_max_source_chars': 8000,
+    'semantic_consolidation_max_batch_chars': 16000,
+    'semantic_consolidation_max_concepts': 5,
+    'semantic_consolidation_source_globs': [
+        'memory/daily/*.md',
+        'memory/learned/*.md',
+        'wiki/queries/*.md',
+        'wiki/entities/*.md',
+        'wiki/lessons/*.md',
+    ],
+    'semantic_consolidation_exclude_globs': [
+        'wiki/index.md',
+        'wiki/log.md',
+        'wiki/raw/*',
+        'wiki/concepts/*',
+        '.bdh-*',
+    ],
+    'semantic_consolidation_source': 'nightly_semantic_consolidation',
+    'semantic_consolidation_frequency_increment': 0.3,
     # Integrate-and-Fire attention model
     'experimental_integrate_fire': False,  # IaF attention — enable via bdh-config.yaml
     'iaf_tau_base': 0.15,       # base firing threshold
