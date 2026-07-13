@@ -132,6 +132,9 @@ python -m bdh_graph_harness --query "come funziona l'apprendimento Hebbian?"
 # Force graph rebuild
 python -m bdh_graph_harness --refresh
 
+# Read-only source scan (no ChromaDB, embeddings, LLM, or writes)
+python -m bdh_graph_harness --config bdh-config.local.yaml --scan-sources
+
 # Open visualization
 open http://localhost:8643
 
