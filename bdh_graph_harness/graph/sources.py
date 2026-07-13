@@ -50,6 +50,16 @@ class Document:
         return f"external:{self.source_id}/{relative}"
 
 
+@dataclass(frozen=True)
+class CounterpartSpec:
+    """Explicit pair of anchor notes representing the same project."""
+
+    source_id: str
+    group_id: str
+    vault_path: str
+    external_path: str
+
+
 class DocumentSource(Protocol):
     """Minimal source contract consumed by the federated graph builder."""
 
@@ -240,11 +250,48 @@ def sources_from_config(config: dict) -> list[DocumentSource]:
     return sources
 
 
+def counterpart_specs_from_config(config: dict) -> list[CounterpartSpec]:
+    """Read explicit vault/external anchor pairs from external source config."""
+    specs: list[CounterpartSpec] = []
+    for entry in config.get("external_sources", []) or []:
+        if not isinstance(entry, dict):
+            continue
+        source_id = validate_source_id(entry.get("id", ""))
+        raw_specs = entry.get("counterparts")
+        if raw_specs is None and entry.get("counterpart") is not None:
+            raw_specs = [entry["counterpart"]]
+        for raw in raw_specs or []:
+            if not isinstance(raw, dict):
+                raise ValueError(f"Counterpart entries must be mappings: {raw!r}")
+            group_id = raw.get("group_id") or entry.get("project_group")
+            vault_path = raw.get("vault_path")
+            external_path = raw.get("external_path")
+            if not group_id or not vault_path or not external_path:
+                raise ValueError(
+                    "Counterpart requires 'group_id', 'vault_path', and 'external_path'"
+                )
+            specs.append(CounterpartSpec(
+                source_id=source_id,
+                group_id=validate_source_id(group_id),
+                vault_path=_with_posix_path(vault_path),
+                external_path=_with_posix_path(external_path),
+            ))
+    return specs
+
+
+def _with_posix_path(path: str) -> str:
+    """Normalize a configured relative path without requiring a graph module."""
+    path = str(path).replace("\\", "/").lstrip("/")
+    return path if path.lower().endswith(".md") else f"{path}.md"
+
+
 __all__ = [
     "Document",
     "DocumentSource",
+    "CounterpartSpec",
     "ExternalMarkdownSource",
     "VaultMarkdownSource",
     "sources_from_config",
+    "counterpart_specs_from_config",
     "validate_source_id",
 ]

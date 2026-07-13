@@ -16,7 +16,13 @@ from typing import Iterable
 
 from bdh_graph_harness.graph.builder import build_graph
 from bdh_graph_harness.graph.parser import extract_text, extract_wikilinks, parse_frontmatter
-from bdh_graph_harness.graph.sources import Document, DocumentSource, sources_from_config
+from bdh_graph_harness.graph.sources import (
+    CounterpartSpec,
+    Document,
+    DocumentSource,
+    counterpart_specs_from_config,
+    sources_from_config,
+)
 
 
 def _without_md(path: str) -> str:
@@ -116,6 +122,7 @@ def build_federated_graph(
     sources: Iterable[DocumentSource],
     *,
     graph_ignore: Iterable[str] | None = None,
+    counterparts: Iterable[CounterpartSpec] | None = None,
 ) -> tuple[dict, dict, list[dict]]:
     """Build a federated graph from multiple Markdown sources.
 
@@ -185,6 +192,40 @@ def build_federated_graph(
                 "explicit": bool(_normalise_explicit_target(target)),
             })
 
+    # Counterparts are explicit reciprocal structural links between the two
+    # anchor documents that represent the same project. They are not wikilinks
+    # and not Hebbian edges; they exist to bridge the two provenance domains.
+    for spec in counterparts or ():
+        vault_id = by_source_path.get(("vault", "vault", _with_md(spec.vault_path)))
+        external_id = by_source_path.get(("external", spec.source_id, _with_md(spec.external_path)))
+        if not vault_id or not external_id:
+            missing = []
+            if not vault_id:
+                missing.append(f"vault:{_with_md(spec.vault_path)}")
+            if not external_id:
+                missing.append(f"external:{spec.source_id}/{_with_md(spec.external_path)}")
+            raise ValueError(
+                f"Counterpart anchor(s) not found for {spec.group_id!r}: {', '.join(missing)}"
+            )
+        nodes[vault_id]["project_group"] = spec.group_id
+        nodes[external_id]["project_group"] = spec.group_id
+        for source_id, target_id in ((vault_id, external_id), (external_id, vault_id)):
+            if any(
+                edge.get("target") == target_id and edge.get("type") == "counterpart"
+                for edge in edges[source_id]
+            ):
+                continue
+            edges[source_id].append({
+                "target": target_id,
+                "type": "counterpart",
+                "relation": "same_project",
+                "group_id": spec.group_id,
+                "weight": 1.0,
+                "explicit": False,
+                "generated": True,
+                "traversable": True,
+            })
+
     return nodes, dict(edges), unresolved
 
 
@@ -234,6 +275,7 @@ def build_configured_graph(config: dict, *, use_cache: bool = True) -> tuple[dic
         return build_federated_graph(
             sources_from_config(config),
             graph_ignore=config.get("graph_ignore", []),
+            counterparts=counterpart_specs_from_config(config),
         )
     nodes, edges = build_graph(
         config["vault_path"],

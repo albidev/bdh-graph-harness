@@ -194,7 +194,7 @@ See `bdh-config.yaml` for all parameters. Key ones:
 | `quality_reactivation_score` | 0.50 | Activation score to re-awaken a dormant node |
 | `quality_prune_interval` | 50 | Re-evaluate node quality every N queries |
 | `graph_ignore` | `[]` | fnmatch patterns to exclude nodes from the graph (e.g. `[".bdh-*"]`) |
-| `external_sources` | `[]` | Read-only Markdown sources with per-source `include`/`exclude` glob lists |
+| `external_sources` | `[]` | Read-only Markdown sources with per-source `include`/`exclude` glob lists; optional explicit `counterparts` link vault/external anchor notes |
 | `consolidation_downscale_factor` | 0.90 | Global weight multiplier per sleep cycle |
 | `consolidation_prune_weight_floor` | 0.02 | Delete synapses below this weight after downscaling |
 | `consolidation_dormant_persist_cycles` | 3 | Remove nodes dormant for N+ consolidation cycles |

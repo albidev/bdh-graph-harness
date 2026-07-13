@@ -52,6 +52,7 @@ class WebSocketManager:
                 'relative_path': node.get('relative_path', ''),
                 'source_id': node.get('source_id', 'vault'),
                 'source_type': node.get('source_type', 'vault'),
+                'project_group': node.get('project_group'),
                 'writable': node.get('writable', True),
                 'text': node.get('text', '')[:200],
             })
@@ -67,10 +68,13 @@ class WebSocketManager:
                     edge_list.append({
                         'source': src,
                         'target': target_id,
-                        'display': link.get('display', ''),
+                        'display': link.get('display', link.get('relation', '')),
                         'type': link.get('type', 'wikilink'),
                         'weight': link.get('weight', 1.0),
                         'explicit': link.get('explicit', True),
+                        'relation': link.get('relation'),
+                        'group_id': link.get('group_id'),
+                        'generated': link.get('generated', False),
                     })
 
         hebbian_list = []

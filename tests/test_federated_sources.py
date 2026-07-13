@@ -6,8 +6,10 @@ from pathlib import Path
 
 from bdh_graph_harness.graph.federated import build_federated_graph, migrate_legacy_state_ids
 from bdh_graph_harness.graph.sources import (
+    CounterpartSpec,
     ExternalMarkdownSource,
     VaultMarkdownSource,
+    counterpart_specs_from_config,
     sources_from_config,
 )
 
@@ -72,6 +74,81 @@ def test_external_source_include_exclude_and_cross_source_links(tmp_path):
         "display": "missing-note",
         "source_path": "demo/docs/design.md",
     }]
+
+
+def test_counterpart_edges_are_reciprocal_without_parent_node(tmp_path):
+    vault = tmp_path / "vault"
+    projects = tmp_path / "projects"
+    _write(vault / "projects/demo/overview.md", "# Vault overview")
+    _write(projects / "demo/README.md", "# Repository README")
+
+    nodes, edges, unresolved = build_federated_graph(
+        [
+            VaultMarkdownSource(str(vault)),
+            ExternalMarkdownSource(str(projects), source_id="projects"),
+        ],
+        counterparts=[CounterpartSpec(
+            source_id="projects",
+            group_id="demo",
+            vault_path="projects/demo/overview.md",
+            external_path="demo/README.md",
+        )],
+    )
+
+    assert unresolved == []
+    assert set(nodes) == {
+        "vault:projects/demo/overview.md",
+        "external:projects/demo/README.md",
+    }
+    assert nodes["vault:projects/demo/overview.md"]["project_group"] == "demo"
+    assert nodes["external:projects/demo/README.md"]["project_group"] == "demo"
+    assert edges["vault:projects/demo/overview.md"] == [{
+        "target": "external:projects/demo/README.md",
+        "type": "counterpart",
+        "relation": "same_project",
+        "group_id": "demo",
+        "weight": 1.0,
+        "explicit": False,
+        "generated": True,
+        "traversable": True,
+    }]
+    assert edges["external:projects/demo/README.md"][0]["target"] == "vault:projects/demo/overview.md"
+    assert all(not node_id.startswith("project:") for node_id in nodes)
+
+
+def test_counterpart_specs_from_config_supports_singular_and_plural_forms(tmp_path):
+    vault = tmp_path / "vault"
+    projects = tmp_path / "projects"
+    vault.mkdir()
+    projects.mkdir()
+    config = {
+        "vault_path": str(vault),
+        "external_sources": [{
+            "id": "projects",
+            "path": str(projects),
+            "counterparts": [{
+                "group_id": "demo",
+                "vault_path": "projects/demo/overview.md",
+                "external_path": "demo/README.md",
+            }],
+        }, {
+            "id": "docs",
+            "path": str(projects),
+            "counterpart": {
+                "group_id": "docs",
+                "vault_path": "projects/docs/overview.md",
+                "external_path": "docs/README.md",
+            },
+        }],
+    }
+
+    specs = counterpart_specs_from_config(config)
+
+    assert [(spec.source_id, spec.group_id) for spec in specs] == [
+        ("projects", "demo"),
+        ("docs", "docs"),
+    ]
+    assert specs[0].external_path == "demo/README.md"
 
 
 def test_sources_from_config_supports_include_exclude_and_read_only_defaults(tmp_path):

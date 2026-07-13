@@ -41,12 +41,19 @@ function initNetwork(graphData) {
 
   // Build edge set and compute degree/neighbor maps
   const edgeSet = new Set();
+  const counterpartSet = new Set();
   const connectedNodes = new Set();
   degreeMap = {};
   neighborMap = {};
 
   graphData.edges.forEach(e => {
     if (!sourceVisibleIds.has(e.source) || !sourceVisibleIds.has(e.target)) return;
+    const type = e.type || 'wikilink';
+    if (type === 'counterpart') {
+      const counterpartKey = [e.source, e.target].sort().join('↔');
+      if (counterpartSet.has(counterpartKey)) return;
+      counterpartSet.add(counterpartKey);
+    }
     const eid = e.source + '→' + e.target;
     if (edgeSet.has(eid)) return;
     edgeSet.add(eid);
@@ -215,21 +222,37 @@ function initNetwork(graphData) {
   const nodeIdSet = new Set(activeNodeIds);
 
   // === Z-ORDER: links drawn in array order, last = on top ===
-  // 1. Wikilinks (bottom — thin, least important)
+  // 1. Structural/direct links (bottom — wikilinks thin, counterparts highlighted)
   graphData.edges.forEach(e => {
     if (!nodeIdSet.has(e.source) || !nodeIdSet.has(e.target)) return;
+    const type = e.type || 'wikilink';
+    if (type === 'counterpart') {
+      const counterpartKey = [e.source, e.target].sort().join('↔');
+      if (counterpartSet.has(counterpartKey + ':rendered')) return;
+      counterpartSet.add(counterpartKey + ':rendered');
+    }
     const eid = e.source + '→' + e.target;
     const srcTitle = (graphData.nodes.find(n => n.id === e.source) || {}).title || e.source;
     const tgtTitle = (graphData.nodes.find(n => n.id === e.target) || {}).title || e.target;
-    edgeInfoMap[eid] = { source_title: srcTitle, target_title: tgtTitle, type: 'wikilink' };
+    edgeInfoMap[eid] = {
+      source_title: srcTitle,
+      target_title: tgtTitle,
+      type: type,
+      relation: e.relation,
+      group_id: e.group_id,
+    };
+    const counterpart = type === 'counterpart';
     fgLinks.push({
       source: e.source,
       target: e.target,
-      color: COLORS.edgeWikilink,
-      width: 0.5,
-      type: 'wikilink',
+      color: counterpart ? COLORS.edgeCounterpart : COLORS.edgeWikilink,
+      width: counterpart ? 2.2 : 0.5,
+      type: type,
+      relation: e.relation,
+      group_id: e.group_id,
       particles: 0,
       _id: eid,
+      _dashes: counterpart,
       _visible: true,
     });
   });
