@@ -181,6 +181,26 @@ def test_hebbian_update_single_note(fresh_state):
     assert state['queries'] == 1
 
 
+def test_hebbian_update_semantic_sleep_is_dampened(fresh_state):
+    """Semantic sleep reinforces co-activation without full user-query weight."""
+    previous = harness.CONFIG.get('semantic_consolidation_frequency_increment', 0.3)
+    harness.CONFIG['semantic_consolidation_frequency_increment'] = 0.3
+    try:
+        fresh_state['synapses']['old|memory'] = {
+            'weight': 0.03,
+            'frequency': 0.3,
+            'last_coactivated': '2026-01-01T00:00:00',
+            'created': '2026-01-01T00:00:00',
+        }
+        state, _, _ = harness.hebbian_update(
+            {'a': 0.8, 'b': 0.6},
+            fresh_state,
+            source='nightly_semantic_consolidation',
+        )
+        assert state['synapses']['a|b']['frequency'] == 0.3
+        assert state['synapses']['old|memory']['weight'] == 0.03
+    finally:
+        harness.CONFIG['semantic_consolidation_frequency_increment'] = previous
 def test_hebbian_update_sets_last_coactivated(fresh_state):
     """Test that last_coactivated is set on new synapses."""
     active = {'a': 0.8, 'b': 0.6}
