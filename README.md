@@ -17,7 +17,7 @@ Turns an Obsidian vault into a living knowledge graph where:
 - **Notes → neurons** — each note embedded with `nomic-embed-text-v2-moe` (768d, via Ollama) and stored in ChromaDB with `OllamaEmbeddingFunction`
 - **Wikilinks → synapses** — graph edges from `[[wikilinks]]`
 - **Hebbian learning** — co-activated notes strengthen their synaptic weight over time (frequency + recency + activation correlation)
-- **Vector retrieval** — semantic search via embeddings (default). Optional BM25 hybrid mode for multilingual vaults (disabled by default — see `benchmarks/BM25_ANALYSIS.md`)
+- **Vector + lexical retrieval** — semantic search via Chroma embeddings with optional BM25 Hybrid scoring (`hybrid_search: true`, α=0.7 / β=0.3)
 - **Adaptive thresholding** — `max(Q75, mean+1std, 0.15)` to filter noise dynamically
 - **Neurogenesis** — LLM extracts new concepts from queries and creates notes in the vault, filtered by a 3-layer signal system (prompt engineering + regex blocklist + semantic dedup) to prevent noise; generation provenance is kept in frontmatter so it does not pollute embeddings
 - **Node quality scoring** — composite score (strong edges + mean weight + frequency) auto-prunes dormant nodes from visualization; re-activates on strong re-encounter

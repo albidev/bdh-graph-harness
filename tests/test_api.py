@@ -2,6 +2,7 @@
 import os
 import json
 import tempfile
+import asyncio
 import pytest
 import chromadb
 import harness
@@ -206,6 +207,53 @@ async def test_api_query_success(mock_app_setup, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_api_query_read_only_skips_learning_and_neurogenesis(mock_app_setup, monkeypatch):
+    from aiohttp.test_utils import TestClient, TestServer
+
+    nodes, edges, collection, state, config, _ = mock_app_setup
+    app = _capture_app(monkeypatch, config, nodes, edges, collection, state)
+    before = json.dumps(state, sort_keys=True)
+    monkeypatch.setattr(
+        bdh_routes, 'run_neurogenesis',
+        lambda *args: pytest.fail('read-only query ran neurogenesis'),
+    )
+    monkeypatch.setattr(
+        bdh_routes, 'llm_respond',
+        lambda *args: pytest.fail('read-only query ran synthesis LLM'),
+    )
+
+    server = TestServer(app)
+    client = TestClient(server)
+    await client.start_server()
+
+    try:
+        resp = await client.post('/api/query', json={
+            'query': 'technical retrieval',
+            'source': 'automatic_retrieval',
+            'learn': False,
+            'respond': False,
+        })
+        assert resp.status == 200
+        data = await resp.json()
+        assert data['hebbian_updates'] == []
+        assert data['new_concepts'] == []
+        assert set(data['routing']) >= {
+            'vector_top_score', 'bm25_top_score', 'hybrid_top_score',
+            'hybrid_second_score', 'hybrid_margin', 'hybrid_enabled',
+        }
+        assert data['routing']['hybrid_enabled'] is True
+        assert data['activated_notes']
+        for note in data['activated_notes']:
+            assert note['role'] in {'seed', 'graph_neighbor'}
+            assert isinstance(note['hop'], int)
+            assert 'final_score' in note
+            assert 'hybrid_score' in note
+        assert json.dumps(state, sort_keys=True) == before
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
 async def test_api_query_empty_returns_400(mock_app_setup, monkeypatch):
     from aiohttp.test_utils import TestClient, TestServer
 
@@ -263,5 +311,35 @@ async def test_api_index_page(mock_app_setup, monkeypatch):
         assert resp.status == 200
         text = await resp.text()
         assert 'BDH Graph Harness' in text
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_api_query_broadcasts_neurogenesis_after_activation(mock_app_setup, monkeypatch):
+    from aiohttp.test_utils import TestClient, TestServer
+
+    nodes, edges, collection, state, config, _ = mock_app_setup
+    events = []
+    app = _capture_app(monkeypatch, config, nodes, edges, collection, state)
+    monkeypatch.setattr(
+        bdh_routes, 'run_neurogenesis',
+        lambda *args: [{'id': 'wiki/concepts/test-concept', 'title': 'Test Concept'}],
+    )
+    async def capture(event, _clients):
+        events.append(event)
+    monkeypatch.setattr(bdh_routes, 'broadcast_activation', capture)
+
+    server = TestServer(app)
+    client = TestClient(server)
+    await client.start_server()
+    try:
+        resp = await client.post('/api/query', json={'query': 'test concept'})
+        assert resp.status == 200
+        data = await resp.json()
+        assert data['new_concepts'][0]['id'] == 'wiki/concepts/test-concept'
+        assert len(events) == 2
+        assert events[1]['new_concepts'][0]['id'] == 'wiki/concepts/test-concept'
+        assert events[1]['sequence'] > events[0]['sequence']
     finally:
         await client.close()

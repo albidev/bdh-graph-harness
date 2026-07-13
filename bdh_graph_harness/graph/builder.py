@@ -28,12 +28,9 @@ GRAPH_CACHE_FILE = ".bdh-graph-cache.json"
 # Ignore filter
 # ---------------------------------------------------------------------------
 
-def _is_ignored(note_id: str) -> bool:
-    """Check if a note_id should be excluded from the graph.
-
-    Matches against CONFIG['graph_ignore'] patterns (fnmatch-style).
-    """
-    ignore_list = CONFIG.get('graph_ignore', [])
+def _is_ignored(note_id: str, ignore_list=None) -> bool:
+    """Check if a note_id should be excluded from the graph."""
+    ignore_list = CONFIG.get('graph_ignore', []) if ignore_list is None else ignore_list
     for pattern in ignore_list:
         if fnmatch.fnmatch(note_id, pattern):
             return True
@@ -44,7 +41,7 @@ def _is_ignored(note_id: str) -> bool:
 # Graph construction
 # ---------------------------------------------------------------------------
 
-def build_graph(vault_root, use_cache=True):
+def build_graph(vault_root, use_cache=True, graph_ignore=None):
     """Build the note graph: nodes with text, edges from wikilinks.
 
     With use_cache=True, loads from .bdh-graph-cache.json and only re-reads
@@ -64,14 +61,14 @@ def build_graph(vault_root, use_cache=True):
             cached = None
 
     if cached:
-        return _incremental_graph_update(vault_root, cached, cache_path)
+        return _incremental_graph_update(vault_root, cached, cache_path, graph_ignore)
     else:
-        nodes, edges = _full_graph_build(vault_root)
+        nodes, edges = _full_graph_build(vault_root, graph_ignore)
         _save_graph_cache(vault_root, nodes, edges, cache_path)
         return nodes, edges
 
 
-def _full_graph_build(vault_root):
+def _full_graph_build(vault_root, ignore_list=None):
     """Full graph build by walking the entire vault."""
     nodes = {}  # note_id -> {text, title, tags, path, mtime}
     edges = defaultdict(list)  # note_id -> [(target_id, ...), ...]
@@ -87,7 +84,7 @@ def _full_graph_build(vault_root):
             note_id = extract_note_id(filepath, vault_root)
 
             # Skip ignored notes
-            if _is_ignored(note_id):
+            if _is_ignored(note_id, ignore_list):
                 ignored.add(note_id)
                 continue
 
@@ -124,7 +121,7 @@ def _full_graph_build(vault_root):
     return nodes, dict(edges)
 
 
-def _incremental_graph_update(vault_root, cached, cache_path):
+def _incremental_graph_update(vault_root, cached, cache_path, ignore_list=None):
     """Update cached graph by only re-reading changed files.
 
     Compares mtimes: if a file's mtime changed, re-read it. If a file
@@ -145,7 +142,7 @@ def _incremental_graph_update(vault_root, cached, cache_path):
             filepath = os.path.join(root, f)
             note_id = extract_note_id(filepath, vault_root)
             # Skip ignored notes
-            if _is_ignored(note_id):
+            if _is_ignored(note_id, ignore_list):
                 continue
             mtime = os.path.getmtime(filepath)
             current_files[note_id] = (filepath, mtime)
@@ -175,7 +172,7 @@ def _incremental_graph_update(vault_root, cached, cache_path):
     if total_changes > len(current_ids) * 0.5:
         logger.info(f"Too many changes ({total_changes}/{len(current_ids)}), full rebuild")
         print(f"   🔄 {total_changes} changes (>50%), full rebuild")
-        nodes, edges = _full_graph_build(vault_root)
+        nodes, edges = _full_graph_build(vault_root, ignore_list)
         _save_graph_cache(vault_root, nodes, edges, cache_path)
         return nodes, edges
 

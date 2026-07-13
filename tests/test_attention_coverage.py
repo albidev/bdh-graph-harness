@@ -47,7 +47,10 @@ def test_hebbian_helpers_handle_empty_invalid_and_capped_scores(monkeypatch):
             "broken": {"weight": 1.0, "last_coactivated": "nope"},
         },
     }
-    assert attention._get_recently_active_notes(with_validity) == {"a", "b"}
+    assert attention._get_recently_active_notes(
+        with_validity, valid_node_ids={"a", "b"}
+    ) == {"a", "b"}
+    assert "_valid_node_ids" in with_validity
     assert attention._get_recently_active_notes(None) == set()
 
 
