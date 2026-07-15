@@ -14,9 +14,10 @@ Contains the ``main()`` argparse dispatcher plus terminal-output helpers
 import os
 import sys
 import argparse
+from collections import Counter
 
 from bdh_graph_harness.config import CONFIG, load_config
-from bdh_graph_harness.graph import build_graph
+from bdh_graph_harness.graph import build_graph, build_configured_graph, migrate_legacy_state_ids
 from bdh_graph_harness.retrieval.attention import attention
 from bdh_graph_harness.retrieval import compute_all_embeddings, BM25Index
 from bdh_graph_harness.memory import load_state, save_state, hebbian_update
@@ -24,7 +25,7 @@ from bdh_graph_harness.llm import llm_respond
 from bdh_graph_harness.neurogenesis import extract_new_concepts, create_note
 from bdh_graph_harness.api import start_api_server
 
-__all__ = ["main", "show_stats", "show_hebbian", "interactive_mode"]
+__all__ = ["main", "show_stats", "show_hebbian", "show_source_scan", "interactive_mode"]
 
 
 # ---------------------------------------------------------------------------
@@ -72,6 +73,72 @@ def show_hebbian(state):
         a, b = key.split('|')
         print(f"  {a} ↔ {b}")
         print(f"    weight: {syn['weight']:.3f} | freq: {syn['frequency']} | last: {syn['last_coactivated']}")
+
+
+def show_source_scan(config: dict, vault_id: str | None = None, vault_override: str | None = None) -> dict:
+    """Run a completely read-only federated Markdown scan and print a report."""
+    from bdh_graph_harness.graph.federated import build_federated_graph
+    from bdh_graph_harness.graph.sources import counterpart_specs_from_config, sources_from_config
+    from bdh_graph_harness.vaults import normalize_vault_configs
+
+    effective_config = dict(config)
+    if vault_id:
+        vault_configs = normalize_vault_configs(config)
+        matched = [vault for vault in vault_configs if vault.id == vault_id]
+        if not matched:
+            available = [vault.id for vault in vault_configs]
+            raise ValueError(
+                f"Unknown vault-id '{vault_id}'. Available: {available}"
+            )
+        effective_config = dict(matched[0].settings)
+    elif vault_override:
+        effective_config['vault_path'] = os.path.expanduser(vault_override)
+
+    sources = sources_from_config(effective_config)
+    nodes, edges, unresolved = build_federated_graph(
+        sources,
+        graph_ignore=effective_config.get('graph_ignore', []),
+        counterparts=counterpart_specs_from_config(effective_config),
+    )
+    source_counts = Counter(
+        (node.get('source_type', 'vault'), node.get('source_id', 'vault'))
+        for node in nodes.values()
+    )
+    resolved_links = sum(
+        1
+        for links in edges.values()
+        for link in links
+        if link.get('type', 'wikilink') == 'wikilink'
+    )
+    counterpart_edges = sum(
+        1
+        for links in edges.values()
+        for link in links
+        if link.get('type') == 'counterpart'
+    )
+
+    print("🔎 BDH Markdown source scan (read-only)")
+    print(f"   Vault: {effective_config['vault_path']}")
+    for source in sources:
+        key = (source.source_type, source.source_id)
+        print(f"   {source.source_type}:{source.source_id}: {source_counts.get(key, 0)} Markdown")
+    print(f"   ✓ Nodes: {len(nodes)}")
+    print(f"   ✓ Resolved wikilinks: {resolved_links}")
+    print(f"   ✓ Counterpart edges: {counterpart_edges}")
+    print(f"   ! Unresolved wikilinks: {len(unresolved)}")
+    if unresolved:
+        for link in unresolved[:10]:
+            print(f"     - {link['source']} → {link['target']}")
+        if len(unresolved) > 10:
+            print(f"     … and {len(unresolved) - 10} more")
+
+    return {
+        'nodes': nodes,
+        'edges': edges,
+        'unresolved': unresolved,
+        'source_counts': dict(source_counts),
+        'counterpart_edges': counterpart_edges,
+    }
 
 
 def interactive_mode(vault_root, nodes, edges, collection, state, bm25_index=None):
@@ -173,6 +240,8 @@ def main():
     parser.add_argument('--interactive', action='store_true', help='Interactive REPL mode')
     parser.add_argument('--no-cache', action='store_true',
                         help='Force full graph rebuild (skip cache)')
+    parser.add_argument('--scan-sources', action='store_true',
+                        help='Read-only Markdown source scan; skips embeddings, LLM, and state writes')
     parser.add_argument('--mcp', action='store_true',
                         help='Start the MCP (Model Context Protocol) server')
     parser.add_argument('--mcp-transport', choices=['stdio', 'http'], default='stdio',
@@ -186,7 +255,15 @@ def main():
     # Load configuration
     config = load_config(args.config)
 
-    # --list-vaults: show configured vaults and exit
+    if args.scan_sources:
+        try:
+            show_source_scan(config, vault_id=args.vault_id, vault_override=args.vault)
+        except (FileNotFoundError, ValueError) as exc:
+            print(f"Error: {exc}")
+            sys.exit(1)
+        return
+
+    # --list-vaults: show graph stats and exit
     if args.list_vaults:
         from bdh_graph_harness.vaults import normalize_vault_configs
         import chromadb
@@ -197,7 +274,7 @@ def main():
             neurons = 0
             embeddings = 0
             try:
-                nodes, _ = build_graph(vc.path, use_cache=True)
+                nodes, _, _ = build_configured_graph(vc.settings, use_cache=True)
                 neurons = len(nodes)
             except Exception:
                 pass
@@ -212,6 +289,7 @@ def main():
         return
 
     # Resolve vault (--vault-id takes precedence over --vault)
+    effective_config = dict(config)
     if args.vault_id:
         from bdh_graph_harness.vaults import normalize_vault_configs
         vault_cfgs = normalize_vault_configs(config)
@@ -220,10 +298,12 @@ def main():
             available = [v.id for v in vault_cfgs]
             print(f"Error: vault-id '{args.vault_id}' not found. Available: {available}")
             sys.exit(1)
+        effective_config = dict(matched[0].settings)
         vault_root = matched[0].path
     else:
         vault_root = args.vault or config['vault_path']
         vault_root = os.path.expanduser(vault_root)
+        effective_config['vault_path'] = vault_root
 
     if not os.path.isdir(vault_root):
         print(f"Error: vault path '{vault_root}' not found")
@@ -232,11 +312,27 @@ def main():
     print(f"🐉 BDH Graph Harness — Building graph from vault...")
     print(f"   Vault: {vault_root}")
 
-    nodes, edges = build_graph(vault_root, use_cache=not args.no_cache)
+    if effective_config.get('external_sources'):
+        nodes, edges, unresolved = build_configured_graph(
+            effective_config,
+            use_cache=not args.no_cache,
+        )
+    else:
+        nodes, edges = build_graph(vault_root, use_cache=not args.no_cache)
+        unresolved = []
     print(f"   ✓ {len(nodes)} neurons, {sum(len(e) for e in edges.values())} synapses")
 
     # Compute embeddings
-    collection = compute_all_embeddings(nodes, vault_root)
+    if effective_config.get('external_sources'):
+        collection = compute_all_embeddings(
+            nodes,
+            vault_root,
+            chroma_path=effective_config.get('chroma_path'),
+            collection_name=effective_config.get('chroma_collection'),
+            config=effective_config,
+        )
+    else:
+        collection = compute_all_embeddings(nodes, vault_root)
 
     # Build BM25 index for hybrid search (Phase 3.1)
     # Skip if --serve: the server builds its own index
@@ -248,6 +344,8 @@ def main():
 
     # Load state
     state = load_state(vault_root)
+    state = migrate_legacy_state_ids(state, nodes)
+    state['unresolved_links'] = unresolved
 
     # --- Mode dispatch ---
 

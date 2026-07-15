@@ -1,96 +1,138 @@
-"""Filesystem watcher for vault changes.
+"""Filesystem watcher for configured Markdown sources.
 
-Monitors the vault directory for .md file changes by comparing mtimes.
-Polls every N seconds, triggers graph rebuild + WS broadcast when changes detected.
+Monitors the primary vault and any configured external Markdown sources using
+source include/exclude rules. Polling is intentionally boring and portable;
+short bursts of editor writes are coalesced before the graph update callback
+runs. The watcher never writes to a source directory.
 """
+
+from __future__ import annotations
 
 import asyncio
 import logging
 import os
 import time
-from typing import Callable, Coroutine, Optional
+from typing import Any, Callable, Coroutine, Iterable, Optional
 
 logger = logging.getLogger("bdh-watcher")
 
 
 class VaultWatcher:
-    """Watches vault directory for .md changes and triggers graph updates."""
+    """Watch one or more configured Markdown sources for filesystem changes."""
 
     def __init__(
         self,
         vault_path: str,
         update_fn: Callable[[], Coroutine],
         poll_interval: float = 2.0,
+        *,
+        sources: Iterable[Any] | None = None,
+        debounce_seconds: float = 1.0,
     ):
         self.vault_path = vault_path
         self.update_fn = update_fn
         self.poll_interval = poll_interval
-        self._mtimes: dict[str, float] = {}
+        self.sources = tuple(sources or ())
+        self.debounce_seconds = max(0.0, debounce_seconds)
+        self._signatures: dict[str, tuple[int, int]] = {}
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._task: Optional[asyncio.Task] = None
+        self._pending_since: float | None = None
+        self._pending_counts = (0, 0, 0)
 
     def start(self, loop: asyncio.AbstractEventLoop):
-        """Start watching the vault directory."""
+        """Start watching the configured source directories."""
         self._loop = loop
-        self._mtimes = self._scan_mtimes()
-        print(f"👁️  Vault watcher: scanned {len(self._mtimes)} files", flush=True)
+        self._signatures = self._scan_signatures()
+        print(f"👁️  Vault watcher: scanned {len(self._signatures)} files", flush=True)
         self._task = loop.create_task(self._poll_loop())
         print(f"👁️  Vault watcher: poll task created: {self._task}", flush=True)
 
     def stop(self):
         if self._task:
             self._task.cancel()
+            self._task = None
 
-    def _scan_mtimes(self) -> dict[str, float]:
-        mtimes = {}
+    def _scan_signatures(self) -> dict[str, tuple[int, int]]:
+        """Return stable file signatures for all matching Markdown paths."""
+        if self.sources:
+            paths = (
+                absolute
+                for source in self.sources
+                for _relative, absolute in source.iter_paths()
+            )
+        else:
+            paths = self._legacy_paths()
+
+        signatures: dict[str, tuple[int, int]] = {}
+        for path in paths:
+            try:
+                stat = os.stat(path)
+            except OSError:
+                continue
+            signatures[path] = (stat.st_mtime_ns, stat.st_size)
+        return signatures
+
+    def _legacy_paths(self):
+        """Keep the old constructor behavior for non-federated callers."""
         for root, dirs, files in os.walk(self.vault_path):
             dirs[:] = [d for d in dirs if not d.startswith('.')]
-            for f in files:
-                if not f.endswith('.md') or f.startswith('.'):
+            for filename in files:
+                if filename.startswith('.') or not filename.lower().endswith('.md'):
                     continue
-                path = os.path.join(root, f)
-                try:
-                    mtimes[path] = os.path.getmtime(path)
-                except OSError:
-                    continue
-        return mtimes
+                yield os.path.join(root, filename)
 
     async def _poll_loop(self):
-        print(f"👁️  Vault watcher: poll loop started", flush=True)
+        print("👁️  Vault watcher: poll loop started", flush=True)
         while True:
             await asyncio.sleep(self.poll_interval)
             try:
                 await self._check_changes()
             except asyncio.CancelledError:
-                print(f"👁️  Vault watcher: poll loop cancelled", flush=True)
+                print("👁️  Vault watcher: poll loop cancelled", flush=True)
                 break
-            except Exception as e:
-                print(f"👁️  Vault watcher error: {e}", flush=True)
+            except Exception as exc:
+                print(f"👁️  Vault watcher error: {exc}", flush=True)
 
     async def _check_changes(self):
-        new_mtimes = self._scan_mtimes()
+        new_signatures = self._scan_signatures()
+        old_signatures = self._signatures
+        changed = [
+            path
+            for path, signature in new_signatures.items()
+            if path in old_signatures and signature != old_signatures[path]
+        ]
+        added = [path for path in new_signatures if path not in old_signatures]
+        deleted = [path for path in old_signatures if path not in new_signatures]
+        self._signatures = new_signatures
 
-        changed = []
-        for path, mtime in new_mtimes.items():
-            old_mtime = self._mtimes.get(path, 0)
-            if mtime > old_mtime:
-                changed.append(path)
-
-        added = [p for p in new_mtimes if p not in self._mtimes]
-        deleted = [p for p in self._mtimes if p not in new_mtimes]
-
-        if not added and not changed and not deleted:
+        if added or changed or deleted:
+            self._pending_since = time.monotonic()
+            self._pending_counts = (len(added), len(changed), len(deleted))
+            logger.info(
+                "Watcher change burst: %s new, %s changed, %s deleted",
+                len(added), len(changed), len(deleted),
+            )
             return
 
-        print(f"👁️  Vault watcher: {len(added)} new, {len(changed)} changed, {len(deleted)} deleted", flush=True)
-        self._mtimes = new_mtimes
-        logger.info(f"Vault watcher: {len(added)} new, {len(changed)} changed, {len(deleted)} deleted — triggering update")
+        if self._pending_since is None:
+            return
+        if time.monotonic() - self._pending_since < self.debounce_seconds:
+            return
 
+        added_count, changed_count, deleted_count = self._pending_counts
+        self._pending_since = None
+        self._pending_counts = (0, 0, 0)
+        print(
+            f"👁️  Vault watcher: {added_count} new, "
+            f"{changed_count} changed, {deleted_count} deleted — triggering update",
+            flush=True,
+        )
         try:
-            print(f"👁️  Vault watcher: calling update_fn...", flush=True)
+            print("👁️  Vault watcher: calling update_fn...", flush=True)
             await self.update_fn()
-            print(f"👁️  Vault watcher: update_fn completed", flush=True)
-        except Exception as e:
+            print("👁️  Vault watcher: update_fn completed", flush=True)
+        except Exception as exc:
             import traceback
-            print(f"👁️  Vault watcher update FAILED: {e}", flush=True)
+            print(f"👁️  Vault watcher update FAILED: {exc}", flush=True)
             traceback.print_exc()

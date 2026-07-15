@@ -2,8 +2,16 @@
 // Graph initialization
 // ============================================================================
 function initNetwork(graphData) {
+  // Keep the server payload so source filters can rebuild the view without
+  // losing hidden nodes or cross-source edges.
+  sourceGraphData = JSON.parse(JSON.stringify(graphData));
   // Store full node list for orphan toggle + build fast lookup map
   allGraphNodes = graphData.nodes;
+  const sourceVisibleIds = new Set(
+    graphData.nodes
+      .filter(nodeMatchesSourceFilter)
+      .map(node => node.id)
+  );
   nodeDataMap = {};
   graphData.nodes.forEach(n => { nodeDataMap[n.id] = n; });
 
@@ -33,11 +41,19 @@ function initNetwork(graphData) {
 
   // Build edge set and compute degree/neighbor maps
   const edgeSet = new Set();
+  const counterpartSet = new Set();
   const connectedNodes = new Set();
   degreeMap = {};
   neighborMap = {};
 
   graphData.edges.forEach(e => {
+    if (!sourceVisibleIds.has(e.source) || !sourceVisibleIds.has(e.target)) return;
+    const type = e.type || 'wikilink';
+    if (type === 'counterpart') {
+      const counterpartKey = [e.source, e.target].sort().join('↔');
+      if (counterpartSet.has(counterpartKey)) return;
+      counterpartSet.add(counterpartKey);
+    }
     const eid = e.source + '→' + e.target;
     if (edgeSet.has(eid)) return;
     edgeSet.add(eid);
@@ -56,6 +72,7 @@ function initNetwork(graphData) {
   // Add hebbian edges to degree count
   hebbianMap = {};
   graphData.hebbian.forEach(h => {
+    if (!sourceVisibleIds.has(h.note_a) || !sourceVisibleIds.has(h.note_b)) return;
     const key = h.note_a + '|' + h.note_b;
     hebbianMap[key] = h.weight;
     connectedNodes.add(h.note_a);
@@ -66,6 +83,7 @@ function initNetwork(graphData) {
 
   // Phantom edges degree count
   (graphData.phantom || []).forEach(p => {
+    if (!sourceVisibleIds.has(p.source) || !sourceVisibleIds.has(p.target)) return;
     connectedNodes.add(p.source);
     connectedNodes.add(p.target);
     degreeMap[p.source] = (degreeMap[p.source] || 0) + 1;
@@ -83,8 +101,8 @@ function initNetwork(graphData) {
   // Build force-graph nodes
   fgNodes = [];
   const activeNodeIds = showOrphans
-    ? graphData.nodes.map(n => n.id)
-    : graphData.nodes.filter(n => connectedSet.has(n.id)).map(n => n.id);
+    ? graphData.nodes.filter(n => sourceVisibleIds.has(n.id)).map(n => n.id)
+    : graphData.nodes.filter(n => sourceVisibleIds.has(n.id) && connectedSet.has(n.id)).map(n => n.id);
 
   // Synaptic aura score: nodes attached to strong rendered Hebbian edges glow a
   // little more, so the visual density follows learned plasticity instead of
@@ -128,6 +146,8 @@ function initNetwork(graphData) {
       if (primaryTag && tagColorMap[primaryTag]) {
         color = tagColorMap[primaryTag];
       }
+    } else {
+      color = sourceColor(n);
     }
     nodeTagColorMap[n.id] = color;
     const mass = computeNodeMass(n, deg, maxDeg);
@@ -138,7 +158,7 @@ function initNetwork(graphData) {
 
     fgNodes.push({
       id: n.id,
-      name: n.title || n.id,
+      name: n.display_label || n.title || n.id,
       color: color,
       val: val,
       _mass: mass,
@@ -152,6 +172,7 @@ function initNetwork(graphData) {
       _qualityScore: qualityScore,
       _tags: n.tags || '',
       _title: n.title || n.id,
+      _displayLabel: n.display_label || n.title || n.id,
       _path: n.path || '',
       _text: n.text || '',
     });
@@ -202,21 +223,37 @@ function initNetwork(graphData) {
   const nodeIdSet = new Set(activeNodeIds);
 
   // === Z-ORDER: links drawn in array order, last = on top ===
-  // 1. Wikilinks (bottom — thin, least important)
+  // 1. Structural/direct links (bottom — wikilinks thin, counterparts highlighted)
   graphData.edges.forEach(e => {
     if (!nodeIdSet.has(e.source) || !nodeIdSet.has(e.target)) return;
+    const type = e.type || 'wikilink';
+    if (type === 'counterpart') {
+      const counterpartKey = [e.source, e.target].sort().join('↔');
+      if (counterpartSet.has(counterpartKey + ':rendered')) return;
+      counterpartSet.add(counterpartKey + ':rendered');
+    }
     const eid = e.source + '→' + e.target;
-    const srcTitle = (graphData.nodes.find(n => n.id === e.source) || {}).title || e.source;
-    const tgtTitle = (graphData.nodes.find(n => n.id === e.target) || {}).title || e.target;
-    edgeInfoMap[eid] = { source_title: srcTitle, target_title: tgtTitle, type: 'wikilink' };
+    const srcTitle = (graphData.nodes.find(n => n.id === e.source) || {}).display_label || (graphData.nodes.find(n => n.id === e.source) || {}).title || e.source;
+    const tgtTitle = (graphData.nodes.find(n => n.id === e.target) || {}).display_label || (graphData.nodes.find(n => n.id === e.target) || {}).title || e.target;
+    edgeInfoMap[eid] = {
+      source_title: srcTitle,
+      target_title: tgtTitle,
+      type: type,
+      relation: e.relation,
+      group_id: e.group_id,
+    };
+    const counterpart = type === 'counterpart';
     fgLinks.push({
       source: e.source,
       target: e.target,
-      color: COLORS.edgeWikilink,
-      width: 0.5,
-      type: 'wikilink',
+      color: counterpart ? COLORS.edgeCounterpart : COLORS.edgeWikilink,
+      width: counterpart ? 2.2 : 0.5,
+      type: type,
+      relation: e.relation,
+      group_id: e.group_id,
       particles: 0,
       _id: eid,
+      _dashes: counterpart,
       _visible: true,
     });
   });
@@ -517,10 +554,12 @@ function initNetwork(graphData) {
 
   // onZoom callback handles slider sync (no polling needed)
 
-  // Update stats
-  document.getElementById('stat-neurons').textContent = graphData.stats.neurons;
-  document.getElementById('stat-synapses').textContent = graphData.stats.synapses;
-  document.getElementById('stat-hebbian').textContent = graphData.stats.hebbian_synapses;
+  // Update stats using the currently rendered source-filtered graph.
+  const renderedWikilinks = fgLinks.filter(link => link.type === 'wikilink').length;
+  const renderedHebbian = fgLinks.filter(link => link.type === 'hebbian').length;
+  document.getElementById('stat-neurons').textContent = fgNodes.length;
+  document.getElementById('stat-synapses').textContent = renderedWikilinks;
+  document.getElementById('stat-hebbian').textContent = renderedHebbian;
 
   // NOTE: applyEdgeFilters() is NOT called here — it calls setGraphDataPreservingView
   // which calls graph.graphData() again, breaking all interactions (drag/zoom/click).

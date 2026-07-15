@@ -7,6 +7,27 @@
 # Vault
 vault_path: ./wiki  # path to your Obsidian vault
 
+# Optional federated Markdown sources. External sources are read-only by default.
+# Paths are scanned recursively for *.md and can be narrowed with include/exclude.
+# external_sources:
+#   - id: projects
+#     path: ~/Projects
+#     include:
+#       - bdh-graph-harness/**/*.md
+#       - mlx-colibri/docs/**/*.md
+#     exclude:
+#       - "**/.git/**"
+#       - "**/node_modules/**"
+#       - "**/.venv/**"
+#       - "**/build/**"
+#       - "**/dist/**"
+#     writable: false
+#     # Optional reciprocal edge between the two project anchor documents.
+#     counterparts:
+#       - group_id: bdh-graph-harness
+#         vault_path: projects/bdh-graph-harness/overview.md
+#         external_path: bdh-graph-harness/README.md
+
 # Ollama
 ollama_url: http://127.0.0.1:11434
 embedding_model: nomic-embed-text-v2-moe

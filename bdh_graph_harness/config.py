@@ -33,6 +33,9 @@ DEFAULT_CONFIG_PATHS = [
 
 CONFIG = {
     'vault_path': os.path.expanduser('~/Documents/Hermes'),
+    # Optional read-only Markdown sources merged into the primary vault graph.
+    # Each entry supports id, path, include, exclude, and writable (false by default).
+    'external_sources': [],
     'ollama_url': 'http://127.0.0.1:11434',
     # Embedding (Ollama)
     'embedding_model': 'nomic-embed-text-v2-moe',
