@@ -205,5 +205,47 @@ async def test_semantic_endpoint_dry_run_does_not_write_checkpoint(monkeypatch, 
     assert not (tmp_path / ".checkpoint.json").exists()
 
 
+@pytest.mark.asyncio
+async def test_semantic_endpoint_can_process_filtered_delta_without_sessions(monkeypatch, tmp_path):
+    config = _config(semantic_consolidation_session_enabled=True)
+    ctx = SimpleNamespace(
+        config=SimpleNamespace(id="core", path=str(tmp_path), settings=config),
+        semantic_lock=asyncio.Lock(),
+        event_sequence=0,
+    )
+    monkeypatch.setattr(routes, "_resolve_vault_ctx", lambda _state, _vault: (ctx, None))
+    monkeypatch.setattr(routes, "broadcast_activation", _noop_broadcast)
+    captured = {}
+
+    def fake_notes(root, cfg, checkpoint, *, max_sources):
+        captured["notes_config"] = cfg
+        return []
+
+    def fake_sessions(cfg, checkpoint, *, max_sessions):
+        captured["sessions_config"] = cfg
+        return []
+
+    monkeypatch.setattr(routes, "select_candidate_notes", fake_notes)
+    monkeypatch.setattr(routes, "select_candidate_sessions", fake_sessions)
+    response = await routes.api_semantic_consolidate(
+        _Request({
+            "session_enabled": False,
+            "source_globs": ["memory/learned/bdh-session-recovery-delta.md"],
+            "max_age_hours": 48,
+            "max_sources": 3,
+            "dry_run": True,
+        }),
+        {},
+        set(),
+    )
+    data = json.loads(response.text)
+    assert response.status == 200
+    assert data["sources_discovered"] == 0
+    assert captured["notes_config"]["semantic_consolidation_source_globs"] == [
+        "memory/learned/bdh-session-recovery-delta.md"
+    ]
+    assert captured["sessions_config"]["semantic_consolidation_session_enabled"] is False
+
+
 async def _noop_broadcast(*_args, **_kwargs):
     return None

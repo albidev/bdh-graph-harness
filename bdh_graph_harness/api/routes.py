@@ -112,7 +112,11 @@ async def index(request, app_state: dict) -> web.Response:
         sum(len(links) for links in ctx.edges.values()),
         len(ctx.state['synapses']),
     )
-    return web.Response(text=html, content_type='text/html')
+    return web.Response(
+        text=html,
+        content_type='text/html',
+        headers={'Cache-Control': 'no-store, max-age=0'},
+    )
 
 
 async def api_stats(request, app_state: dict) -> web.Response:
@@ -433,7 +437,7 @@ async def api_query(request, app_state: dict, ws_clients: set) -> web.Response:
     if new_concepts_list:
         ctx.event_sequence += 1
         await broadcast_activation({
-            'type': 'activation',
+            'type': 'neurogenesis',
             'sequence': ctx.event_sequence,
             'vault_id': ctx.config.id,
             'query': query,
@@ -970,6 +974,30 @@ async def api_semantic_consolidate(request, app_state: dict, ws_clients: set) ->
             status=409,
         )
 
+    semantic_config = dict(config)
+    if 'session_enabled' in data:
+        semantic_config['semantic_consolidation_session_enabled'] = bool(
+            data['session_enabled']
+        )
+    if 'source_globs' in data:
+        source_globs = data['source_globs']
+        if not isinstance(source_globs, list) or not all(
+            isinstance(pattern, str) and pattern.strip() for pattern in source_globs
+        ):
+            return web.json_response(
+                {'error': 'source_globs must be a non-empty list of strings'},
+                status=400,
+            )
+        semantic_config['semantic_consolidation_source_globs'] = source_globs
+    if 'max_age_hours' in data:
+        try:
+            max_age_hours = float(data['max_age_hours'])
+        except (TypeError, ValueError):
+            return web.json_response({'error': 'max_age_hours must be a number'}, status=400)
+        if max_age_hours <= 0:
+            return web.json_response({'error': 'max_age_hours must be > 0'}, status=400)
+        semantic_config['semantic_consolidation_max_age_hours'] = max_age_hours
+
     requested_max = data.get('max_sources')
     try:
         max_sources = int(requested_max) if requested_max is not None else None
@@ -982,12 +1010,12 @@ async def api_semantic_consolidate(request, app_state: dict, ws_clients: set) ->
     checkpoint = load_checkpoint(ctx.config.path, config)
     file_sources = select_candidate_notes(
         ctx.config.path,
-        config,
+        semantic_config,
         checkpoint,
         max_sources=max_sources,
     )
     session_sources = select_candidate_sessions(
-        config,
+        semantic_config,
         checkpoint,
         max_sessions=max_sources,
     )

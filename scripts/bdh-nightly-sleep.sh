@@ -7,6 +7,7 @@ set -euo pipefail
 SERVER="${BDH_SERVER:-http://localhost:8643}"
 VAULT_ID="${BDH_VAULT_ID:-core}"
 MAX_SOURCES="${BDH_MAX_SOURCES:-}"
+RECOVERY_DELTA_GLOB="${BDH_RECOVERY_DELTA_GLOB:-memory/learned/bdh-session-recovery-delta.md}"
 SEMANTIC_ENDPOINT="${SERVER}/api/semantic-consolidate"
 REFRESH_ENDPOINT="${SERVER}/api/refresh-graph"
 STRUCTURAL_ENDPOINT="${SERVER}/api/consolidate"
@@ -15,9 +16,9 @@ TMPDIR_BDH=$(mktemp -d)
 trap 'rm -rf "$TMPDIR_BDH"' EXIT
 
 if [[ -n "$MAX_SOURCES" ]]; then
-    semantic_payload=$(printf '{"vault_id":"%s","max_sources":%s}' "$VAULT_ID" "$MAX_SOURCES")
+    semantic_payload=$(printf '{"vault_id":"%s","max_sources":%s,"session_enabled":false,"source_globs":["%s"],"max_age_hours":48}' "$VAULT_ID" "$MAX_SOURCES" "$RECOVERY_DELTA_GLOB")
 else
-    semantic_payload=$(printf '{"vault_id":"%s"}' "$VAULT_ID")
+    semantic_payload=$(printf '{"vault_id":"%s","session_enabled":false,"source_globs":["%s"],"max_age_hours":48}' "$VAULT_ID" "$RECOVERY_DELTA_GLOB")
 fi
 structural_payload=$(printf '{"vault_id":"%s"}' "$VAULT_ID")
 
