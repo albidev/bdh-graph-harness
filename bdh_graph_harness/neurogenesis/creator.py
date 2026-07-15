@@ -45,7 +45,7 @@ def _is_noise_title(title: str) -> bool:
     return False
 
 
-def extract_new_concepts(llm_response, query, active_notes, nodes, *, allow_existing=False):
+def extract_new_concepts(llm_response, query, active_notes, nodes):
     """Ask the LLM to identify concepts in its response that aren't in the vault."""
     import urllib.request
 
@@ -160,21 +160,15 @@ def extract_new_concepts(llm_response, query, active_notes, nodes, *, allow_exis
                 definition = definition.strip()
                 if not title or not definition:
                     continue
-                exact_match = is_duplicate(title, existing_titles)
-                if exact_match and not allow_existing:
+                if is_duplicate(title, existing_titles):
                     continue
                 if _is_noise_title(title):
                     print(f"  🚫 Noise filter rejected: '{title}'", file=sys.stderr)
                     continue
-                semantic_match = is_semantic_duplicate(title, definition)
-                if semantic_match and not allow_existing:
+                if is_semantic_duplicate(title, definition):
                     print(f"  🔁 Semantic duplicate rejected: '{title}'", file=sys.stderr)
                     continue
-                item = {'title': title, 'definition': definition}
-                if allow_existing:
-                    item['_exact_match'] = exact_match
-                    item['_semantic_match'] = semantic_match
-                filtered.append(item)
+                filtered.append({'title': title, 'definition': definition})
             return filtered[:5]
 
     try:
