@@ -158,7 +158,7 @@ function initNetwork(graphData) {
 
     fgNodes.push({
       id: n.id,
-      name: n.title || n.id,
+      name: n.display_label || n.title || n.id,
       color: color,
       val: val,
       _mass: mass,
@@ -172,6 +172,7 @@ function initNetwork(graphData) {
       _qualityScore: qualityScore,
       _tags: n.tags || '',
       _title: n.title || n.id,
+      _displayLabel: n.display_label || n.title || n.id,
       _path: n.path || '',
       _text: n.text || '',
     });
@@ -232,8 +233,8 @@ function initNetwork(graphData) {
       counterpartSet.add(counterpartKey + ':rendered');
     }
     const eid = e.source + '→' + e.target;
-    const srcTitle = (graphData.nodes.find(n => n.id === e.source) || {}).title || e.source;
-    const tgtTitle = (graphData.nodes.find(n => n.id === e.target) || {}).title || e.target;
+    const srcTitle = (graphData.nodes.find(n => n.id === e.source) || {}).display_label || (graphData.nodes.find(n => n.id === e.source) || {}).title || e.source;
+    const tgtTitle = (graphData.nodes.find(n => n.id === e.target) || {}).display_label || (graphData.nodes.find(n => n.id === e.target) || {}).title || e.target;
     edgeInfoMap[eid] = {
       source_title: srcTitle,
       target_title: tgtTitle,

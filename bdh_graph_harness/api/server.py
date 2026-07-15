@@ -156,6 +156,8 @@ def _make_watcher_callback(ctx, app_state, ws_clients):
                 added_node_data.append({
                     'id': nid,
                     'title': node.get('title', nid.split('/')[-1]),
+                    'display_label': node.get('display_label', node.get('title', nid.split('/')[-1])),
+                    'context_label': node.get('context_label'),
                     'tags': node.get('tags', ''),
                     'text': node.get('text', ''),
                     'path': node.get('path', ''),

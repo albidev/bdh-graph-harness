@@ -16,6 +16,7 @@ from bdh_graph_harness.graph.parser import (
     extract_text,
     extract_wikilinks,
 )
+from bdh_graph_harness.graph.display import add_display_label
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -61,11 +62,14 @@ def build_graph(vault_root, use_cache=True, graph_ignore=None):
             cached = None
 
     if cached:
-        return _incremental_graph_update(vault_root, cached, cache_path, graph_ignore)
+        nodes, edges = _incremental_graph_update(vault_root, cached, cache_path, graph_ignore)
     else:
         nodes, edges = _full_graph_build(vault_root, graph_ignore)
         _save_graph_cache(vault_root, nodes, edges, cache_path)
-        return nodes, edges
+
+    for node in nodes.values():
+        add_display_label(node)
+    return nodes, edges
 
 
 def _full_graph_build(vault_root, ignore_list=None):

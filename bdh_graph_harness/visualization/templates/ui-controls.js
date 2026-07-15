@@ -54,7 +54,7 @@ function toggleOrphans(show) {
         if (n) {
           freshNodes.push({
             id: n.id,
-            name: n.title,
+            name: n.display_label || n.title,
             color: '#1c2128',
             val: 6,
             _mass: computeNodeMass(n, 0, Math.max(1, ...Object.values(degreeMap))),

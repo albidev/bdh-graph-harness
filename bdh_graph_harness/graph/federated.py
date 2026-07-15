@@ -15,6 +15,7 @@ from pathlib import PurePosixPath
 from typing import Iterable
 
 from bdh_graph_harness.graph.builder import build_graph
+from bdh_graph_harness.graph.display import add_display_label
 from bdh_graph_harness.graph.parser import extract_text, extract_wikilinks, parse_frontmatter
 from bdh_graph_harness.graph.sources import (
     CounterpartSpec,
@@ -225,6 +226,14 @@ def build_federated_graph(
                 "generated": True,
                 "traversable": True,
             })
+
+    # Derive UI labels after counterpart assignment so explicit project_group
+    # context is available to both vault and external anchor documents.
+    for document in documents:
+        add_display_label(
+            nodes[document.id],
+            frontmatter=parse_frontmatter(document.content),
+        )
 
     return nodes, dict(edges), unresolved
 
