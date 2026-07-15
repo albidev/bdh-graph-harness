@@ -160,6 +160,8 @@ async def api_graph(request, app_state: dict) -> web.Response:
         node_list.append({
             'id': note_id,
             'title': node['title'],
+            'display_label': node.get('display_label', node['title']),
+            'context_label': node.get('context_label'),
             'tags': node['tags'],
             'path': node.get('path', ''),
             'absolute_path': node.get('absolute_path', node.get('path', '')),
@@ -635,7 +637,12 @@ async def api_node_update(request, app_state: dict, ws_clients: set) -> web.Resp
         old_text = old_nodes[nid].get('text', '')
         new_text = new_nodes[nid].get('text', '')
         if old_title != new_title or old_text != new_text:
-            changed.append({'id': nid, 'title': new_title, 'old_title': old_title})
+            changed.append({
+                'id': nid,
+                'title': new_title,
+                'display_label': new_nodes[nid].get('display_label', new_title),
+                'old_title': old_title,
+            })
 
     async with ctx.runtime_lock:
         ctx.nodes = new_nodes
@@ -688,6 +695,8 @@ async def api_node_update(request, app_state: dict, ws_clients: set) -> web.Resp
             added_node_data.append({
                 'id': nid,
                 'title': node.get('title', nid.split('/')[-1]),
+                'display_label': node.get('display_label', node.get('title', nid.split('/')[-1])),
+                'context_label': node.get('context_label'),
                 'tags': node.get('tags', ''),
                 'text': node.get('text', ''),
                 'path': node.get('path', ''),
@@ -771,7 +780,11 @@ async def _api_refresh_graph_unlocked(request, app_state: dict, ws_clients: set)
         old_title = old_node_titles.get(nid, '')
         new_title = nodes[nid].get('title', '')
         if old_title != new_title:
-            changed_nodes.append({'id': nid, 'title': new_title})
+            changed_nodes.append({
+                'id': nid,
+                'title': new_title,
+                'display_label': nodes[nid].get('display_label', new_title),
+            })
     new_concepts = []
     added_node_data = []
     for nid in sorted(new_node_ids):
@@ -807,6 +820,8 @@ async def _api_refresh_graph_unlocked(request, app_state: dict, ws_clients: set)
         new_concepts.append({'id': nid, 'title': title, 'source_notes': source_notes[:5]})
         added_node_data.append({
             'id': nid, 'title': title,
+            'display_label': node.get('display_label', title),
+            'context_label': node.get('context_label'),
             'tags': node.get('tags', ''), 'text': node.get('text', ''),
             'path': node.get('path', ''),
             'absolute_path': node.get('absolute_path', node.get('path', '')),

@@ -353,7 +353,7 @@ function showTooltip(node, evt) {
   if (!n) { hideTooltip(); return; }
   const mobile = isMobile();
 
-  const title = escapeHtml(n.title || n.id);
+  const title = escapeHtml(n.display_label || n.title || n.id);
   const path = n._path || n.path || '';
   const sourceType = n.source_type || 'vault';
   const sourceId = n.source_id || sourceType;

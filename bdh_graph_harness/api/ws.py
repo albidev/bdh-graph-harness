@@ -46,6 +46,8 @@ class WebSocketManager:
             node_list.append({
                 'id': note_id,
                 'title': node['title'],
+                'display_label': node.get('display_label', node['title']),
+                'context_label': node.get('context_label'),
                 'tags': node.get('tags', []),
                 'path': node.get('path', ''),
                 'absolute_path': node.get('absolute_path', node.get('path', '')),
@@ -194,6 +196,8 @@ async def websocket_handler(request, app_state: dict, ws_clients: set = None) ->
         node_list.append({
             'id': note_id,
             'title': node['title'],
+            'display_label': node.get('display_label', node['title']),
+            'context_label': node.get('context_label'),
             'tags': node.get('tags', []),
             'path': node.get('path', ''),
             'absolute_path': node.get('absolute_path', node.get('path', '')),

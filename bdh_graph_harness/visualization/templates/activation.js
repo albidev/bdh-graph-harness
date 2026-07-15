@@ -93,9 +93,11 @@ function handleActivation(event) {
     // canvas after an otherwise normal query.
     if (!targetLink && (activatedIds.has(a) || activatedIds.has(b))) {
       const eid = 'hebb_' + a + '→' + b;
+      const srcTitle = (nodeDataMap[a] || {}).display_label || (nodeDataMap[a] || {}).title || a;
+      const tgtTitle = (nodeDataMap[b] || {}).display_label || (nodeDataMap[b] || {}).title || b;
       edgeInfoMap[eid] = {
-        source_title: (nodeDataMap[a] || {}).title || a,
-        target_title: (nodeDataMap[b] || {}).title || b,
+        source_title: srcTitle,
+        target_title: tgtTitle,
         type: 'hebbian', weight: h.weight, frequency: h.frequency,
       };
       pendingHebbianLinks.push({
