@@ -79,16 +79,17 @@ def _make_watcher_callback(ctx, app_state, ws_clients):
     """Factory for the vault watcher callback — avoids closure capture bugs."""
 
     async def _trigger_node_update_unlocked():
-        from bdh_graph_harness.graph.builder import build_graph
+        from bdh_graph_harness.graph.federated import build_configured_graph
         from bdh_graph_harness.api.ws import broadcast_activation
         from bdh_graph_harness.retrieval import compute_all_embeddings
 
         vault_path = ctx.config.path
         old_nodes = ctx.nodes or {}
 
-        new_nodes, new_edges = await asyncio.to_thread(
-            build_graph, vault_path, False,
-            ctx.config.settings.get('graph_ignore')
+        new_nodes, new_edges, unresolved = await asyncio.to_thread(
+            build_configured_graph,
+            ctx.config.settings,
+            use_cache=False,
         )
 
         old_ids = set(old_nodes.keys())
@@ -115,6 +116,7 @@ def _make_watcher_callback(ctx, app_state, ws_clients):
 
         ctx.nodes = new_nodes
         ctx.edges = new_edges
+        ctx.state['unresolved_links'] = unresolved
 
         if added or changed or deleted:
             ctx.collection = await asyncio.to_thread(
@@ -135,16 +137,36 @@ def _make_watcher_callback(ctx, app_state, ws_clients):
                 node_edges = []
                 source_notes = []
                 for link in new_edges.get(nid, []):
-                    target_id = link['target'] if isinstance(link, dict) else link
-                    node_edges.append({'source': nid, 'target': target_id})
+                    if isinstance(link, dict):
+                        target_id = link['target']
+                        edge_payload = {
+                            'source': nid,
+                            'target': target_id,
+                            'type': link.get('type', 'wikilink'),
+                            'weight': link.get('weight', 1.0),
+                            'relation': link.get('relation'),
+                            'group_id': link.get('group_id'),
+                        }
+                    else:
+                        target_id = link
+                        edge_payload = {'source': nid, 'target': target_id, 'type': 'wikilink'}
+                    node_edges.append(edge_payload)
                     if target_id in old_ids:
                         source_notes.append(old_nodes.get(target_id, {}).get('title', target_id))
                 added_node_data.append({
                     'id': nid,
                     'title': node.get('title', nid.split('/')[-1]),
+                    'display_label': node.get('display_label', node.get('title', nid.split('/')[-1])),
+                    'context_label': node.get('context_label'),
                     'tags': node.get('tags', ''),
                     'text': node.get('text', ''),
                     'path': node.get('path', ''),
+                    'absolute_path': node.get('absolute_path', node.get('path', '')),
+                    'relative_path': node.get('relative_path', ''),
+                    'source_id': node.get('source_id', 'vault'),
+                    'source_type': node.get('source_type', 'vault'),
+                    'project_group': node.get('project_group'),
+                    'writable': node.get('writable', True),
                     'edges': node_edges,
                 })
                 new_concepts.append({
@@ -258,7 +280,13 @@ def start_api_server(config, nodes, edges, collection, state):
         for ctx in registry.list():
             try:
                 callback = _make_watcher_callback(ctx, app_state, ws_clients)
-                watcher = VaultWatcher(ctx.config.path, callback)
+                from bdh_graph_harness.graph.sources import sources_from_config
+                watcher_sources = sources_from_config(ctx.config.settings)
+                watcher = VaultWatcher(
+                    ctx.config.path,
+                    callback,
+                    sources=watcher_sources,
+                )
                 ctx.watcher = watcher
                 watchers.append((ctx, watcher))
             except Exception as e:

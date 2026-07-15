@@ -121,7 +121,7 @@ function connectWS() {
           id: n.id, name: n.name, color: n.color, val: n.val,
           _opacity: n._opacity, _shape: n._shape, _dormant: n._dormant,
           _mass: n._mass, _synapticGlow: n._synapticGlow,
-          _tags: n._tags, _title: n._title, _path: n._path, _text: n._text,
+          _tags: n._tags, _title: n._title, _displayLabel: n._displayLabel, _path: n._path, _text: n._text,
           _hidden: n._hidden,
         }));
         const freshLinks = currentData.links.map(l => ({
@@ -156,7 +156,7 @@ function connectWS() {
             nodeTagColorMap[nd.id] = color;
             keepNodes.push({
               id: nd.id,
-              name: nd.title || nd.id.split('/').pop(),
+              name: nd.display_label || nd.title || nd.id.split('/').pop(),
               color: color,
               val: 10,
               _mass: 1,
@@ -202,8 +202,9 @@ function connectWS() {
         changedNodes.forEach(n => {
           const existing = keepNodes.find(x => x.id === n.id);
           if (existing) {
-            existing.name = n.title;
+            existing.name = n.display_label || n.title;
             existing._title = n.title;
+            existing._displayLabel = n.display_label || n.title;
           }
           if (nodeDataMap[n.id]) nodeDataMap[n.id].title = n.title;
         });
@@ -275,7 +276,7 @@ function connectWS() {
           id: n.id, name: n.name, color: n.color, val: n.val,
           _opacity: n._opacity, _shape: n._shape, _dormant: n._dormant,
           _mass: n._mass, _synapticGlow: n._synapticGlow,
-          _tags: n._tags, _title: n._title, _path: n._path, _text: n._text,
+          _tags: n._tags, _title: n._title, _displayLabel: n._displayLabel, _path: n._path, _text: n._text,
           _hidden: n._hidden,
         }));
         const freshLinks = currentData.links.map(l => ({

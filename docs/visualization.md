@@ -10,6 +10,7 @@ activation feedback during queries.
 
 - **Nodes** are colored by activation state: inactive (gray), seed (blue), activated (orange)
 - **Tag-based coloring** — toggle the "Tags" button to color nodes by their Obsidian frontmatter tags. Each tag gets a unique color from a consistent palette
+- **Source filtering** — the Source selector shows all nodes, only primary vault nodes, or only external source nodes. With tag coloring disabled, vault nodes use blue and external nodes use orange.
 - **Orphan nodes hidden by default** — nodes with zero connections are hidden to reduce clutter. Toggle "Orphans" to show them. The node counter updates to reflect visible vs total
 - **Shape-aware hit area** — node pointer area includes +6px padding for easier selection in dense regions
 
@@ -61,8 +62,10 @@ The side panel labels seeds and graph neighbors separately. This avoids presenti
 | Control | Description |
 |---------|-------------|
 | **Tags** toggle | Switch between activation-based and tag-based node coloring |
+| **Source** selector | Show all, vault-only, or external-only nodes |
 | **Orphans** toggle | Show/hide nodes with no connections |
 | **Direct-only** toggle | Show only wikilink edges |
+| **Counterpart** toggle | Show/hide reciprocal vault ↔ external project-anchor edges |
 | **Phantom** toggle | Show/hide semantic similarity edges |
 | **Hebbian threshold** slider | Minimum weight for Hebbian edges to show (0–1, default 0.3) |
 | **Spacing** slider | Network spacing — distance between nodes |
@@ -74,7 +77,7 @@ Slider values are persisted in `localStorage` and restored on page refresh.
 
 ## Tooltips
 
-- **Node tooltip** — shows on hover: note title, tags, vault path, degree (connection count), and a text preview of the note content. Dismiss on tap (mobile)
+- **Node tooltip** — shows on hover: note title, source type/id, relative path, open-file link, tags, degree (connection count), and a text preview of the note content. Dismiss on tap (mobile)
 - **Edge tooltip** — shows on hover: synaptic weight, edge type, connected note titles
 
 ## State management

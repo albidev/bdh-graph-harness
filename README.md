@@ -22,10 +22,11 @@ Turns an Obsidian vault into a living knowledge graph where:
 - **Neurogenesis** — LLM extracts new concepts from queries and creates notes in the vault, filtered by a 3-layer signal system (prompt engineering + regex blocklist + semantic dedup) to prevent noise; generation provenance is kept in frontmatter so it does not pollute embeddings
 - **Node quality scoring** — composite score (strong edges + mean weight + frequency) auto-prunes dormant nodes from visualization; re-activates on strong re-encounter
 - **Sleep-cycle consolidation** — periodic synaptic downscaling (×0.9), structural pruning below weight floor, and stale dormant node removal — mirrors biological sleep consolidation
-- **Server-side file watcher** — mtime-based polling detects vault changes from any source (Obsidian, LLM, scripts) and triggers incremental graph updates
+- **Server-side file watcher** — source-aware polling detects vault and configured external Markdown changes, debounces editor bursts, and triggers incremental graph/embedding updates with source-safe pruning
 - **LLM responses** — any OpenAI-compatible provider (OpenRouter, Ollama Cloud, local Ollama), with citations back to source notes
 - **Real-time visualization** — WebGL force-graph showing nodes activating, edges pulsing as Hebbian weights update during queries
 - **Multi-vault isolation** — optional `vaults:` configuration creates one graph state, watcher, BM25 index, lock, and ChromaDB collection per vault; requests select a vault explicitly without cross-contaminating embeddings or state
+- **Federated Markdown sources** — optional read-only `external_sources` merge selected Markdown trees into the primary graph with source-aware IDs, cross-source wikilinks, and configurable `include`/`exclude` globs
 
 For the theory behind these choices — why Hebbian plasticity, why Obsidian, why not just RAG — see [`docs/philosophy.md`](docs/philosophy.md).
 
@@ -64,7 +65,9 @@ bdh_graph_harness/
 ├── mcp_server.py            # MCP server (FastMCP, stdio + HTTP transport)
 ├── graph/
 │   ├── parser.py            # Frontmatter + wikilink parsing
-│   ├── builder.py           # Graph construction + incremental cache
+│   ├── builder.py           # Legacy graph construction + incremental cache
+│   ├── sources.py           # Vault/external Markdown source scanners
+│   ├── federated.py         # Source-aware IDs + federated graph builder
 │   └── cache.py             # Graph cache serialization
 ├── retrieval/
 │   ├── embeddings.py        # Ollama embedding client
@@ -89,7 +92,7 @@ bdh_graph_harness/
 │   ├── server.py            # aiohttp app setup + WebSocket
 │   ├── routes.py            # REST endpoints
 │   ├── ws.py                # WebSocket handlers
-│   └── watcher.py           # Server-side vault file watcher (mtime polling)
+│   └── watcher.py           # Source-aware polling watcher with debounce
 └── visualization/
     └── templates/index.html # force-graph (WebGL) real-time graph UI
 ```
@@ -128,6 +131,9 @@ python -m bdh_graph_harness --query "come funziona l'apprendimento Hebbian?"
 
 # Force graph rebuild
 python -m bdh_graph_harness --refresh
+
+# Read-only source scan (no ChromaDB, embeddings, LLM, or writes)
+python -m bdh_graph_harness --config bdh-config.local.yaml --scan-sources
 
 # Open visualization
 open http://localhost:8643
@@ -188,6 +194,7 @@ See `bdh-config.yaml` for all parameters. Key ones:
 | `quality_reactivation_score` | 0.50 | Activation score to re-awaken a dormant node |
 | `quality_prune_interval` | 50 | Re-evaluate node quality every N queries |
 | `graph_ignore` | `[]` | fnmatch patterns to exclude nodes from the graph (e.g. `[".bdh-*"]`) |
+| `external_sources` | `[]` | Read-only Markdown sources with per-source `include`/`exclude` glob lists; optional explicit `counterparts` link vault/external anchor notes |
 | `consolidation_downscale_factor` | 0.90 | Global weight multiplier per sleep cycle |
 | `consolidation_prune_weight_floor` | 0.02 | Delete synapses below this weight after downscaling |
 | `consolidation_dormant_persist_cycles` | 3 | Remove nodes dormant for N+ consolidation cycles |
