@@ -68,6 +68,15 @@ def test_external_source_include_exclude_and_cross_source_links(tmp_path):
         "external:projects/demo/docs/design.md",
         "vault:wiki/concepts/bdh.md",
     }
+    design_edges = edges["external:projects/demo/docs/design.md"]
+    assert any(
+        edge["target"] == "external:projects/demo/README.md"
+        and edge["type"] == "project_context"
+        and edge["relation"] == "same_project"
+        and edge["generated"] is True
+        for edge in design_edges
+    )
+    assert nodes["external:projects/demo/docs/design.md"]["project_group"] == "demo"
     assert unresolved == [{
         "source": "external:projects/demo/docs/design.md",
         "target": "missing-note",
