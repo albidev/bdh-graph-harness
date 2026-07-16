@@ -113,6 +113,36 @@ def _add_project_context_edges(
             })
 
 
+def _add_vault_counterpart_context_edges(
+    specs: Iterable[CounterpartSpec],
+    nodes: dict[str, dict],
+    edges: dict[str, list[dict]],
+    by_source_path: dict[tuple[str, str, str], str],
+) -> None:
+    """Bridge every external project note to its enriched vault counterpart."""
+    for spec in specs:
+        vault_id = by_source_path.get(("vault", "vault", _with_md(spec.vault_path)))
+        if not vault_id:
+            continue
+        for external_id, node in nodes.items():
+            if node.get("source_type") != "external":
+                continue
+            if node.get("project_group") != spec.group_id or external_id == vault_id:
+                continue
+            if any(edge.get("target") == vault_id for edge in edges[external_id]):
+                continue
+            edges[external_id].append({
+                "target": vault_id,
+                "type": "project_context",
+                "relation": "same_project",
+                "group_id": spec.group_id,
+                "weight": 0.55,
+                "explicit": False,
+                "generated": True,
+                "traversable": True,
+            })
+
+
 def _normalise_explicit_target(target: str) -> tuple[str, str, str] | None:
     """Parse ``vault:...`` or ``external:source/...`` link targets."""
     target = target.strip().replace("\\", "/")
@@ -244,11 +274,12 @@ def build_federated_graph(
             })
 
     _add_project_context_edges(documents, nodes, edges)
+    counterpart_specs = tuple(counterparts or ())
 
     # Counterparts are explicit reciprocal structural links between the two
     # anchor documents that represent the same project. They are not wikilinks
     # and not Hebbian edges; they exist to bridge the two provenance domains.
-    for spec in counterparts or ():
+    for spec in counterpart_specs:
         vault_id = by_source_path.get(("vault", "vault", _with_md(spec.vault_path)))
         external_id = by_source_path.get(("external", spec.source_id, _with_md(spec.external_path)))
         if not vault_id or not external_id:
@@ -278,6 +309,13 @@ def build_federated_graph(
                 "generated": True,
                 "traversable": True,
             })
+
+    _add_vault_counterpart_context_edges(
+        counterpart_specs,
+        nodes,
+        edges,
+        by_source_path,
+    )
 
     # Derive UI labels after counterpart assignment so explicit project_group
     # context is available to both vault and external anchor documents.
