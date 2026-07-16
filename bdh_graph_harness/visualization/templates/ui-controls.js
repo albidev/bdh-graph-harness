@@ -247,11 +247,8 @@ function applyEdgeFilters() {
     linkVisibilityState.set(linkKey(l), visible);
   });
 
-  // Update visible synapse count
-  const synEl = document.getElementById('stat-synapses');
-  if (synEl) synEl.textContent = visibleCount;
-
-  // Force force-graph to re-evaluate linkVisibility by passing fresh data
+  // Keep the top-bar Edges metric as the raw structural count. Visibility filters
+  // affect rendering only; they must not masquerade as graph mutations.
   setGraphDataPreservingView({ nodes: currentData.nodes, links: currentData.links });
 }
 
@@ -555,15 +552,18 @@ function toggleEdgeType(type, btn) {
 // ============================================================================
 function updateStatsDashboard() {
   const neurons = document.getElementById('stat-neurons')?.textContent || '—';
-  const synapses = document.getElementById('stat-synapses')?.textContent || '—';
+  const edges = document.getElementById('stat-synapses')?.textContent || '—';
+  const wikilinks = document.getElementById('stat-wikilinks')?.textContent || '—';
   const hebbian = document.getElementById('stat-hebbian')?.textContent || '—';
   const queries = document.getElementById('stat-queries')?.textContent || '—';
   const dashN = document.getElementById('dash-neurons');
   const dashS = document.getElementById('dash-synapses');
+  const dashW = document.getElementById('dash-wikilinks');
   const dashH = document.getElementById('dash-hebbian');
   const dashQ = document.getElementById('dash-queries');
   if (dashN) dashN.textContent = neurons;
-  if (dashS) dashS.textContent = synapses;
+  if (dashS) dashS.textContent = edges;
+  if (dashW) dashW.textContent = wikilinks;
   if (dashH) dashH.textContent = hebbian;
   if (dashQ) dashQ.textContent = queries;
 }
