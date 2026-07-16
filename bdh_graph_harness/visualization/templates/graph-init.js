@@ -252,17 +252,18 @@ function initNetwork(graphData) {
     };
     const counterpart = type === 'counterpart';
     const projectContext = type === 'project_context';
+    const projectReference = type === 'project_reference';
     fgLinks.push({
       source: e.source,
       target: e.target,
-      color: counterpart ? COLORS.edgeCounterpart : (projectContext ? COLORS.edgeProjectContext : COLORS.edgeWikilink),
-      width: counterpart ? 2.2 : (projectContext ? 1.2 : 0.5),
+      color: counterpart ? COLORS.edgeCounterpart : (projectContext ? COLORS.edgeProjectContext : (projectReference ? COLORS.edgeProjectReference : COLORS.edgeWikilink)),
+      width: counterpart ? 2.2 : ((projectContext || projectReference) ? 1.2 : 0.5),
       type: type,
       relation: e.relation,
       group_id: e.group_id,
       particles: 0,
       _id: eid,
-      _dashes: counterpart || projectContext,
+      _dashes: counterpart || projectContext || projectReference,
       _visible: true,
     });
   });

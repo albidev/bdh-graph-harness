@@ -131,10 +131,11 @@ def _add_vault_counterpart_context_edges(
                 continue
             if any(edge.get("target") == vault_id for edge in edges[external_id]):
                 continue
+            edge_type = "project_context" if spec.relation == "same_project" else "project_reference"
             edges[external_id].append({
                 "target": vault_id,
-                "type": "project_context",
-                "relation": "same_project",
+                "type": edge_type,
+                "relation": spec.relation,
                 "group_id": spec.group_id,
                 "weight": 0.55,
                 "explicit": False,
@@ -291,18 +292,20 @@ def build_federated_graph(
             raise ValueError(
                 f"Counterpart anchor(s) not found for {spec.group_id!r}: {', '.join(missing)}"
             )
-        nodes[vault_id]["project_group"] = spec.group_id
-        nodes[external_id]["project_group"] = spec.group_id
+        if spec.relation == "same_project":
+            nodes[vault_id]["project_group"] = spec.group_id
+            nodes[external_id]["project_group"] = spec.group_id
+        edge_type = "counterpart" if spec.relation == "same_project" else "project_reference"
         for source_id, target_id in ((vault_id, external_id), (external_id, vault_id)):
             if any(
-                edge.get("target") == target_id and edge.get("type") == "counterpart"
+                edge.get("target") == target_id and edge.get("type") == edge_type
                 for edge in edges[source_id]
             ):
                 continue
             edges[source_id].append({
                 "target": target_id,
-                "type": "counterpart",
-                "relation": "same_project",
+                "type": edge_type,
+                "relation": spec.relation,
                 "group_id": spec.group_id,
                 "weight": 1.0,
                 "explicit": False,
