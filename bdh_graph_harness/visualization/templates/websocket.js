@@ -226,6 +226,8 @@ function connectWS() {
         // 5. Update stats
         if (event.neurons != null) document.getElementById('stat-neurons').textContent = event.neurons;
         if (event.synapses != null) document.getElementById('stat-synapses').textContent = event.synapses;
+        const wikilinkEl = document.getElementById('stat-wikilinks');
+        if (wikilinkEl) wikilinkEl.textContent = keepLinks.filter(link => link.type === 'wikilink').length;
 
         // 6. Animate new concept birth (do NOT clobber existing activation state)
         if (newConceptsForAnimation.length > 0 && isHoverActive()) {
