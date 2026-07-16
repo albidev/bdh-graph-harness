@@ -68,7 +68,8 @@
     </div>
     <div class="stats">
       Neurons: <span id="stat-neurons">{neuron_count}</span>
-      · Synapses: <span id="stat-synapses">{synapse_count}</span>
+      · Edges: <span id="stat-synapses">{synapse_count}</span>
+      · Wikilinks: <span id="stat-wikilinks">—</span>
       · Hebbian: <span id="stat-hebbian">{hebbian_count}</span>
       <span id="stat-dormant" style="display:none"> · 💤 <span id="stat-dormant-count">0</span></span>
       <span id="stat-phantom" style="display:none"> · 👻 <span id="stat-phantom-count">0</span></span>
@@ -105,7 +106,8 @@
   </div>
   <div id="stats-dashboard">
     <div class="stat-cell"><span class="stat-icon">🧠</span><span class="stat-num" id="dash-neurons">—</span><span class="stat-label">Neurons</span></div>
-    <div class="stat-cell"><span class="stat-icon">🔗</span><span class="stat-num" id="dash-synapses">—</span><span class="stat-label">Synapses</span></div>
+    <div class="stat-cell"><span class="stat-icon">↗</span><span class="stat-num" id="dash-synapses">—</span><span class="stat-label">Edges</span></div>
+    <div class="stat-cell"><span class="stat-icon">🔗</span><span class="stat-num" id="dash-wikilinks">—</span><span class="stat-label">Wikilinks</span></div>
     <div class="stat-cell"><span class="stat-icon">⚡</span><span class="stat-num" id="dash-hebbian">—</span><span class="stat-label">Hebbian</span></div>
     <div class="stat-cell"><span class="stat-icon">🔍</span><span class="stat-num" id="dash-queries">—</span><span class="stat-label">Queries</span></div>
   </div>
@@ -140,11 +142,11 @@
   </div>
 </div>
 <script src="https://unpkg.com/force-graph/dist/force-graph.min.js"></script>
-<script src="/static/graph-core.js?v=project-reference-v1"></script>
-<script src="/static/graph-init.js?v=project-reference-v1"></script>
+<script src="/static/graph-core.js?v=edge-metrics-v1"></script>
+<script src="/static/graph-init.js?v=edge-metrics-v1"></script>
 <script src="/static/activation.js?v=graph-stability-v3"></script>
 <script src="/static/vault-selector.js?v=multi-vault"></script>
 <script src="/static/websocket.js?v=graph-stability-v3"></script>
-<script src="/static/ui-controls.js?v=project-reference-v1"></script>
+<script src="/static/ui-controls.js?v=edge-metrics-v1"></script>
 </body>
 </html>
