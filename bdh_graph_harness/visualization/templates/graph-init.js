@@ -63,8 +63,8 @@ function initNetwork(graphData) {
     degreeMap[e.target] = (degreeMap[e.target] || 0) + 1;
     if (!neighborMap[e.source]) neighborMap[e.source] = [];
     if (!neighborMap[e.target]) neighborMap[e.target] = [];
-    const srcNode = graphData.nodes.find(n => n.id === e.source);
-    const tgtNode = graphData.nodes.find(n => n.id === e.target);
+    const srcNode = nodeDataMap[e.source];
+    const tgtNode = nodeDataMap[e.target];
     if (tgtNode) neighborMap[e.source].push(tgtNode.title || e.target);
     if (srcNode) neighborMap[e.target].push(srcNode.title || e.source);
   });
@@ -118,12 +118,15 @@ function initNetwork(graphData) {
   const maxSynapticGlow = Math.max(1, ...Object.values(synapticGlowRaw));
 
   activeNodeIds.forEach(id => {
-    const n = graphData.nodes.find(x => x.id === id);
+    const n = nodeDataMap[id];
     if (!n) return;
     const deg = degreeMap[id] || 0;
     const isDormant = n.dormant === true;
     const qualityScore = n.quality_score || 0;
-    const tags = (n.tags || '').toLowerCase();
+    const tags = Array.isArray(n.tags)
+      ? n.tags.join(',').toLowerCase()
+      : String(n.tags || '').toLowerCase();
+    const isNeurogenesis = tags.includes('neurogenesis');
 
     // Determine shape
     let shape = 'circle';
@@ -135,6 +138,9 @@ function initNetwork(graphData) {
     let color = COLORS.inactive;
     if (isDormant) {
       color = COLORS.dormant;
+    } else if (isNeurogenesis) {
+      // Neurogenesis is an identity, not a tag category: keep it ultraviolet.
+      color = COLORS.neurogenesis;
     } else if (showTagColors && tagColorMap) {
       const rawTags = n.tags || '';
       let primaryTag = '';
@@ -233,8 +239,10 @@ function initNetwork(graphData) {
       counterpartSet.add(counterpartKey + ':rendered');
     }
     const eid = e.source + '→' + e.target;
-    const srcTitle = (graphData.nodes.find(n => n.id === e.source) || {}).display_label || (graphData.nodes.find(n => n.id === e.source) || {}).title || e.source;
-    const tgtTitle = (graphData.nodes.find(n => n.id === e.target) || {}).display_label || (graphData.nodes.find(n => n.id === e.target) || {}).title || e.target;
+    const srcNode = nodeDataMap[e.source] || {};
+    const tgtNode = nodeDataMap[e.target] || {};
+    const srcTitle = srcNode.display_label || srcNode.title || e.source;
+    const tgtTitle = tgtNode.display_label || tgtNode.title || e.target;
     edgeInfoMap[eid] = {
       source_title: srcTitle,
       target_title: tgtTitle,
@@ -262,8 +270,8 @@ function initNetwork(graphData) {
   (graphData.phantom || []).forEach(p => {
     if (!nodeIdSet.has(p.source) || !nodeIdSet.has(p.target)) return;
     const eid = 'phantom_' + p.source + '→' + p.target;
-    const srcTitle = (graphData.nodes.find(n => n.id === p.source) || {}).title || p.source;
-    const tgtTitle = (graphData.nodes.find(n => n.id === p.target) || {}).title || p.target;
+    const srcTitle = (nodeDataMap[p.source] || {}).title || p.source;
+    const tgtTitle = (nodeDataMap[p.target] || {}).title || p.target;
     edgeInfoMap[eid] = { source_title: srcTitle, target_title: tgtTitle, type: 'phantom', similarity: p.similarity };
     fgLinks.push({
       source: p.source,
@@ -290,8 +298,8 @@ function initNetwork(graphData) {
       return;
     }
     const eid = 'hebb_' + h.note_a + '→' + h.note_b;
-    const srcTitle = (graphData.nodes.find(n => n.id === h.note_a) || {}).title || h.note_a;
-    const tgtTitle = (graphData.nodes.find(n => n.id === h.note_b) || {}).title || h.note_b;
+    const srcTitle = (nodeDataMap[h.note_a] || {}).title || h.note_a;
+    const tgtTitle = (nodeDataMap[h.note_b] || {}).title || h.note_b;
     edgeInfoMap[eid] = { source_title: srcTitle, target_title: tgtTitle, type: 'hebbian', weight: h.weight, frequency: h.frequency };
     const w = Math.min(1 + h.weight * 3, 5);
     fgLinks.push({
@@ -387,7 +395,6 @@ function initNetwork(graphData) {
     .linkDirectionalParticleCanvasObject(drawNeuralParticle)
     .warmupTicks(100)
     .cooldownTime(30000)
-    .autoPauseRedraw(false)
     .enableNodeDrag(true)
     .onNodeHover((node, prevNode) => {
       if (node) {
@@ -441,101 +448,9 @@ function initNetwork(graphData) {
     graph.d3Force('collision').radius(node => nodeRadius(node.val || 4) + 4);
   }
 
-  // Cluster positions were seeded before graph creation. Do not run a live
-  // centroid force here: it causes slow collapse after the simulation cools.
-  // Manual collision force — grid-based spatial hash for O(N) performance.
-  // With 584 nodes, the old O(N²) loop did 170k comparisons per tick.
-  // This grid approach bins nodes into cells and only checks neighbors.
-  if (!window.__collisionForceInstalled) {
-    window.__collisionForceInstalled = true;
-    (function installCollisionForce() {
-      const MIN_GAP = 8; // minimum pixel gap between node edges
-      let lastTick = 0;
-      function tick() {
-        if (!graph) return;
-        const now = performance.now();
-        if (now - lastTick < 50) { requestAnimationFrame(tick); return; }
-        lastTick = now;
-        const data = graph.graphData();
-        if (!data || !data.nodes) { requestAnimationFrame(tick); return; }
-        const nodes = data.nodes;
-        const N = nodes.length;
-
-        // Compute bounding box and cell size
-        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-        for (let i = 0; i < N; i++) {
-          const n = nodes[i];
-          if (n.x == null || n.y == null) continue;
-          if (n.x < minX) minX = n.x;
-          if (n.x > maxX) maxX = n.x;
-          if (n.y < minY) minY = n.y;
-          if (n.y > maxY) maxY = n.y;
-        }
-        if (minX === Infinity) { requestAnimationFrame(tick); return; }
-
-        // Cell size = max node radius + MIN_GAP (ensures neighbors are in adjacent cells)
-        const CELL_SIZE = 40; // ~nodeRadius(40) + MIN_GAP + slack = 10.7 + 8 + 21
-        const cols = Math.max(1, Math.ceil((maxX - minX) / CELL_SIZE) + 2);
-        const rows = Math.max(1, Math.ceil((maxY - minY) / CELL_SIZE) + 2);
-
-        // Build spatial hash grid
-        const grid = new Array(cols * rows);
-        for (let i = 0; i < N; i++) {
-          const n = nodes[i];
-          if (n.x == null || n.y == null) continue;
-          const cx = Math.floor((n.x - minX) / CELL_SIZE) + 1;
-          const cy = Math.floor((n.y - minY) / CELL_SIZE) + 1;
-          const idx = cy * cols + cx;
-          if (!grid[idx]) grid[idx] = [];
-          grid[idx].push(i);
-        }
-
-        // Check collisions only within 3x3 neighborhood of each cell
-        for (let gy = 1; gy < rows - 1; gy++) {
-          for (let gx = 1; gx < cols - 1; gx++) {
-            const cellIdx = gy * cols + gx;
-            const cell = grid[cellIdx];
-            if (!cell) continue;
-            // Check against same cell + 8 neighbors
-            for (let dy = -1; dy <= 1; dy++) {
-              for (let dx = -1; dx <= 1; dx++) {
-                const nIdx = (gy + dy) * cols + (gx + dx);
-                const nCell = grid[nIdx];
-                if (!nCell) continue;
-                for (const i of cell) {
-                  const a = nodes[i];
-                  const ra = nodeRadius(a.val || 4);
-                  for (const j of nCell) {
-                    if (j <= i) continue; // avoid double-checking pairs
-                    const b = nodes[j];
-                    const rb = nodeRadius(b.val || 4);
-                    const ddx = b.x - a.x;
-                    const ddy = b.y - a.y;
-                    const dist = Math.sqrt(ddx * ddx + ddy * ddy);
-                    const minDist = ra + rb + MIN_GAP;
-                    if (dist < minDist && dist > 0.01) {
-                      const push = (minDist - dist) * 0.15;
-                      const nx = ddx / dist;
-                      const ny = ddy / dist;
-                      const ma = Math.max(0.35, a._mass || 1);
-                      const mb = Math.max(0.35, b._mass || 1);
-                      const totalMass = ma + mb;
-                      a.x -= nx * push * (mb / totalMass);
-                      a.y -= ny * push * (mb / totalMass);
-                      b.x += nx * push * (ma / totalMass);
-                      b.y += ny * push * (ma / totalMass);
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-        requestAnimationFrame(tick);
-      }
-      requestAnimationFrame(tick);
-    })();
-  }
+  // Use force-graph's built-in d3 collision force only. A second perpetual
+  // requestAnimationFrame collision loop used to fight d3 over node.x/y and
+  // kept the page busy forever, especially during graphData() rebuilds.
   applyRestoredGraphControls();
   // Let simulation settle before rendering
   graph.d3ReheatSimulation();
@@ -596,10 +511,28 @@ function initNetwork(graphData) {
 // Repaint mutated node/link style without resetting the force-graph viewport.
 // Calling graph.graphData(currentData) for every query highlight makes force-graph
 // recalculate bounds/transform and the graph appears to jump out of the window.
+let redrawRestoreTimer = null;
+
 function requestGraphRedraw() {
   if (!graph) return;
+  const hoverActive = (typeof isHoverActive === 'function' && isHoverActive()) || !!hoverEdgeId;
+  if (redrawRestoreTimer) {
+    clearTimeout(redrawRestoreTimer);
+    redrawRestoreTimer = null;
+  }
   if (typeof graph.autoPauseRedraw === 'function') graph.autoPauseRedraw(false);
   if (typeof graph.resumeAnimation === 'function') graph.resumeAnimation();
+  if (hoverActive) return;
+
+  // One-shot style updates get a short repaint window, then return to idle.
+  redrawRestoreTimer = setTimeout(() => {
+    redrawRestoreTimer = null;
+    if (!graph) return;
+    const stillHovering = (typeof isHoverActive === 'function' && isHoverActive()) || !!hoverEdgeId;
+    if (!stillHovering && typeof graph.autoPauseRedraw === 'function') {
+      graph.autoPauseRedraw(true);
+    }
+  }, 120);
 }
 
 // Use only for structural changes (added/removed nodes or links). Preserve the

@@ -25,6 +25,7 @@ from bdh_graph_harness.memory.semantic_consolidation import (
     save_checkpoint_atomic,
     select_candidate_notes,
     select_candidate_sessions,
+    extract_bdh_candidates,
 )
 from bdh_graph_harness.llm import llm_respond, llm_stream
 from bdh_graph_harness.neurogenesis import extract_new_concepts, create_note
@@ -901,7 +902,17 @@ async def _run_semantic_source(source: dict, ctx, ws_clients: set, *, dry_run: b
     source_name = config.get(
         'semantic_consolidation_source', 'nightly_semantic_consolidation'
     )
-    content = source['content']
+    content = extract_bdh_candidates(source['content'], source_path=source['path'])
+    if source['path'] == 'memory/learned/bdh-session-recovery-delta.md' and not content.strip():
+        return {
+            'path': source['path'],
+            'new_concepts': [],
+            'hebbian_updates': 0,
+            'activated_notes': 0,
+            'dry_run': dry_run,
+            'skipped': True,
+            'skip_reason': 'no_valid_bdh_candidates',
+        }
     source_label = source.get('title') or source['path']
     query = (
         f"Semantic consolidation of {source_label}\n"

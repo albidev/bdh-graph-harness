@@ -3,6 +3,7 @@
 // ============================================================================
 let activeWebSocket = null;
 let lastEventSequence = null;
+let graphRefreshGeneration = 0;
 
 function closeActiveWebSocket() {
   if (!activeWebSocket) return;
@@ -16,7 +17,7 @@ function sendQuery() {
   const input = document.getElementById('query-input');
   const btn = document.getElementById('query-btn');
   const query = input.value.trim();
-  if (!query) return;
+  if (!query || btn.disabled) return;
   btn.disabled = true;
   btn.textContent = 'Processing...';
   beginQueryParticles();
@@ -42,7 +43,10 @@ function sendQuery() {
       if (data.response) {
         document.getElementById('response-text').textContent = data.response;
       }
-      if (data.activated_notes) {
+      // The WebSocket owns activation rendering when connected. The HTTP
+      // response only updates text/stats; use it as a fallback if WS is down.
+      const wsReady = activeWebSocket && activeWebSocket.readyState === WebSocket.OPEN;
+      if (data.activated_notes && !wsReady) {
         handleActivation({
           type: 'activation',
           query: query,
@@ -100,7 +104,7 @@ function connectWS() {
       if (event.type === 'graph') {
         initNetwork(event);
         if (showTagColors) toggleTagColors(true);
-      } else if (event.type === 'activation') {
+      } else if (event.type === 'activation' || event.type === 'neurogenesis') {
         handleActivation(event);
       } else if (event.type === 'graph_refresh') {
         // Delta update: build a fresh graph and submit all at once.
@@ -111,9 +115,14 @@ function connectWS() {
         const newConcepts = event.new_concepts || [];
         const deletedNodes = event.deleted_nodes || [];
         const addedNodeData = event.added_node_data || [];
+        const refreshGeneration = ++graphRefreshGeneration;
 
         if (!graph) return;
         const currentData = graph.graphData();
+        const existingNodeIds = new Set(currentData.nodes.map(n => n.id));
+        const newConceptsForAnimation = newConcepts.filter(nc =>
+          !existingNodeIds.has(nc.id) && addedNodeData.some(nd => nd.id === nc.id)
+        );
         const deletedSet = new Set(deletedNodes);
 
         // Build a fresh, independent copy of the current graph
@@ -211,30 +220,27 @@ function connectWS() {
 
         // 4. Submit the fresh, complete graph
         setGraphDataPreservingView({ nodes: keepNodes, links: keepLinks }, { reheat: true });
-        if (newConcepts.length > 0 || addedNodeData.length > 0) {
-          setTimeout(() => {
-            if (!graph || typeof graph.zoomToFit !== 'function') return;
-            graph.zoomToFit(600, 50);
-            if (typeof syncZoomUI === 'function') syncZoomUI(false);
-          }, 900);
-        }
+        // Preserve the user's camera after a structural delta. Automatic delayed
+        // zoomToFit used to fight activation, dragging, and subsequent refreshes.
 
         // 5. Update stats
         if (event.neurons != null) document.getElementById('stat-neurons').textContent = event.neurons;
         if (event.synapses != null) document.getElementById('stat-synapses').textContent = event.synapses;
 
         // 6. Animate new concept birth (do NOT clobber existing activation state)
-        if (newConcepts.length > 0 && isHoverActive()) {
+        if (newConceptsForAnimation.length > 0 && isHoverActive()) {
           // Only pulse new concepts if user is actively hovering
-        } else if (newConcepts.length > 0) {
+        } else if (newConceptsForAnimation.length > 0) {
           // Subtle birth pulse without wiping query activation
-          newConcepts.forEach((nc, i) => {
+          newConceptsForAnimation.forEach((nc, i) => {
             setTimeout(() => {
+              if (refreshGeneration !== graphRefreshGeneration) return;
               nodeActivationOpacity.set(nc.id, 1.0);
               nodeActivationColor.set(nc.id, COLORS.neurogenesis);
               requestGraphRedraw();
             }, i * 150);
             setTimeout(() => {
+              if (refreshGeneration !== graphRefreshGeneration) return;
               // Restore to dim if query is active, or full opacity if not
               const hasQuery = nodeActivationOpacity.size > 0 && [...nodeActivationOpacity.values()].some(o => o < 1);
               nodeActivationOpacity.set(nc.id, hasQuery ? 0.3 : 1.0);
@@ -252,6 +258,7 @@ function connectWS() {
               nodeActivationOpacity.set(n.id, 1.0);
               requestGraphRedraw();
               setTimeout(() => {
+                if (refreshGeneration !== graphRefreshGeneration) return;
                 nodeActivationColor.delete(n.id);
                 const hasQuery = nodeActivationOpacity.size > 0 && [...nodeActivationOpacity.values()].some(o => o < 1);
                 nodeActivationOpacity.set(n.id, hasQuery ? 0.3 : 1.0);
@@ -266,6 +273,7 @@ function connectWS() {
         console.log('Node update:', event.message);
         const changedNodes = event.changed_nodes || [];
         const deletedNodes = event.deleted_nodes || [];
+        const updateGeneration = ++graphRefreshGeneration;
 
         if (!graph) return;
         const currentData = graph.graphData();
@@ -293,26 +301,37 @@ function connectWS() {
           return !deletedSet.has(l.source) && !deletedSet.has(l.target);
         });
 
-        if (deletedNodes.length > 0) {
-          setGraphDataPreservingView({ nodes: keepNodes, links: keepLinks }, { reheat: true });
+        // Apply changed labels before submitting the fresh snapshot.
+        changedNodes.forEach(n => {
+          const existing = keepNodes.find(x => x.id === n.id);
+          if (existing) {
+            existing.name = n.display_label || n.title;
+            existing._title = n.title;
+            existing._displayLabel = n.display_label || n.title;
+          }
+          if (nodeDataMap[n.id]) {
+            nodeDataMap[n.id].title = n.title;
+            nodeDataMap[n.id].display_label = n.display_label || n.title;
+          }
+        });
+
+        if (deletedNodes.length > 0 || changedNodes.length > 0) {
+          setGraphDataPreservingView(
+            { nodes: keepNodes, links: keepLinks },
+            { reheat: deletedNodes.length > 0 },
+          );
         }
 
-        // Update changed nodes with pulse via activation Maps
+        // Pulse changed nodes via activation Maps
         changedNodes.forEach((n, i) => {
           setTimeout(() => {
-            // Update name in fresh data (will be reflected on next graph refresh)
-            const existing = keepNodes.find(x => x.id === n.id);
-            if (existing) {
-              existing.name = n.title;
-              existing._title = n.title;
-            }
-            if (nodeDataMap[n.id]) nodeDataMap[n.id].title = n.title;
-
+            if (updateGeneration !== graphRefreshGeneration) return;
             // Pulse via Maps
             nodeActivationColor.set(n.id, COLORS.activated);
             nodeActivationOpacity.set(n.id, 1.0);
             requestGraphRedraw();
             setTimeout(() => {
+              if (updateGeneration !== graphRefreshGeneration) return;
               nodeActivationColor.delete(n.id);
               const hasQuery = nodeActivationOpacity.size > 0 && [...nodeActivationOpacity.values()].some(o => o < 1);
               nodeActivationOpacity.set(n.id, hasQuery ? 0.3 : 1.0);

@@ -120,9 +120,15 @@ function toggleTagColors(enabled) {
   if (!graph) return;
   const currentData = graph.graphData();
   currentData.nodes.forEach(node => {
-    const n = allGraphNodes.find(x => x.id === node.id);
+    const n = nodeDataMap[node.id] || allGraphNodes.find(x => x.id === node.id);
     if (!n || node._dormant) return;
-    if (enabled && tagColorMap) {
+    const isNeurogenesis = (Array.isArray(n.tags) ? n.tags.join(',') : String(n.tags || ''))
+      .toLowerCase().includes('neurogenesis');
+    if (isNeurogenesis) {
+      // Keep neurogenesis identity stable when tag colors are toggled.
+      node.color = COLORS.neurogenesis;
+      nodeTagColorMap[node.id] = COLORS.neurogenesis;
+    } else if (enabled && tagColorMap) {
       const rawTags = n.tags || '';
       let primaryTag = '';
       if (Array.isArray(rawTags) && rawTags.length > 0) {
@@ -372,6 +378,7 @@ function resetQuery() {
   document.getElementById('activated-list').innerHTML = '<div class="empty">No activations yet</div>';
 
   if (graph) {
+    if (typeof invalidateActivationAnimations === 'function') invalidateActivationAnimations();
     clearActivationState();
     endQueryParticles();
     requestGraphRedraw();
