@@ -63,6 +63,56 @@ def _source_key(document: Document, relative_path: str) -> tuple[str, str, str]:
     return document.source_type, document.source_id, _with_md(relative_path)
 
 
+def _external_project_group(document: Document) -> str | None:
+    """Return the project directory for an external document."""
+    if document.source_type != "external":
+        return None
+    parts = PurePosixPath(document.relative_path).parts
+    return parts[0] if len(parts) > 1 else None
+
+
+def _add_project_context_edges(
+    documents: list[Document],
+    nodes: dict[str, dict],
+    edges: dict[str, list[dict]],
+) -> None:
+    """Connect external project notes to their root README without file writes.
+
+    External repositories are read-only and often contain no Obsidian
+    wikilinks. A deterministic star rooted at ``<project>/README.md`` gives
+    the graph project coherence without creating a synthetic parent node or a
+    quadratic all-to-all edge set.
+    """
+    anchors: dict[tuple[str, str], str] = {}
+    for document in documents:
+        group = _external_project_group(document)
+        if group:
+            nodes[document.id].setdefault("project_group", group)
+        if group and document.relative_path == f"{group}/README.md":
+            anchors[(document.source_id, group)] = document.id
+
+    for document in documents:
+        group = _external_project_group(document)
+        if not group:
+            continue
+        anchor_id = anchors.get((document.source_id, group))
+        if not anchor_id or document.id == anchor_id:
+            continue
+        for source_id, target_id in ((document.id, anchor_id), (anchor_id, document.id)):
+            if any(edge.get("target") == target_id for edge in edges[source_id]):
+                continue
+            edges[source_id].append({
+                "target": target_id,
+                "type": "project_context",
+                "relation": "same_project",
+                "group_id": group,
+                "weight": 0.35,
+                "explicit": False,
+                "generated": True,
+                "traversable": True,
+            })
+
+
 def _normalise_explicit_target(target: str) -> tuple[str, str, str] | None:
     """Parse ``vault:...`` or ``external:source/...`` link targets."""
     target = target.strip().replace("\\", "/")
@@ -192,6 +242,8 @@ def build_federated_graph(
                 "weight": 1.0,
                 "explicit": bool(_normalise_explicit_target(target)),
             })
+
+    _add_project_context_edges(documents, nodes, edges)
 
     # Counterparts are explicit reciprocal structural links between the two
     # anchor documents that represent the same project. They are not wikilinks
