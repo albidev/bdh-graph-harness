@@ -10,6 +10,7 @@ aiohttp ``Application``.
 import asyncio
 import json
 import os
+import sys
 from datetime import datetime
 
 from aiohttp import web
@@ -29,6 +30,12 @@ from bdh_graph_harness.memory.semantic_consolidation import (
 )
 from bdh_graph_harness.llm import llm_respond, llm_stream
 from bdh_graph_harness.neurogenesis import extract_new_concepts, create_note
+from bdh_graph_harness.neurogenesis.dedupe import find_semantic_match
+from bdh_graph_harness.neurogenesis.merge import (
+    MERGE_SIMILARITY_THRESHOLD,
+    assimilate_evidence,
+    looks_conflicting,
+)
 from bdh_graph_harness.graph import _resolve_target
 from bdh_graph_harness.api.ws import broadcast_activation
 
@@ -359,7 +366,16 @@ def run_neurogenesis(
     if config.get('neurogenesis_enabled', True):
         n = ctx.nodes
         active_titles = [n[nid]['title'] for nid in active if nid in n]
-        new_concepts = extract_new_concepts(response_text, query, active, n) or []
+        try:
+            new_concepts = extract_new_concepts(
+                response_text, query, active, n, allow_existing=True
+            ) or []
+        except TypeError as exc:
+            # Keep compatibility with test adapters and third-party wrappers
+            # that still expose the pre-merge four-argument extractor.
+            if 'allow_existing' not in str(exc):
+                raise
+            new_concepts = extract_new_concepts(response_text, query, active, n) or []
         if max_concepts is not None:
             new_concepts = new_concepts[:max(0, int(max_concepts))]
         for concept in new_concepts:
@@ -368,6 +384,48 @@ def run_neurogenesis(
             if not title or not definition:
                 continue
             vault_root = ctx.config.path
+
+            # BDH Neurogenesis Merge: exact identity or a high-confidence
+            # semantic match assimilates evidence into the canonical note.
+            canonical_id = next(
+                (nid for nid, node in n.items() if node.get('title', '').casefold() == title.casefold()),
+                None,
+            )
+            match = None
+            if canonical_id is None:
+                match = find_semantic_match(
+                    title,
+                    definition,
+                    threshold=MERGE_SIMILARITY_THRESHOLD,
+                    vault_root=vault_root,
+                    config=config,
+                )
+                canonical_id = match.get('node_id') if match else None
+
+            if canonical_id is not None and canonical_id in n and not looks_conflicting(definition):
+                merged = assimilate_evidence(
+                    vault_root,
+                    canonical_id,
+                    n[canonical_id],
+                    definition,
+                    source_notes=active_titles,
+                    query=query,
+                )
+                if merged['status'] in {'merged', 'already_present'}:
+                    new_concepts_list.append({
+                        'id': canonical_id,
+                        'title': n[canonical_id].get('title', title),
+                        'source_notes': active_titles[:3],
+                        'merged': merged['status'] == 'merged',
+                        'similarity': match.get('similarity') if match else 1.0,
+                    })
+                    continue
+            elif canonical_id is not None and canonical_id in n:
+                print(
+                    f"  ⚠ Neurogenesis conflict not merged: '{title}' -> '{canonical_id}'",
+                    file=sys.stderr,
+                )
+
             new_note_id = create_note(
                 vault_root, title, definition, active_titles, query,
                 neurogenesis_dir=ctx.config.settings.get('neurogenesis_dir'),
