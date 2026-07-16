@@ -10,6 +10,7 @@ from types import SimpleNamespace
 import pytest
 
 from bdh_graph_harness.memory.semantic_consolidation import (
+    extract_bdh_candidates,
     load_checkpoint,
     save_checkpoint_atomic,
     select_candidate_notes,
@@ -44,6 +45,41 @@ def _config(**overrides):
     }
     config.update(overrides)
     return config
+
+
+def test_extract_bdh_candidates_is_fail_closed():
+    content = """# Recovery report
+
+## Decisioni
+- branch: feature/example
+- colore UI: ultraviolet
+
+## BDH Candidates
+
+### Candidate: Vite dependency recovery
+- kind: lesson
+- bdh_candidate: true
+- title: Vite Dependency Corruption Recovery
+- definition: Reinstalling node_modules resolves an inconsistent Vite dependency tree.
+
+### Candidate: Temporary branch detail
+- kind: decision
+- bdh_candidate: true
+- title: Feature branch
+- definition: Keep this branch active.
+
+## Task aperti
+- Update the branch later.
+"""
+    selected = extract_bdh_candidates(
+        content,
+        source_path="memory/learned/bdh-session-recovery-delta.md",
+    )
+    assert "Vite Dependency Corruption Recovery" in selected
+    assert "ultraviolet" not in selected
+    assert "Feature branch" not in selected
+    assert "kind: lesson" in selected
+    assert extract_bdh_candidates(content, source_path="memory/learned/other.md") == content
 
 
 def test_select_candidate_notes_uses_content_hash_and_excludes_noise(tmp_path):
