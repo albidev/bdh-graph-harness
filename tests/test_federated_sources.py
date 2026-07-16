@@ -188,6 +188,29 @@ def test_counterpart_specs_from_config_supports_singular_and_plural_forms(tmp_pa
         ("docs", "docs"),
     ]
     assert specs[0].external_path == "demo/README.md"
+    assert specs[0].relation == "same_project"
+
+
+def test_counterpart_specs_support_cross_project_reference_relation(tmp_path):
+    vault = tmp_path / "vault"
+    projects = tmp_path / "projects"
+    vault.mkdir()
+    projects.mkdir()
+    specs = counterpart_specs_from_config({
+        "vault_path": str(vault),
+        "external_sources": [{
+            "id": "projects",
+            "path": str(projects),
+            "counterparts": [{
+                "group_id": "bridge",
+                "vault_path": "projects/bdh/README.md",
+                "external_path": "bridge/README.md",
+                "relation": "references_project",
+            }],
+        }],
+    })
+
+    assert specs[0].relation == "references_project"
 
 
 def test_sources_from_config_supports_include_exclude_and_read_only_defaults(tmp_path):
