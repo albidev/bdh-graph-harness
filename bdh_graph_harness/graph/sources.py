@@ -52,12 +52,13 @@ class Document:
 
 @dataclass(frozen=True)
 class CounterpartSpec:
-    """Explicit pair of anchor notes representing the same project."""
+    """Explicit pair of anchor notes and their semantic relationship."""
 
     source_id: str
     group_id: str
     vault_path: str
     external_path: str
+    relation: str = "same_project"
 
 
 class DocumentSource(Protocol):
@@ -273,11 +274,18 @@ def counterpart_specs_from_config(config: dict) -> list[CounterpartSpec]:
                 raise ValueError(
                     "Counterpart requires 'group_id', 'vault_path', and 'external_path'"
                 )
+            relation = raw.get("relation", "same_project")
+            if relation not in {"same_project", "references_project"}:
+                raise ValueError(
+                    f"Unsupported counterpart relation {relation!r}; "
+                    "expected 'same_project' or 'references_project'"
+                )
             specs.append(CounterpartSpec(
                 source_id=source_id,
                 group_id=validate_source_id(group_id),
                 vault_path=_with_posix_path(vault_path),
                 external_path=_with_posix_path(external_path),
+                relation=relation,
             ))
     return specs
 

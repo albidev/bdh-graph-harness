@@ -232,7 +232,7 @@ function applyEdgeFilters() {
     const type = info.type || l.type || 'wikilink';
     let visible = true;
     if (directOnly) {
-      visible = type === 'wikilink' || type === 'counterpart' || type === 'project_context';
+      visible = type === 'wikilink' || type === 'counterpart' || type === 'project_context' || type === 'project_reference';
     } else {
       // Check edge type toggle first
       if (edgeTypeVisible[type] === false) {
@@ -266,7 +266,7 @@ function initEdgeVisibility() {
     const type = info.type || l.type || 'wikilink';
     let visible = true;
     if (directOnly) {
-      visible = type === 'wikilink' || type === 'counterpart' || type === 'project_context';
+      visible = type === 'wikilink' || type === 'counterpart' || type === 'project_context' || type === 'project_reference';
     } else {
       if (edgeTypeVisible[type] === false) {
         visible = false;
@@ -542,7 +542,7 @@ function searchNode(query) {
 // ============================================================================
 // Edge type filtering — toggle visibility by edge type (wikilink/hebbian/phantom)
 // ============================================================================
-const edgeTypeVisible = { wikilink: true, counterpart: true, project_context: true, hebbian: true, phantom: true };
+const edgeTypeVisible = { wikilink: true, counterpart: true, project_context: true, project_reference: true, hebbian: true, phantom: true };
 
 function toggleEdgeType(type, btn) {
   edgeTypeVisible[type] = !edgeTypeVisible[type];
