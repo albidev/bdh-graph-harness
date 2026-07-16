@@ -1,12 +1,25 @@
 
-// ============================================================================
-// Activation handler — dim non-active nodes, light up active ones, pulse Hebbian
-// ============================================================================
+// Animation generation invalidates callbacks from older queries.
+let activationGeneration = 0;
+
+function invalidateActivationAnimations() {
+  activationGeneration += 1;
+}
+
 function handleActivation(event) {
-  const activated = event.activated_notes || [];
+  const isNeurogenesisUpdate = event.type === 'neurogenesis';
+  const generation = isNeurogenesisUpdate
+    ? activationGeneration
+    : ++activationGeneration;
+  const isCurrent = () => generation === activationGeneration;
+  const activated = isNeurogenesisUpdate
+    ? Array.from(activatedNotesById.values())
+    : (event.activated_notes || []);
   const newConcepts = event.new_concepts || [];
-  activatedNotesById.clear();
-  activated.forEach(note => activatedNotesById.set(note.id, note));
+  if (!isNeurogenesisUpdate) {
+    activatedNotesById.clear();
+    activated.forEach(note => activatedNotesById.set(note.id, note));
+  }
   const activatedIds = new Set(activated.map(n => n.id));
   const seedId = activated.length > 0 ? activated[0].id : null;
   const hasActivation = activatedIds.size > 0;
@@ -120,6 +133,7 @@ function handleActivation(event) {
 
     // Pulse: use Maps for particles/width/color
     setTimeout(() => {
+      if (!isCurrent()) return;
       linkParticlesState.set(key, 8);
       linkParticleColorState.set(key, COLORS.edgeHebbianPulse);
       linkActivationColor.set(key, COLORS.edgeHebbianPulse);
@@ -129,17 +143,20 @@ function handleActivation(event) {
     }, delay);
 
     setTimeout(() => {
+      if (!isCurrent()) return;
       linkWidthState.set(key, newWidth + 4);
       requestGraphRedraw();
     }, delay + 600);
 
     setTimeout(() => {
+      if (!isCurrent()) return;
       linkWidthState.set(key, newWidth + 1.5);
       linkActivationColor.set(key, weightColor(h.weight));
       requestGraphRedraw();
     }, delay + 1400);
 
     setTimeout(() => {
+      if (!isCurrent()) return;
       linkWidthState.delete(key);
       linkParticlesState.delete(key);
       linkParticleColorState.delete(key);
@@ -165,6 +182,7 @@ function handleActivation(event) {
   // Reset activation state after all Hebbian settle animations finish
   const activationTimeoutMs = Math.max(5000, (hebbianUpdates.length - 1) * 120 + 3000);
   setTimeout(() => {
+    if (!isCurrent()) return;
     clearActivationState();
     endQueryParticles();
     requestGraphRedraw();
@@ -228,7 +246,6 @@ function handleActivation(event) {
       _dashes: l._dashes, weight: l.weight, frequency: l.frequency,
       particleColor: l.particleColor,
     }));
-    const nodeMap = new Map(freshNodes.map(n => [n.id, n]));
 
     newConcepts.forEach((nc, ncIdx) => {
       if (nc.id && !nodeDataMap[nc.id]) {
@@ -244,7 +261,7 @@ function handleActivation(event) {
           id: nc.id,
           name: nc.title || nc.id.split('/').pop(),
           color: COLORS.neurogenesis,
-          val: 40,  // start large for birth pulse
+          val: 20,
           _mass: 2.2,
           _synapticGlow: 0.85,
           _opacity: 1.0,
@@ -255,12 +272,12 @@ function handleActivation(event) {
           _path: '',
           _text: nc.definition || '',
         };
-        nodeMap.set(nc.id, newNode);
+        nodeBirthScaleState.set(nc.id, 2.0);
         freshNodes.push(newNode);
 
         // Add edges to source notes
         const sources = nc.source_notes || [];
-        sources.forEach((srcTitle, srcIdx) => {
+        sources.forEach(srcTitle => {
           const srcNode = allGraphNodes.find(n => n.title === srcTitle);
           if (srcNode) {
             const eid = nc.id + '→' + srcNode.id;
@@ -279,42 +296,36 @@ function handleActivation(event) {
           }
         });
 
-        // Birth pulse animation: shrink node via Maps
+        // Animate the birth scale through the renderer Maps. Do not rebuild
+        // graphData for every pulse: that restarts d3 and causes visible jumps.
         setTimeout(() => {
-          const liveNode = nodeMap.get(nc.id);
-          if (liveNode) liveNode.val = 30;
-          // Rebuild with the smaller val
-          const updated = {
-            nodes: freshNodes.map(n => ({...n})),
-            links: freshLinks.map(l => ({...l})),
-          };
-          setGraphDataPreservingView(updated, { reheat: true });
+          if (!isCurrent()) return;
+          nodeBirthScaleState.set(nc.id, 1.5);
+          requestGraphRedraw();
         }, birthDelay + 300);
 
         setTimeout(() => {
-          const liveNode = nodeMap.get(nc.id);
-          if (liveNode) liveNode.val = 20;
+          if (!isCurrent()) return;
+          nodeBirthScaleState.delete(nc.id);
           requestGraphRedraw();
         }, birthDelay + 600);
 
         const cEl = document.getElementById('stat-concepts');
-        if (cEl) { cEl.textContent = totalConcepts; cEl.style.color = '#3fb950'; setTimeout(() => { cEl.style.color = ''; }, 1500); }
+        if (cEl) {
+          cEl.textContent = totalConcepts;
+          cEl.style.color = COLORS.neurogenesis;
+          setTimeout(() => {
+            if (isCurrent()) cEl.style.color = '';
+          }, 1500);
+        }
       }
     });
 
-    // Submit all new nodes/links at once
+    // Submit all new nodes/links once, then animate only through Maps.
     setGraphDataPreservingView({ nodes: freshNodes, links: freshLinks }, { reheat: true });
 
-    // After all birth-pulse rebuilds, recover a usable viewport if the
-    // preserved camera ended up zoomed out/off-canvas.
-    const fitDelay = newConcepts.length * 200 + 800;
-    setTimeout(() => {
-      if (!graph || typeof graph.zoomToFit !== 'function') return;
-      if (graph.zoom() < 0.35) {
-        graph.zoomToFit(600, 50);
-        if (typeof syncZoomUI === 'function') syncZoomUI(false);
-      }
-    }, fitDelay);
+    // Do not auto-fit here: a delayed camera animation fights user navigation
+    // and any subsequent activation/graph refresh.
   }
 
   // Update stats
