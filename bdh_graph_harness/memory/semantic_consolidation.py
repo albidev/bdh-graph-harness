@@ -29,10 +29,60 @@ DEFAULT_EXCLUDE_GLOBS = (
     "wiki/concepts/*",
     ".bdh-*",
 )
+BDH_DELTA_PATH = "memory/learned/bdh-session-recovery-delta.md"
+BDH_ALLOWED_KINDS = {
+    "concept",
+    "lesson",
+    "root_cause",
+    "architecture_pattern",
+}
 _ACK_RE = re.compile(
     r"^(ok|okay|va bene|bene|perfetto|grazie|thanks|capito|ricevuto|fatto|done|procedi|vai)[.! ]*$",
     re.IGNORECASE,
 )
+
+
+def extract_bdh_candidates(content: str, *, source_path: str = "") -> str:
+    """Return only explicitly approved BDH candidates from the staging file.
+
+    Recovery reports may contain useful operational context, but BDH semantic
+    sleep fails closed: only ``## BDH Candidates`` blocks with
+    ``bdh_candidate: true`` and an allowed kind reach synthesis/neurogenesis.
+    """
+    if source_path != BDH_DELTA_PATH:
+        return content
+    match = re.search(
+        r"^##\s+BDH Candidates\s*$([\s\S]*?)(?=^##\s+|\Z)",
+        content,
+        flags=re.MULTILINE,
+    )
+    if not match:
+        return ""
+    blocks = re.split(r"(?=^###\s+Candidate\b)", match.group(1), flags=re.MULTILINE)
+    valid = []
+    for block in blocks:
+        if not re.search(r"^[-*]\s*bdh_candidate:\s*true\s*$", block, re.MULTILINE | re.IGNORECASE):
+            continue
+        kind_match = re.search(r"^[-*]\s*kind:\s*([\w-]+)\s*$", block, re.MULTILINE | re.IGNORECASE)
+        title_match = re.search(r"^[-*]\s*title:\s*(.+?)\s*$", block, re.MULTILINE | re.IGNORECASE)
+        definition_match = re.search(
+            r"^[-*]\s*definition:\s*(.+?)\s*$", block, re.MULTILINE | re.IGNORECASE
+        )
+        if not kind_match or not title_match or not definition_match:
+            continue
+        kind = kind_match.group(1).strip().lower()
+        if kind not in BDH_ALLOWED_KINDS:
+            continue
+        valid.append(
+            "\n".join(
+                (
+                    f"kind: {kind}",
+                    f"title: {title_match.group(1).strip()}",
+                    f"definition: {definition_match.group(1).strip()}",
+                )
+            )
+        )
+    return "\n\n".join(valid)
 
 
 def _relative(path: Path, root: Path) -> str:
