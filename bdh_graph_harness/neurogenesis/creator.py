@@ -229,9 +229,6 @@ def create_note(vault_root, title, definition, source_notes, query, neurogenesis
     if os.path.isfile(note_path):
         return None
 
-    # Build wikilinks to source notes
-    source_links = "\n".join(f"- [[concepts/{slugify(s)}|{s}]]" for s in source_notes[:3])
-
     # Keep provenance in frontmatter: parser.extract_text() excludes it from
     # embeddings, so generation metadata cannot become a shared retrieval
     # attractor across every neurogenesis note.
@@ -257,9 +254,6 @@ activated_from: {safe_sources}
 # {title}
 
 {definition}
-
-## Links
-{source_links}
 """
 
     os.makedirs(os.path.dirname(note_path), exist_ok=True)

@@ -91,8 +91,8 @@ def test_create_note_does_not_overwrite(temp_vault):
     assert 'Second def.' not in content
 
 
-def test_create_note_source_links(temp_vault):
-    """Test that create_note includes wikilinks to source notes."""
+def test_create_note_does_not_write_unvalidated_source_links(temp_vault):
+    """Provenance titles must not become guessed wikilinks."""
     note_id = harness.create_note(
         temp_vault, 'New Concept', 'Definition.',
         ['Alpha', 'Beta', 'Gamma'], 'query'
@@ -100,8 +100,9 @@ def test_create_note_source_links(temp_vault):
     note_path = os.path.join(temp_vault, note_id + '.md')
     with open(note_path, 'r') as f:
         content = f.read()
-    assert '[[concepts/alpha|Alpha]]' in content
-    assert '[[concepts/beta|Beta]]' in content
+    assert 'activated_from: "Alpha, Beta, Gamma"' in content
+    assert '## Links' not in content
+    assert '[[' not in content
 
 
 def test_create_note_creates_concepts_dir(temp_vault):
