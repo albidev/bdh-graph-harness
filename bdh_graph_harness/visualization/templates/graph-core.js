@@ -7,14 +7,14 @@ const COLORS = {
   inactive: '#6e7681',
   activated: '#f0883e',
   seed: '#58a6ff',
-  neurogenesis: '#3fb950',  // green — new born nodes
+  neurogenesis: '#00E5FF',  // electric aqua — newly generated nodes
   dormant: '#30363d',       // dark gray — dormant/low-quality nodes
   edgeWikilink: '#484f58',
   edgeHebbianLow: '#3b2066',
   edgeHebbianMid: '#8957e5',
   edgeHebbianHigh: '#d2a8ff',
   edgeHebbianPulse: '#d2a8ff',
-  edgeNeurogenesis: '#3fb950',  // green dashed edges for new connections
+  edgeNeurogenesis: '#67F3FF',  // electric aqua dashed edges for new connections
   edgePhantom: '#1f6feb',       // blue dashed edges for phantom links
   edgeCounterpart: '#56d4dd',   // cyan dashed edges between project anchors
   sourceVault: '#58a6ff',
@@ -237,7 +237,6 @@ function drawNeuralParticle(x, y, link, ctx, globalScale) {
   const active = isActiveFlowLink(link);
   const core = active ? particleConfig.activeCore : particleConfig.ambientCore;
   const halo = active ? particleConfig.activeHalo : particleConfig.ambientHalo;
-  const bloom = active ? particleConfig.activeBloom : particleConfig.ambientBloom;
   const alpha = active ? particleConfig.activeAlpha : particleConfig.ambientAlpha;
   const color = active
     ? (linkParticleColorState.get(linkKey(link)) || particleConfig.activeColor)
@@ -248,8 +247,9 @@ function drawNeuralParticle(x, y, link, ctx, globalScale) {
 
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
-  ctx.shadowColor = color;
-  ctx.shadowBlur = bloom * scaleDamp;
+  // The radial gradient already provides the halo. shadowBlur forces expensive
+  // software rasterization on Canvas 2D and caused query-time frame drops.
+  ctx.shadowBlur = 0;
 
   const grad = ctx.createRadialGradient(x, y, 0, x, y, haloR);
   grad.addColorStop(0, withAlpha(color, alpha));
@@ -260,7 +260,6 @@ function drawNeuralParticle(x, y, link, ctx, globalScale) {
   ctx.arc(x, y, haloR, 0, 2 * Math.PI);
   ctx.fill();
 
-  ctx.shadowBlur = bloom * 0.45 * scaleDamp;
   ctx.fillStyle = withAlpha('#ffffff', active ? 0.92 : 0.55);
   ctx.beginPath();
   ctx.arc(x, y, coreR, 0, 2 * Math.PI);
@@ -800,7 +799,8 @@ function pathNodeShape(ctx, shape, x, y, r) {
 }
 
 function drawNode(node, ctx, globalScale) {
-  const val = node.val || 4;
+  const birthScale = nodeBirthScaleState.get(node.id) || 1;
+  const val = (node.val || 4) * birthScale;
   const actColor = nodeActivationColor.get(node.id);
   const color = actColor || node.color || COLORS.inactive;
   const actOpacity = nodeActivationOpacity.get(node.id);
@@ -826,15 +826,21 @@ function drawNode(node, ctx, globalScale) {
     drawNodeGlow(node, ctx, globalScale, actColor || COLORS.edgeHebbianPulse, opacity, r * 1.18, boost * 1.15);
   }
 
-  // LOD: at low zoom, simplify body to dots but keep a tiny aura so the graph
-  // still feels alive instead of turning into dust.
+  // LOD: simplify ordinary nodes to dots, but preserve semantic shapes so
+  // neurogenesis/hub/dormant identity survives zooming out.
   const lod = globalScale < 0.5;
   if (lod) {
+    const lodRadius = Math.max(1.6, r * 0.72);
+    const semanticShape = ['diamond', 'hexagon', 'triangleDown'].includes(shape);
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
     ctx.globalAlpha = opacity;
-    ctx.beginPath();
-    ctx.arc(x, y, Math.max(1.6, r * 0.72), 0, 2 * Math.PI);
+    if (semanticShape) {
+      pathNodeShape(ctx, shape, x, y, lodRadius);
+    } else {
+      ctx.beginPath();
+      ctx.arc(x, y, lodRadius, 0, 2 * Math.PI);
+    }
     ctx.fillStyle = withAlpha(color, node._dormant ? 0.48 : 0.82);
     ctx.fill();
     ctx.restore();
@@ -905,6 +911,7 @@ function drawNode(node, ctx, globalScale) {
 // ============================================================================
 const nodeActivationOpacity = new Map(); // nodeId → opacity
 const nodeActivationColor = new Map();   // nodeId → color string
+const nodeBirthScaleState = new Map();   // nodeId → temporary birth scale
 const linkActivationVisible = new Map(); // linkKey → bool
 const linkActivationColor = new Map();   // linkKey → color string
 const linkParticlesState = new Map();    // linkKey → number
@@ -915,6 +922,7 @@ const linkVisibilityState = new Map();  // linkKey → bool (threshold/direct fi
 function clearActivationState() {
   nodeActivationOpacity.clear();
   nodeActivationColor.clear();
+  nodeBirthScaleState.clear();
   linkActivationVisible.clear();
   linkActivationColor.clear();
   linkParticlesState.clear();
