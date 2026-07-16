@@ -18,6 +18,7 @@ const COLORS = {
   edgePhantom: '#1f6feb',       // blue dashed edges for phantom links
   edgeCounterpart: '#56d4dd',   // cyan dashed edges between project anchors
   edgeProjectContext: '#2f81f7', // blue dashed edges to same-project context
+  edgeProjectReference: '#f2cc60', // gold dashed cross-project references
   sourceVault: '#58a6ff',
   sourceExternal: '#f0883e',
   bg: '#0d1117',
@@ -407,13 +408,14 @@ function showEdgeTooltip(link, evt) {
   const isHebbian = info.type === 'hebbian';
   const isCounterpart = info.type === 'counterpart';
   const isProjectContext = info.type === 'project_context';
-  const icon = isHebbian ? '⚡' : (info.type === 'phantom' ? '👻' : (isCounterpart ? '⇄' : (isProjectContext ? '⌁' : '🔗')));
-  const typeLabel = isHebbian ? 'Hebbian Synapse' : (info.type === 'phantom' ? 'Phantom Link' : (isCounterpart ? 'Project Counterpart' : (isProjectContext ? 'Project Context' : 'Wikilink')));
+  const isProjectReference = info.type === 'project_reference';
+  const icon = isHebbian ? '⚡' : (info.type === 'phantom' ? '👻' : (isCounterpart ? '⇄' : (isProjectContext ? '⌁' : (isProjectReference ? '↗' : '🔗'))));
+  const typeLabel = isHebbian ? 'Hebbian Synapse' : (info.type === 'phantom' ? 'Phantom Link' : (isCounterpart ? 'Project Counterpart' : (isProjectContext ? 'Project Context' : (isProjectReference ? 'Project Reference' : 'Wikilink'))));
 
   let html = '<div style="max-width:280px">';
   html += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">';
   html += '<span style="font-size:14px">' + icon + '</span>';
-  html += '<span style="font-weight:600;color:' + (isHebbian ? weightColor(info.weight || 0) : (isCounterpart ? COLORS.edgeCounterpart : (isProjectContext ? COLORS.edgeProjectContext : '#8b949e'))) + '">' + typeLabel + '</span>';
+  html += '<span style="font-weight:600;color:' + (isHebbian ? weightColor(info.weight || 0) : (isCounterpart ? COLORS.edgeCounterpart : (isProjectContext ? COLORS.edgeProjectContext : (isProjectReference ? COLORS.edgeProjectReference : '#8b949e')))) + '">' + typeLabel + '</span>';
   html += '</div>';
   html += '<div style="margin-bottom:4px">';
   html += '<span style="color:#58a6ff">' + escapeHtml(info.source_title) + '</span>';
@@ -434,6 +436,10 @@ function showEdgeTooltip(link, evt) {
     html += '</div>';
   } else if (isProjectContext) {
     html += '<div style="font-size:11px;color:' + COLORS.edgeProjectContext + '">Same project context';
+    if (info.group_id) html += ': <b>' + escapeHtml(info.group_id) + '</b>';
+    html += '</div>';
+  } else if (isProjectReference) {
+    html += '<div style="font-size:11px;color:' + COLORS.edgeProjectReference + '">References project';
     if (info.group_id) html += ': <b>' + escapeHtml(info.group_id) + '</b>';
     html += '</div>';
   }

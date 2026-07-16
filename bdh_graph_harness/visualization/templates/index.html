@@ -58,6 +58,7 @@
       <button class="edge-filter-btn active" data-type="wikilink" onclick="toggleEdgeType('wikilink', this)" title="Toggle wikilink edges">🔗</button>
       <button class="edge-filter-btn active" data-type="counterpart" onclick="toggleEdgeType('counterpart', this)" title="Toggle project counterpart edges">⇄</button>
       <button class="edge-filter-btn active" data-type="project_context" onclick="toggleEdgeType('project_context', this)" title="Toggle same-project context edges">⌁</button>
+      <button class="edge-filter-btn active" data-type="project_reference" onclick="toggleEdgeType('project_reference', this)" title="Toggle cross-project reference edges">↗</button>
       <button class="edge-filter-btn active" data-type="hebbian" onclick="toggleEdgeType('hebbian', this)" title="Toggle Hebbian edges">⚡</button>
       <button class="edge-filter-btn active" data-type="phantom" onclick="toggleEdgeType('phantom', this)" title="Toggle phantom edges">👻</button>
     </div>
@@ -139,11 +140,11 @@
   </div>
 </div>
 <script src="https://unpkg.com/force-graph/dist/force-graph.min.js"></script>
-<script src="/static/graph-core.js?v=project-context-v1"></script>
-<script src="/static/graph-init.js?v=project-context-v1"></script>
+<script src="/static/graph-core.js?v=project-reference-v1"></script>
+<script src="/static/graph-init.js?v=project-reference-v1"></script>
 <script src="/static/activation.js?v=graph-stability-v3"></script>
 <script src="/static/vault-selector.js?v=multi-vault"></script>
 <script src="/static/websocket.js?v=graph-stability-v3"></script>
-<script src="/static/ui-controls.js?v=project-context-v1"></script>
+<script src="/static/ui-controls.js?v=project-reference-v1"></script>
 </body>
 </html>
