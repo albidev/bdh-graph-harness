@@ -68,9 +68,14 @@ def parse_frontmatter(content):
 
 
 def extract_wikilinks(content):
-    """Extract all wikilinks from note content. Returns list of (target, display)."""
+    """Extract semantic wikilinks, ignoring Markdown code examples."""
+    # Links shown inside fenced or inline code are documentation syntax, not
+    # graph edges. Parsing them creates false unresolved targets such as
+    # ``[[VALUE]]`` and ``[[COMPLETE]]`` from README templates.
+    semantic_content = re.sub(r'(?ms)^\s*(```|~~~).*?^\s*\1\s*$', '', content)
+    semantic_content = re.sub(r'`[^`\n]*`', '', semantic_content)
     links = []
-    for match in WIKILINK_RE.finditer(content):
+    for match in WIKILINK_RE.finditer(semantic_content):
         target = match.group(1).strip()
         display = match.group(2).strip() if match.group(2) else target
         links.append((target, display))

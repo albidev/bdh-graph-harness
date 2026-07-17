@@ -19,6 +19,7 @@ from bdh_graph_harness.config import CONFIG, logger
 from bdh_graph_harness.visualization import render_viz_html, get_template_path
 from bdh_graph_harness.retrieval.attention import attention
 from bdh_graph_harness.memory import hebbian_update, save_state
+from bdh_graph_harness.memory.state_store import reconcile_state_to_nodes
 from bdh_graph_harness.memory.consolidation import consolidate, consolidation_stats
 from bdh_graph_harness.memory.semantic_consolidation import (
     load_checkpoint,
@@ -839,7 +840,9 @@ async def _api_refresh_graph_unlocked(request, app_state: dict, ws_clients: set)
 
     ctx.nodes = nodes
     ctx.edges = edges
+    ctx.state = reconcile_state_to_nodes(ctx.state, nodes)
     ctx.state['unresolved_links'] = unresolved
+    save_state(vault_root, ctx.state, valid_node_ids=set(nodes))
 
     new_node_ids = set(nodes.keys()) - old_node_ids
     changed_nodes = []
@@ -923,7 +926,7 @@ async def _api_refresh_graph_unlocked(request, app_state: dict, ws_clients: set)
         'sequence': ctx.event_sequence,
         'vault_id': ctx.config.id,
         'neurons': new_count,
-        'synapses': len(edges),
+        'synapses': sum(len(links) for links in edges.values()),
         'delta': delta,
         'new_concepts': new_concepts,
         'changed_nodes': changed_nodes,
@@ -938,7 +941,7 @@ async def _api_refresh_graph_unlocked(request, app_state: dict, ws_clients: set)
     return web.json_response({
         'status': 'ok',
         'neurons': new_count,
-        'synapses': len(edges),
+        'synapses': sum(len(links) for links in edges.values()),
         'embeddings': coll.count(),
         'delta': delta,
         'new_concepts': new_concepts,

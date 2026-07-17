@@ -162,3 +162,4 @@ phantom_max_total: 100                 # hard cap on total phantom links per cyc
 # graph_ignore:
 #   - ".bdh-*"          # exclude BDH operational files
 #   - "templates/*"     # exclude template directories
+#   - "graphify-out/*"  # exclude derived Graphify artifacts

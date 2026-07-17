@@ -81,6 +81,10 @@ def test_extract_wikilinks_none():
     assert links == []
 
 
+def test_extract_wikilinks_ignores_code_examples():
+    content = "See [[real-note]]. `[[INLINE_EXAMPLE]]`\n```md\n[[FENCED_EXAMPLE]]\n```"
+    assert harness.extract_wikilinks(content) == [('real-note', 'real-note')]
+
 # ---------------------------------------------------------------------------
 # extract_text
 # ---------------------------------------------------------------------------

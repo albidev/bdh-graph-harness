@@ -134,6 +134,7 @@ CONFIG = {
         'wiki/index',           # table of contents, not knowledge
         'wiki/log',             # session log, not knowledge
         'wiki/raw/*',           # raw/unprocessed notes
+        'graphify-out/*',       # derived Graphify artifacts, not knowledge
     ],
     'stream_enabled': True,
 }
