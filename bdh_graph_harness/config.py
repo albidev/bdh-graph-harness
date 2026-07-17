@@ -93,8 +93,8 @@ CONFIG = {
     'consolidation_prune_weight_floor': 0.02,  # delete synapses below this weight
     'consolidation_dormant_persist_cycles': 3, # remove nodes dormant for N+ cycles
     'consolidation_prune_dormant_nodes': True,  # actually delete stale dormant nodes
-    # Interactive neurogenesis is deliberately conservative: one durable candidate per response.
-    'neurogenesis_max_concepts': 1,
+    # Interactive neurogenesis is conservative but can retain several independent durable concepts.
+    'neurogenesis_max_concepts': 3,
     # Semantic sleep — disabled until explicitly enabled in the vault config.
     'semantic_consolidation_enabled': False,
     'semantic_consolidation_checkpoint': '.bdh-semantic-consolidation.json',
