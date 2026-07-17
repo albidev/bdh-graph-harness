@@ -72,9 +72,14 @@ def extract_new_concepts(llm_response, query, active_notes, nodes, *, allow_exis
         "- Meta-descriptions of what the LLM is doing right now\n"
         "- Concepts that are just synonyms or spelling variants of existing ones\n"
         "- Proper nouns that are just labels (company names, product names) without technical depth\n\n"
+        "First decide whether the response contains a durable, reusable concept at all. Set durable=false "
+        "for live operational questions, status updates, UI observations, current-session debugging, requests "
+        "to proceed, or a description of what the agent is doing right now. Set durable=true only for a reusable "
+        "principle, lesson, root cause, architecture pattern, algorithm, or domain concept that remains useful "
+        "outside this session. When durable=false, concepts MUST be [].\n\n"
         "For each new concept, provide a short title of 2-5 words and a one-sentence definition. "
-        "Return at most 5 concepts. When evidence is weak, return []. In that case use {\"concepts\": []}.\n\n"
-        'The required JSON shape is exactly: {"concepts": [{"title": "...", "definition": "..."}]}.'
+        "Return at most 5 concepts. When evidence is weak, return {\"durable\": false, \"concepts\": []}.\n\n"
+        'The required JSON shape is exactly: {"durable": true|false, "concepts": [{"title": "...", "definition": "..."}]}.'
     )
 
     user_prompt = f"""## Existing concept titles in vault
@@ -135,6 +140,8 @@ def extract_new_concepts(llm_response, query, active_notes, nodes, *, allow_exis
                     return []
                 parsed = json.loads(match.group(1))
 
+            if isinstance(parsed, dict) and parsed.get('durable') is False:
+                return []
             if isinstance(parsed, dict) and isinstance(parsed.get('concepts'), list):
                 concepts = parsed['concepts']
             elif isinstance(parsed, dict) and 'title' in parsed and 'definition' in parsed:
