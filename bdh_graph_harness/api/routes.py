@@ -352,7 +352,8 @@ async def run_attention_and_plasticity(
 
 
 def run_neurogenesis(
-    response_text: str, query: str, active: dict, ctx, max_concepts: int | None = None
+    response_text: str, query: str, active: dict, ctx, max_concepts: int | None = None,
+    source: str | None = None,
 ) -> list:
     """Run neurogenesis on a completed LLM response.
 
@@ -363,6 +364,8 @@ def run_neurogenesis(
     """
     new_concepts_list = []
     config = ctx.config.settings
+    if source == 'cron':
+        return new_concepts_list
     if config.get('neurogenesis_enabled', True):
         n = ctx.nodes
         active_titles = [n[nid]['title'] for nid in active if nid in n]
@@ -376,8 +379,9 @@ def run_neurogenesis(
             if 'allow_existing' not in str(exc):
                 raise
             new_concepts = extract_new_concepts(response_text, query, active, n) or []
-        if max_concepts is not None:
-            new_concepts = new_concepts[:max(0, int(max_concepts))]
+        if max_concepts is None:
+            max_concepts = int(config.get('neurogenesis_max_concepts') or 1)
+        new_concepts = new_concepts[:max(0, int(max_concepts))]
         for concept in new_concepts:
             title = concept.get('title', '').strip()
             definition = concept.get('definition', '').strip()
@@ -486,7 +490,7 @@ async def api_query(request, app_state: dict, ws_clients: set) -> web.Response:
     )
 
     new_concepts_list = (
-        run_neurogenesis(response_text, query, active, ctx)
+        run_neurogenesis(response_text, query, active, ctx, source=source)
         if learn and respond else []
     )
 
@@ -596,7 +600,7 @@ async def api_stream(request, app_state: dict, ws_clients: set) -> web.StreamRes
         await resp.write(f"data: {token_data}\n\n".encode())
 
     response_text = ''.join(full_response)
-    new_concepts_list = run_neurogenesis(response_text, query, active, ctx)
+    new_concepts_list = run_neurogenesis(response_text, query, active, ctx, source=source)
 
     done_data = json.dumps({
         'type': 'done',
