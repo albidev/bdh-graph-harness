@@ -374,7 +374,7 @@ async def test_api_query_broadcasts_neurogenesis_after_activation(mock_app_setup
     app = _capture_app(monkeypatch, config, nodes, edges, collection, state)
     monkeypatch.setattr(
         bdh_routes, 'run_neurogenesis',
-        lambda *args: [{'id': 'wiki/concepts/test-concept', 'title': 'Test Concept'}],
+        lambda *args, **kwargs: [{'id': 'wiki/concepts/test-concept', 'title': 'Test Concept'}],
     )
     async def capture(event, _clients):
         events.append(event)
