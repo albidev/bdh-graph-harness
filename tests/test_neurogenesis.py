@@ -2,10 +2,12 @@
 import os
 import json
 import tempfile
+from types import SimpleNamespace
 import pytest
 import harness
 import bdh_graph_harness.config as bdh_config
 import bdh_graph_harness.neurogenesis.creator as bdh_creator
+import bdh_graph_harness.api.routes as bdh_routes
 
 
 @pytest.fixture
@@ -227,6 +229,28 @@ def test_extract_new_concepts_empty(monkeypatch):
     assert result == []
 
 
+def test_extract_new_concepts_rejects_non_durable_response(monkeypatch):
+    """Operational/session commentary must not become persistent concepts."""
+    class MockResp:
+        def read(self):
+            return json.dumps({
+                'message': {
+                    'content': json.dumps({
+                        'durable': False,
+                        'concepts': [{'title': 'Current UI Observation', 'definition': 'A live observation.'}],
+                    })
+                }
+            }).encode()
+        def __enter__(self): return self
+        def __exit__(self, *a): pass
+
+    import urllib.request as urlreq
+    monkeypatch.setattr(urlreq, 'urlopen', lambda req, timeout=120: MockResp())
+    monkeypatch.setattr(bdh_config, 'OLLAMA_LLM_URL', 'http://localhost:11434/api/chat')
+    monkeypatch.setattr(bdh_creator, 'retry_with_backoff', lambda fn: fn())
+    assert harness.extract_new_concepts('live observation', 'what do you see?', {}, {}) == []
+
+
 def test_extract_new_concepts_json_with_fences(monkeypatch):
     """Test that JSON wrapped in markdown fences is parsed correctly."""
     raw_content = '```json\n[{"title": "Test", "definition": "Def"}]\n```'
@@ -338,6 +362,50 @@ def test_extract_new_concepts_prompt_is_signal_first_and_bounded(monkeypatch):
     assert 'The knowledge graph may contain information from any domain' in system_prompt
     assert 'Infer the relevant domain from the response' in system_prompt
     assert 'about AI, software, and neuroscience' not in system_prompt
+    assert 'durable=false' in system_prompt
+    assert 'reusable principle' in system_prompt
     assert 'Return at most 5 concepts' in system_prompt
-    assert 'When evidence is weak, return []' in system_prompt
+    assert 'When evidence is weak, return {"durable": false' in system_prompt
     assert captured['payload']['response_format'] == {'type': 'json_object'}
+
+
+def test_run_neurogenesis_skips_cron_source(monkeypatch, tmp_path):
+    """The API is a second cron isolation boundary after the bridge."""
+    called = False
+
+    def extractor(*args, **kwargs):
+        nonlocal called
+        called = True
+        return [{'title': 'Cron Leakage', 'definition': 'Should not be created.'}]
+
+    monkeypatch.setattr(bdh_routes, 'extract_new_concepts', extractor)
+    ctx = SimpleNamespace(
+        config=SimpleNamespace(
+            settings={'neurogenesis_enabled': True, 'neurogenesis_max_concepts': 1},
+            path=str(tmp_path),
+        ),
+        nodes={},
+    )
+    assert bdh_routes.run_neurogenesis('response', 'cron prompt', {}, ctx, source='cron') == []
+    assert called is False
+
+
+def test_run_neurogenesis_caps_interactive_candidates(monkeypatch, tmp_path):
+    """Interactive responses produce at most one candidate by default."""
+    monkeypatch.setattr(bdh_routes, 'extract_new_concepts', lambda *args, **kwargs: [
+        {'title': 'Concept One', 'definition': 'First.'},
+        {'title': 'Concept Two', 'definition': 'Second.'},
+    ])
+    monkeypatch.setattr(bdh_routes, 'find_semantic_match', lambda *args, **kwargs: None)
+    monkeypatch.setattr(bdh_routes, 'looks_conflicting', lambda definition: False)
+    monkeypatch.setattr(bdh_routes, 'create_note', lambda *args, **kwargs: 'wiki/concepts/concept-one')
+    ctx = SimpleNamespace(
+        config=SimpleNamespace(
+            settings={'neurogenesis_enabled': True, 'neurogenesis_max_concepts': 1, 'neurogenesis_dir': 'wiki/concepts'},
+            path=str(tmp_path),
+        ),
+        nodes={},
+    )
+    result = bdh_routes.run_neurogenesis('response', 'query', {}, ctx)
+    assert len(result) == 1
+    assert result[0]['title'] == 'Concept One'
