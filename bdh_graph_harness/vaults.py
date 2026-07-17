@@ -259,7 +259,7 @@ class VaultRegistry:
         )
         from bdh_graph_harness.retrieval.chroma_store import compute_all_embeddings
         from bdh_graph_harness.retrieval.bm25 import BM25Index
-        from bdh_graph_harness.memory.state_store import load_state
+        from bdh_graph_harness.memory.state_store import load_state, reconcile_state_to_nodes, save_state
 
         for vc in self._vault_configs:
             print(f"   Loading vault '{vc.id}' from {vc.path} …")
@@ -272,8 +272,9 @@ class VaultRegistry:
             )
             state = load_state(vc.path)
             state = migrate_legacy_state_ids(state, nodes)
-            # Unresolved links are observable metadata, never phantom nodes.
+            state = reconcile_state_to_nodes(state, nodes)
             state['unresolved_links'] = unresolved
+            save_state(vc.path, state, valid_node_ids=set(nodes))
 
             bm25_idx = None
             if vc.settings.get('hybrid_search', False):

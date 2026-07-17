@@ -43,7 +43,7 @@ def load_state(vault_root):
             fcntl.flock(lock_f, fcntl.LOCK_UN)
 
 
-def merge_states(disk_state, mem_state):
+def merge_states(disk_state, mem_state, *, valid_node_ids=None):
     """Merge on-disk state with in-memory state to prevent lost updates.
 
     Merge strategy:
@@ -61,6 +61,18 @@ def merge_states(disk_state, mem_state):
     # --- synapses -----------------------------------------------------------
     disk_syn = disk_state.get('synapses', {})
     mem_syn = mem_state.get('synapses', {})
+    if valid_node_ids is not None:
+        valid = set(valid_node_ids)
+        disk_syn = {
+            key: value for key, value in disk_syn.items()
+            if len(key.split('|', 1)) == 2
+            and all(part in valid for part in key.split('|', 1))
+        }
+        mem_syn = {
+            key: value for key, value in mem_syn.items()
+            if len(key.split('|', 1)) == 2
+            and all(part in valid for part in key.split('|', 1))
+        }
     merged_syn = {}
 
     # Keys present in memory: always use the memory version (the active writer
@@ -91,7 +103,44 @@ def merge_states(disk_state, mem_state):
     return merged
 
 
-def save_state(vault_root, state):
+def reconcile_state_to_nodes(state, nodes):
+    """Drop persisted state that references notes absent from the current graph.
+
+    Full graph refreshes can remove many nodes at once (for example after a
+    reversible quarantine). Runtime state must follow the graph or stats,
+    quality, and visualization will report dead synapses and dormant nodes.
+    """
+    valid = set(nodes)
+    synapses = {}
+    for key, value in state.get('synapses', {}).items():
+        parts = key.split('|', 1)
+        if len(parts) == 2 and parts[0] in valid and parts[1] in valid:
+            synapses[key] = value
+    state['synapses'] = synapses
+
+    state['node_quality'] = {
+        node_id: value
+        for node_id, value in state.get('node_quality', {}).items()
+        if node_id in valid
+    }
+    state['dormant_nodes'] = sorted(
+        node_id for node_id in state.get('dormant_nodes', []) if node_id in valid
+    )
+
+    phantom = state.get('phantom_links', [])
+    state['phantom_links'] = [
+        link for link in phantom
+        if isinstance(link, dict)
+        and link.get('source') in valid
+        and link.get('target') in valid
+    ]
+
+    # Recompute quality for the new node set, including newly added nodes.
+    from bdh_graph_harness.memory.quality import prune_dormant
+    return prune_dormant(state, nodes)
+
+
+def save_state(vault_root, state, *, valid_node_ids=None):
     """Persist BDH state. Uses fcntl.flock for concurrency safety.
 
     Before writing, reloads the on-disk state and merges it with the
@@ -111,7 +160,11 @@ def save_state(vault_root, state):
             # Keep read, merge, and atomic replace under one lock: otherwise
             # two writers can both merge against the same stale disk snapshot.
             disk_state = _read_state_unlocked(state_path)
-            merged = merge_states(disk_state, state)
+            merged = merge_states(
+                disk_state,
+                state,
+                valid_node_ids=valid_node_ids,
+            )
             with open(tmp_path, 'w') as f:
                 json.dump(merged, f, indent=2)
             os.replace(tmp_path, state_path)

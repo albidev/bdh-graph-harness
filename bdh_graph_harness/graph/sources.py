@@ -27,6 +27,8 @@ DEFAULT_EXTERNAL_EXCLUDES = (
     "**/build/**",
     "**/dist/**",
     "**/target/**",
+    # Graphify outputs are derived artifacts, not source knowledge.
+    "**/graphify-out/**",
 )
 
 

@@ -189,6 +189,13 @@ def _resolve_target(
             _with_md(f"{prefix}{target}")
             for prefix in ("wiki/", "concepts/", "entities/", "comparisons/", "queries/")
         )
+        # The vault stores these namespaces below wiki/. Accept the shorter
+        # Obsidian-style form (e.g. [[concepts/foo]]) without creating a
+        # basename-based cross-vault match.
+        candidates.extend(
+            _with_md(f"wiki/{prefix}{target}")
+            for prefix in ("concepts/", "entities/", "comparisons/", "queries/")
+        )
     for candidate in candidates:
         if not candidate:
             continue

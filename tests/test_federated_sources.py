@@ -35,6 +35,7 @@ def test_external_source_include_exclude_and_cross_source_links(tmp_path):
         "# Design\nSee [[missing-note]].",
     )
     _write(projects / "demo/skip.md", "# Skip\nNot part of the graph.")
+    _write(projects / "demo/graphify-out/GRAPH_REPORT.md", "# Derived graph report\nNever ingest this.")
     _write(projects / ".hidden.md", "# Hidden\nNever scanned.")
 
     before = sorted(str(path.relative_to(tmp_path)) for path in tmp_path.rglob("*"))
@@ -56,6 +57,7 @@ def test_external_source_include_exclude_and_cross_source_links(tmp_path):
         "external:projects/demo/README.md",
         "external:projects/demo/docs/design.md",
     }
+    assert "external:projects/demo/graphify-out/GRAPH_REPORT.md" not in nodes
     assert nodes["external:projects/demo/README.md"]["source_type"] == "external"
     assert nodes["external:projects/demo/README.md"]["source_id"] == "projects"
     assert nodes["external:projects/demo/README.md"]["relative_path"] == "demo/README.md"
@@ -211,6 +213,23 @@ def test_counterpart_specs_support_cross_project_reference_relation(tmp_path):
     })
 
     assert specs[0].relation == "references_project"
+
+
+def test_vault_namespace_aliases_resolve_under_wiki(tmp_path):
+    vault = tmp_path / "vault"
+    _write(vault / "wiki/concepts/source.md", "# Source\nSee [[concepts/target]], [[comparisons/compare]], and [[entities/project]].")
+    _write(vault / "wiki/concepts/target.md", "# Target")
+    _write(vault / "wiki/comparisons/compare.md", "# Compare")
+    _write(vault / "wiki/entities/project.md", "# Project")
+
+    nodes, edges, unresolved = build_federated_graph([VaultMarkdownSource(str(vault))])
+
+    assert unresolved == []
+    assert {edge["target"] for edge in edges["vault:wiki/concepts/source.md"]} == {
+        "vault:wiki/concepts/target.md",
+        "vault:wiki/comparisons/compare.md",
+        "vault:wiki/entities/project.md",
+    }
 
 
 def test_sources_from_config_supports_include_exclude_and_read_only_defaults(tmp_path):
