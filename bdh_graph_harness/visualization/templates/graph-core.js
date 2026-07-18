@@ -149,24 +149,24 @@ const PARTICLE_PRESETS = {
   subtle: {
     enabled: true,
     ambient: true,
-    activeParticles: 5,
-    activeWidth: 2.4,
-    ambientParticles: 1,
-    ambientWidth: 0.75,
-    ambientThreshold: 0.82,
-    speed: 0.006,
+    activeParticles: 9,
+    activeWidth: 3.4,
+    ambientParticles: 2,
+    ambientWidth: 1.6,
+    ambientThreshold: 0.62,
+    speed: 0.011,
     activeColor: '#f0d2ff',
     ambientColor: '#a371f7',
   },
   loud: {
     enabled: true,
     ambient: true,
-    activeParticles: 8,
-    activeWidth: 3.2,
-    ambientParticles: 1,
-    ambientWidth: 1,
-    ambientThreshold: 0.72,
-    speed: 0.009,
+    activeParticles: 16,
+    activeWidth: 5.2,
+    ambientParticles: 3,
+    ambientWidth: 2.4,
+    ambientThreshold: 0.54,
+    speed: 0.016,
     activeColor: '#f0d2ff',
     ambientColor: '#d2a8ff',
   },
@@ -517,7 +517,7 @@ function hoverAwareParticles(link) {
   const activeCount = linkParticlesState.get(linkKey(link));
   if (activeCount) return particleConfig.enabled ? particleConfig.activeParticles : 0;
   if (hoverEdgeId === link._id || isHighlightedLink(link)) return particleConfig.enabled ? 2 : 0;
-  if (isAmbientFlowLink(link) && currentLodLevel !== 'overview') return particleConfig.ambientParticles;
+  if (isAmbientFlowLink(link)) return particleConfig.ambientParticles;
   return 0;
 }
 
@@ -546,6 +546,44 @@ const threeResources = {
   ringMaterials: new Map(),
   ringTexture: null,
 };
+
+let bloomPass = null;
+let bloomInstallPromise = null;
+
+function installBloomPass() {
+  if (!graph || bloomPass || !window.THREE || typeof window.UnrealBloomPass !== 'function') return false;
+  const composer = typeof graph.postProcessingComposer === 'function'
+    ? graph.postProcessingComposer()
+    : null;
+  if (!composer) return false;
+  const container = document.getElementById('graph-container');
+  const width = Math.max(1, container ? container.clientWidth : window.innerWidth);
+  const height = Math.max(1, container ? container.clientHeight : window.innerHeight);
+  bloomPass = new window.UnrealBloomPass(
+    new window.THREE.Vector2(width, height),
+    0.95,
+    0.68,
+    0.52,
+  );
+  bloomPass.threshold = 0.52;
+  bloomPass.strength = 0.95;
+  bloomPass.radius = 0.68;
+  composer.addPass(bloomPass);
+  return true;
+}
+
+function scheduleBloomInstall() {
+  if (bloomPass || bloomInstallPromise || !window.BDHBloomReady) return;
+  bloomInstallPromise = Promise.resolve(window.BDHBloomReady)
+    .then(() => {
+      bloomInstallPromise = null;
+      if (installBloomPass()) requestGraphRedraw();
+    })
+    .catch(error => {
+      bloomInstallPromise = null;
+      console.warn('[BDH 3D] Bloom unavailable; continuing without post-processing:', error);
+    });
+}
 
 function ensureThreeResources() {
   if (threeResources.initialized) return threeResources;
@@ -588,11 +626,11 @@ function nodeMaterial(color, opacity, emphasis, dormant = false) {
   const emphasisBucket = Math.round(Math.max(0, Math.min(1, emphasis)) * 4) / 4;
   const key = `${color}|${opacityBucket}|${emphasisBucket}|${dormant ? 'dormant' : 'active'}`;
   if (!resources.nodeMaterials.has(key)) {
-    const baseEmissive = dormant ? 0.24 : 0.04;
+    const baseEmissive = dormant ? 0.24 : 0.12;
     const material = new window.THREE.MeshLambertMaterial({
       color,
       emissive: color,
-      emissiveIntensity: baseEmissive + emphasisBucket * 0.34,
+      emissiveIntensity: baseEmissive + emphasisBucket * 0.78,
       transparent: opacityBucket < 1,
       opacity: opacityBucket,
       depthWrite: opacityBucket >= 0.55,
@@ -664,7 +702,11 @@ function updateNodeThreeObject(node) {
 
   const selected = selectedNodeId === node.id;
   const focused = focusedNodeId === node.id;
-  const emphasis = activationColor ? 1 : (selected || focused || direct ? 0.85 : (highlighted ? 0.45 : 0));
+  const synapticGlow = Number(node._synapticGlow || 0);
+  const emphasis = activationColor ? 1 : Math.max(
+    synapticGlow * 0.72,
+    selected || focused || direct ? 0.85 : (highlighted ? 0.45 : 0),
+  );
   body.geometry = geometryForNode(node);
   body.material = nodeMaterial(baseColor, opacity, emphasis, node._dormant);
 
@@ -680,7 +722,10 @@ function updateNodeThreeObject(node) {
     ringOpacity = 0.78;
   } else if (neurogenesis) {
     ringColor = COLORS.neurogenesis;
-    ringOpacity = 0.24;
+    ringOpacity = 0.46;
+  } else if (synapticGlow >= 0.58) {
+    ringColor = baseColor;
+    ringOpacity = 0.16 + synapticGlow * 0.16;
   } else if (highlighted) {
     ringOpacity = 0.42;
   }
