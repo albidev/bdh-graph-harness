@@ -507,33 +507,59 @@ function configureForces() {
   graph.d3Force('link').distance(link => massAwareLinkDistance(link, linkDistance));
   graph.d3Force('center').strength(0.035);
   // Collision force prevents nodes from overlapping — keeps clusters readable.
-  // Created manually since d3 is not globally available; uses the same interface as d3-force-collide.
+  // Uses a spatial grid for O(N) performance instead of O(N²) pairwise checks.
   if (!graph.d3Force('collision')) {
     graph.d3Force('collision', (function() {
       let nodes;
+      const cellSize = 12; // grid cell size in world units
       const force = function(alpha) {
-        if (!nodes) return;
-        const radius = 1.8;
+        if (!nodes || nodes.length === 0) return;
+        const radiusMul = 1.8;
+        // Build spatial grid
+        const grid = new Map();
         for (let i = 0; i < nodes.length; i++) {
           const node = nodes[i];
-          if (!node) continue;
-          const r = nodeRadius(node.val || 4) * nodeWorldScale * radius;
+          if (!node || node.x == null) continue;
+          const r = nodeRadius(node.val || 4) * nodeWorldScale * radiusMul;
           node._collideRadius = r;
+          const cx = Math.floor(node.x / cellSize);
+          const cy = Math.floor(node.y / cellSize);
+          const cz = Math.floor(node.z / cellSize);
+          const key = cx + ',' + cy + ',' + cz;
+          if (!grid.has(key)) grid.set(key, []);
+          grid.get(key).push(node);
         }
+        // Check only neighboring cells (3×3×3 = 27 cells max per node)
+        const checked = new Set();
         for (let i = 0; i < nodes.length; i++) {
           const a = nodes[i];
           if (!a || a.x == null) continue;
-          for (let j = i + 1; j < nodes.length; j++) {
-            const b = nodes[j];
-            if (!b || b.x == null) continue;
-            let dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z;
-            let dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
-            const minDist = (a._collideRadius || 1) + (b._collideRadius || 1);
-            if (dist < minDist && dist > 0) {
-              const push = (minDist - dist) * alpha * 0.5;
-              const nx = dx / dist, ny = dy / dist, nz = dz / dist;
-              a.x -= nx * push; a.y -= ny * push; a.z -= nz * push;
-              b.x += nx * push; b.y += ny * push; b.z += nz * push;
+          const cx = Math.floor(a.x / cellSize);
+          const cy = Math.floor(a.y / cellSize);
+          const cz = Math.floor(a.z / cellSize);
+          for (let dx = -1; dx <= 1; dx++) {
+            for (let dy = -1; dy <= 1; dy++) {
+              for (let dz = -1; dz <= 1; dz++) {
+                const key = (cx + dx) + ',' + (cy + dy) + ',' + (cz + dz);
+                const cell = grid.get(key);
+                if (!cell) continue;
+                for (let k = 0; k < cell.length; k++) {
+                  const b = cell[k];
+                  if (b === a) continue;
+                  const pairKey = a._id < b._id ? a._id + ':' + b._id : b._id + ':' + a._id;
+                  if (checked.has(pairKey)) continue;
+                  checked.add(pairKey);
+                  let ddx = b.x - a.x, ddy = b.y - a.y, ddz = b.z - a.z;
+                  let dist = Math.sqrt(ddx * ddx + ddy * ddy + ddz * ddz);
+                  const minDist = (a._collideRadius || 1) + (b._collideRadius || 1);
+                  if (dist < minDist && dist > 0) {
+                    const push = (minDist - dist) * alpha * 0.5;
+                    const nx = ddx / dist, ny = ddy / dist, nz = ddz / dist;
+                    a.x -= nx * push; a.y -= ny * push; a.z -= nz * push;
+                    b.x += nx * push; b.y += ny * push; b.z += nz * push;
+                  }
+                }
+              }
             }
           }
         }
