@@ -407,7 +407,7 @@ function createGraphInstance() {
     .linkVisibility(effectiveLinkVisibility)
     .linkMaterial(linkMaterial)
     .linkWidth(linkDisplayWidth)
-    .linkResolution(constrained ? 3 : 4)
+    .linkResolution(constrained ? 5 : 8)
     .linkCurvature(link => link._dashes ? 0 : (link.type === 'hebbian' ? 0.04 : 0.08))
     .linkThreeObject(createDashedLinkObject)
     .linkThreeObjectExtend(false)
@@ -417,7 +417,7 @@ function createGraphInstance() {
     .linkDirectionalParticleWidth(hoverAwareParticleWidth)
     .linkDirectionalParticleColor(particleColor)
     .linkDirectionalParticleThreeObject(directionalParticleObject)
-    .linkDirectionalParticleResolution(3)
+    .linkDirectionalParticleResolution(constrained ? 4 : 6)
     .warmupTicks(constrained ? 45 : 90)
     .cooldownTime(constrained ? 8000 : 15000)
     .enablePointerInteraction(true)
@@ -478,7 +478,7 @@ function createGraphInstance() {
     });
 
   const renderer = graph.renderer();
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, constrained ? 1.25 : 1.75));
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, constrained ? 1.5 : 2));
   renderer.setClearColor(COLORS.bg, 1);
   graph.scene().background = new window.THREE.Color(COLORS.bg);
   graph.scene().fog = new window.THREE.FogExp2(COLORS.bg, constrained ? 0.00055 : 0.00038);
@@ -625,6 +625,11 @@ function installGraphInteractionWakeup() {
   ['pointermove', 'pointerdown', 'wheel', 'touchstart'].forEach(eventName => {
     area.addEventListener(eventName, () => markGraphActive(1200), { capture: true, passive: true });
   });
+  area.addEventListener('pointerleave', () => {
+    clearHoverEdge();
+    clearHoverHighlight();
+    hideTooltip();
+  }, { capture: true, passive: true });
 }
 
 function installMouseTracking() {

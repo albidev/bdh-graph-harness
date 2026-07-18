@@ -396,7 +396,7 @@ function scheduleClearHoverHighlight() {
   hoverClearFrame = requestAnimationFrame(() => {
     hoverClearFrame = null;
     clearHoverHighlight();
-    if (!isMobile()) hideTooltip();
+    hideTooltip();
   });
 }
 
@@ -615,8 +615,8 @@ function ensureThreeResources() {
   if (!window.THREE) throw new Error('Three.js module is not ready');
   const T = window.THREE;
   threeResources.geometries = {
-    sphere: new T.SphereGeometry(1, 10, 8),
-    hub: new T.IcosahedronGeometry(1, 1),
+    sphere: new T.SphereGeometry(1, 20, 14),
+    hub: new T.IcosahedronGeometry(1, 2),
     diamond: new T.OctahedronGeometry(1, 0),
     dormant: new T.ConeGeometry(1, 1.5, 4, 1),
   };
