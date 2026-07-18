@@ -487,18 +487,37 @@ function setHoverEdge(linkId) {
   cancelScheduledHoverClear();
   clearHoverHighlight();
   if (hoverEdgeId === linkId) return;
-  // Mark previous hovered link as dirty so it gets restored to normal.
-  if (hoverEdgeId) dirtyLinks.add(hoverEdgeId);
+  const prevId = hoverEdgeId;
   hoverEdgeId = linkId;
-  dirtyLinks.add(linkId);
-  requestGraphRedraw();
+  // Fast path: update only the two affected edges directly, no full graph.refresh().
+  const data = graph.graphData();
+  const linkById = linkByIdMap(data.links);
+  if (prevId) {
+    const prevLink = linkById.get(prevId);
+    if (prevLink && prevLink.__lineObj) syncRegularLinkVisual(prevLink);
+    if (prevLink && prevLink._threeLinkObject) syncDashedLinkVisual(prevLink);
+  }
+  const currLink = linkById.get(linkId);
+  if (currLink && currLink.__lineObj) syncRegularLinkVisual(currLink);
+  if (currLink && currLink._threeLinkObject) syncDashedLinkVisual(currLink);
 }
 
 function clearHoverEdge(redraw = true) {
   if (!hoverEdgeId) return;
-  dirtyLinks.add(hoverEdgeId);
+  const prevId = hoverEdgeId;
   hoverEdgeId = null;
-  if (redraw) requestGraphRedraw();
+  if (redraw) {
+    const data = graph.graphData();
+    const prevLink = linkByIdMap(data.links).get(prevId);
+    if (prevLink && prevLink.__lineObj) syncRegularLinkVisual(prevLink);
+    if (prevLink && prevLink._threeLinkObject) syncDashedLinkVisual(prevLink);
+  }
+}
+
+function linkByIdMap(links) {
+  const m = new Map();
+  for (let i = 0; i < links.length; i++) m.set(links[i]._id, links[i]);
+  return m;
 }
 
 function setPathHighlight(pathIds = []) {
