@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#0d1117">
 <title>BDH Graph Harness — 3D Knowledge Space</title>
-<link rel="stylesheet" href="/static/styles.css?v=3d-v7">
+<link rel="stylesheet" href="/static/styles.css?v=3d-v8">
 <script>
   window.__BDH_RUNTIME_ERRORS__ = [];
   window.addEventListener('error', event => {
@@ -189,7 +189,7 @@
     <section id="query-section">
       <div class="section-heading"><span class="eyebrow">Retrieval</span><h2>Query the graph</h2></div>
       <div class="query-wrap">
-        <input type="text" id="query-input" placeholder="Ask the knowledge space…" autocomplete="off">
+        <textarea id="query-input" rows="5" placeholder="Ask the knowledge space…" autocomplete="off" spellcheck="false"></textarea>
         <button class="query-clear" id="query-clear" onclick="clearQuery()" title="Clear query" aria-label="Clear query">×</button>
       </div>
       <div class="query-actions">
@@ -235,12 +235,12 @@
       return module;
     });
 </script>
-<script src="/static/graph-3d-utils.js?v=3d-v7"></script>
-<script src="/static/graph-core.js?v=3d-v7"></script>
-<script src="/static/graph-init.js?v=3d-v7"></script>
-<script src="/static/activation.js?v=3d-v7"></script>
-<script src="/static/vault-selector.js?v=3d-v7"></script>
-<script src="/static/websocket.js?v=3d-v7"></script>
-<script src="/static/ui-controls.js?v=3d-v7"></script>
+<script src="/static/graph-3d-utils.js?v=3d-v8"></script>
+<script src="/static/graph-core.js?v=3d-v8"></script>
+<script src="/static/graph-init.js?v=3d-v8"></script>
+<script src="/static/activation.js?v=3d-v8"></script>
+<script src="/static/vault-selector.js?v=3d-v8"></script>
+<script src="/static/websocket.js?v=3d-v8"></script>
+<script src="/static/ui-controls.js?v=3d-v8"></script>
 </body>
 </html>

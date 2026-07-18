@@ -1093,13 +1093,17 @@ body.panel-collapsed #panel-resize {
 
 #query-input {
   width: 100%;
-  min-height: 42px;
-  padding: 0 38px 0 13px;
+  height: 120px;
+  min-height: 112px;
+  padding: 11px 38px 11px 13px;
   border: 1px solid var(--line-strong);
   border-radius: 8px;
   color: var(--text);
   background: rgba(5, 8, 12, 0.34);
   font-size: 12px;
+  line-height: 1.5;
+  resize: vertical;
+  overflow: auto;
   transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
 }
 
@@ -1185,16 +1189,21 @@ body.panel-collapsed #panel-resize {
 }
 
 #response-section {
-  max-height: 190px;
+  min-height: 112px;
+  max-height: 280px;
   overflow: auto;
 }
 
 #response-text {
+  max-height: 220px;
+  min-height: 54px;
+  padding-right: 4px;
   color: var(--text-secondary);
   font-size: 11px;
   font-weight: 400;
   line-height: 1.62;
   white-space: pre-wrap;
+  overflow: auto;
 }
 
 #selection-section {
@@ -1889,6 +1898,8 @@ body.panel-collapsed #panel-resize {
   }
 
   #query-input {
+    height: 120px;
+    min-height: 112px;
     padding-right: 42px;
     font-size: 16px;
   }

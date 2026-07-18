@@ -226,6 +226,19 @@ def test_websocket_bootstrap_uses_rich_rest_snapshot_and_polling_fallback():
     assert "fetchGraphSnapshot({ reason: 'websocket-bootstrap'" in websocket
 
 
+def test_remote_query_response_populates_query_and_response_panel():
+    html = (ROOT / "bdh_graph_harness/visualization/templates/index.html").read_text()
+    websocket = (ROOT / "bdh_graph_harness/visualization/templates/websocket.js").read_text()
+
+    assert '<textarea' in html
+    assert 'id="query-input"' in html
+    assert 'rows="5"' in html
+    assert "event.type === 'query_response'" in websocket
+    assert "function renderRemoteQueryResponse(event)" in websocket
+    assert "queryInput.value = event.query || ''" in websocket
+    assert "responseText.textContent = event.response" in websocket
+
+
 def test_activation_updates_visual_state_without_replacing_graph_data():
     activation = (ROOT / "bdh_graph_harness/visualization/templates/activation.js").read_text()
 
