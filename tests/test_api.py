@@ -107,6 +107,9 @@ async def test_api_stats(mock_app_setup, monkeypatch):
         assert data['queries_processed'] == 5
         assert 'top_hebbian' in data
         assert isinstance(data['top_hebbian'], list)
+        assert data['hebbian_strong_synapses'] == 1
+        assert data['hebbian_weak_synapses'] == 0
+        assert data['hebbian_stale_weak_synapses'] == 0
     finally:
         await client.close()
 
@@ -139,6 +142,7 @@ async def test_api_graph(mock_app_setup, monkeypatch):
         assert 'source' in edge
         assert 'target' in edge
         assert 'display' in edge
+        assert data['hebbian'][0]['last_coactivated'] == '2026-01-01T00:00:00'
     finally:
         await client.close()
 

@@ -2,9 +2,12 @@
 
 import pytest
 from copy import deepcopy
+from datetime import datetime, timedelta
 
 from bdh_graph_harness.memory.consolidation import (
     consolidate,
+    is_stale_weak_synapse,
+    prune_stale_weak,
     synaptic_downscaling,
     structural_pruning,
     prune_stale_dormant,
@@ -114,6 +117,80 @@ class TestStructuralPruning:
 
 
 # ---------------------------------------------------------------------------
+# Stale weak synapse retention
+# ---------------------------------------------------------------------------
+
+class TestStaleWeakSynapse:
+
+    @pytest.fixture
+    def weak_config(self):
+        return {
+            'consolidation_weak_weight_threshold': 0.15,
+            'consolidation_weak_max_frequency': 1.0,
+            'consolidation_weak_min_age_hours': 48,
+        }
+
+    def test_fresh_weak_synapse_survives(self, weak_config):
+        now = datetime(2026, 7, 18, 12, 0, 0)
+        synapse = {
+            'weight': 0.08,
+            'frequency': 0.3,
+            'last_coactivated': (now - timedelta(hours=1)).isoformat(),
+        }
+        assert is_stale_weak_synapse(synapse, now=now, config=weak_config) is False
+
+    def test_old_low_frequency_weak_synapse_is_stale(self, weak_config):
+        now = datetime(2026, 7, 18, 12, 0, 0)
+        synapse = {
+            'weight': 0.08,
+            'frequency': 0.6,
+            'last_coactivated': (now - timedelta(hours=49)).isoformat(),
+        }
+        assert is_stale_weak_synapse(synapse, now=now, config=weak_config) is True
+
+    def test_frequent_weak_synapse_is_protected(self, weak_config):
+        now = datetime(2026, 7, 18, 12, 0, 0)
+        synapse = {
+            'weight': 0.08,
+            'frequency': 1.1,
+            'last_coactivated': (now - timedelta(hours=49)).isoformat(),
+        }
+        assert is_stale_weak_synapse(synapse, now=now, config=weak_config) is False
+
+    def test_malformed_timestamp_fails_closed(self, weak_config):
+        synapse = {'weight': 0.08, 'frequency': 0.3, 'last_coactivated': 'unknown'}
+        assert is_stale_weak_synapse(
+            synapse,
+            now=datetime(2026, 7, 18, 12, 0, 0),
+            config=weak_config,
+        ) is False
+
+    def test_prune_stale_weak_returns_count_and_preserves_protected(self, weak_config):
+        now = datetime(2026, 7, 18, 12, 0, 0)
+        state = {
+            'synapses': {
+                'stale|weak': {
+                    'weight': 0.08,
+                    'frequency': 0.3,
+                    'last_coactivated': (now - timedelta(hours=49)).isoformat(),
+                },
+                'fresh|weak': {
+                    'weight': 0.08,
+                    'frequency': 0.3,
+                    'last_coactivated': (now - timedelta(hours=1)).isoformat(),
+                },
+                'frequent|weak': {
+                    'weight': 0.08,
+                    'frequency': 2.0,
+                    'last_coactivated': (now - timedelta(hours=49)).isoformat(),
+                },
+            },
+        }
+        assert prune_stale_weak(state, now=now, config=weak_config) == 1
+        assert set(state['synapses']) == {'fresh|weak', 'frequent|weak'}
+
+
+# ---------------------------------------------------------------------------
 # Stale dormant pruning
 # ---------------------------------------------------------------------------
 
@@ -174,6 +251,7 @@ class TestConsolidate:
         assert 'synapses_before' in results
         assert 'synapses_after' in results
         assert 'synapses_pruned' in results
+        assert 'stale_weak_pruned' in results
         assert 'nodes_removed' in results
         assert 'cycles' in results
         assert 'timestamp' in results
