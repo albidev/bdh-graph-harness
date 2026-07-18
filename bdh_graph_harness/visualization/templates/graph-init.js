@@ -501,8 +501,8 @@ function createGraphInstance() {
 function configureForces() {
   if (!graph) return;
   const spacing = spacingValue / 100;
-  const chargeStrength = Math.round(-280 - spacing * 820);
-  const linkDistance = 42 + edgeLengthMultiplier * 2.45;
+  const chargeStrength = Math.round(-380 - spacing * 920);
+  const linkDistance = 60 + edgeLengthMultiplier * 2.45;
   graph.d3Force('charge').strength(node => massAwareChargeStrength(node, chargeStrength));
   graph.d3Force('link').distance(link => massAwareLinkDistance(link, linkDistance));
   graph.d3Force('center').strength(0.035);
@@ -513,7 +513,7 @@ function configureForces() {
       let nodes;
       const force = function(alpha) {
         if (!nodes) return;
-        const radius = 1.4;
+        const radius = 1.8;
         for (let i = 0; i < nodes.length; i++) {
           const node = nodes[i];
           if (!node) continue;
