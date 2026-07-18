@@ -956,18 +956,25 @@ function linkMaterial(link) {
     const kind = width > 0 ? 'mesh' : 'line';
     const material = kind === 'mesh'
       ? new window.THREE.MeshBasicMaterial({
+          color: linkDisplayColor(link),
           transparent: true,
+          opacity: linkDisplayOpacity(link),
           depthWrite: false,
           blending: window.THREE.NormalBlending,
         })
       : new window.THREE.LineBasicMaterial({
+          color: linkDisplayColor(link),
           transparent: true,
+          opacity: linkDisplayOpacity(link),
           depthWrite: false,
           blending: window.THREE.NormalBlending,
         });
     perLinkMaterials.set(id, material);
   }
-  return perLinkMaterials.get(id);
+  const mat = perLinkMaterials.get(id);
+  mat.color.set(linkDisplayColor(link));
+  mat.opacity = linkDisplayOpacity(link);
+  return mat;
 }
 
 function createDashedLinkObject(link) {
@@ -1037,9 +1044,6 @@ function syncRegularLinkVisual(link) {
 function syncThreeVisualState() {
   if (!graph || !window.THREE) return;
   const data = graph.graphData();
-  data.nodes.forEach(updateNodeThreeObject);
-  data.links.forEach(syncDashedLinkVisual);
-  data.links.forEach(syncRegularLinkVisual);
   graph
     .nodeVisibility(isCoreNodeVisible)
     .linkVisibility(effectiveLinkVisibility)
@@ -1050,6 +1054,10 @@ function syncThreeVisualState() {
     .linkDirectionalParticleWidth(hoverAwareParticleWidth)
     .linkDirectionalParticleColor(particleColor);
   graph.refresh();
+  // Apply per-link visual state AFTER refresh so it survives object recreation.
+  data.nodes.forEach(updateNodeThreeObject);
+  data.links.forEach(syncDashedLinkVisual);
+  data.links.forEach(syncRegularLinkVisual);
   scheduleLabelUpdate();
 }
 
