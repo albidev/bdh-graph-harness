@@ -643,14 +643,12 @@ function stableLinkHash(link) {
 }
 
 function organicLinkCurvature(link) {
-  // Only phantom links stay straight; all others get organic curvature.
-  if (link && link.type === 'phantom') return 0;
+  // All edges get organic curvature — no exceptions for visual homogeneity.
   const hash = stableLinkHash(link);
   return edgeCurvatureBase + ((hash % 100) / 100) * 0.18;
 }
 
 function organicLinkRotation(link) {
-  if (link && link.type === 'phantom') return 0;
   return (stableLinkHash(link) % 628) / 100;
 }
 
@@ -845,7 +843,7 @@ function nodeMaterial(color, opacity, emphasis, dormant = false) {
   const emphasisBucket = Math.round(Math.max(0, Math.min(1, emphasis)) * 4) / 4;
   const key = `${color}|${opacityBucket}|${emphasisBucket}|${dormant ? 'dormant' : 'active'}`;
   if (!resources.nodeMaterials.has(key)) {
-    const baseEmissive = dormant ? 0.12 : 0.45;
+    const baseEmissive = dormant ? 0.08 : 0.35;
     const material = new window.THREE.MeshLambertMaterial({
       color,
       emissive: color,
@@ -964,9 +962,9 @@ function updateNodeThreeObject(node) {
     if (node._dormant) {
       glow.visible = false;
     } else {
-      // Cap at 0.32 to avoid blinding clusters. Emphasis adds a little, not a lot.
+      // Cap at 0.22 to avoid blinding clusters. Emphasis adds a little, not a lot.
       // glowMultiplier is a global scale adjustable from console (BDHGlow.set(2)).
-      const glowOpacity = Math.min(0.32 * glowMultiplier, 0.12 + emphasis * 0.20) * opacity;
+      const glowOpacity = Math.min(0.22 * glowMultiplier, 0.08 + emphasis * 0.14) * opacity;
       glow.visible = glowOpacity > 0.02;
       if (glow.visible) {
         glow.material = glowMaterial(baseColor, glowOpacity);
