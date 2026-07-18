@@ -511,25 +511,28 @@ function linkDisplayOpacity(link) {
   return Math.max(0.025, Math.min(0.9, opacity));
 }
 
+const EDGE_WIDTH_SCALE = 2;
+
 function linkDisplayWidth(link) {
   const key = linkKey(link);
   const stateWidth = linkWidthState.get(key);
-  if (stateWidth != null) return Math.min(3.2, Math.max(0, stateWidth * 0.42));
-  if (hoverEdgeId === link._id || isHighlightedLink(link)) return Math.max(0.8, Math.min(2.2, (link.width || 1) * 0.55));
-  if (currentLodLevel === 'overview') {
-    if (link.type === 'wikilink') return 2.00;
-    if (link.type === 'phantom') return 1.65;
-    if (link.type === 'hebbian') return 2.45;
-    if (link.type === 'project_context') return 2.20;
-    if (link.type === 'counterpart' || link.type === 'project_reference' || link.type === 'neurogenesis') return 3.10;
-    return 1.80;
-  }
-  if (link.type === 'wikilink') return 2.35;
-  if (link.type === 'phantom') return 1.95;
-  if (link.type === 'hebbian') return (link.weight || 0) >= 0.7 ? 3.20 : 2.40;
-  if (link.type === 'project_context') return 2.75;
-  if (link.type === 'counterpart' || link.type === 'project_reference' || link.type === 'neurogenesis') return 3.80;
-  return 2.10;
+  let width;
+  if (stateWidth != null) width = Math.min(3.2, Math.max(0, stateWidth * 0.42));
+  else if (hoverEdgeId === link._id || isHighlightedLink(link)) width = Math.max(0.8, Math.min(2.2, (link.width || 1) * 0.55));
+  else if (currentLodLevel === 'overview') {
+    if (link.type === 'wikilink') width = 2.00;
+    else if (link.type === 'phantom') width = 1.65;
+    else if (link.type === 'hebbian') width = 2.45;
+    else if (link.type === 'project_context') width = 2.20;
+    else if (link.type === 'counterpart' || link.type === 'project_reference' || link.type === 'neurogenesis') width = 3.10;
+    else width = 1.80;
+  } else if (link.type === 'wikilink') width = 2.35;
+  else if (link.type === 'phantom') width = 1.95;
+  else if (link.type === 'hebbian') width = (link.weight || 0) >= 0.7 ? 3.20 : 2.40;
+  else if (link.type === 'project_context') width = 2.75;
+  else if (link.type === 'counterpart' || link.type === 'project_reference' || link.type === 'neurogenesis') width = 3.80;
+  else width = 2.10;
+  return width * EDGE_WIDTH_SCALE;
 }
 
 function stableLinkHash(link) {
@@ -970,7 +973,7 @@ function linkMaterial(link) {
 function createDashedLinkObject(link) {
   if (!link._dashes) return null;
   const highlighted = hoverEdgeId === link._id || isHighlightedLink(link);
-  const radius = highlighted ? 1.35 : Math.max(0.62, Math.min(1.2, linkDisplayWidth(link) * 0.38));
+  const radius = highlighted ? 2.7 : Math.max(1.24, Math.min(2.4, linkDisplayWidth(link) * 0.38));
   const geometry = new window.THREE.CylinderGeometry(1, 1, 1, 12, 1, false);
   const material = new window.THREE.MeshBasicMaterial({
     color: linkDisplayColor(link),
@@ -993,7 +996,7 @@ function updateDashedLinkPosition(object, coordinates, link) {
   const direction = end.clone().sub(start);
   const length = Math.max(0.001, direction.length());
   const highlighted = hoverEdgeId === link._id || isHighlightedLink(link);
-  const radius = highlighted ? 1.35 : Math.max(0.62, Math.min(1.2, linkDisplayWidth(link) * 0.38));
+  const radius = highlighted ? 2.7 : Math.max(1.24, Math.min(2.4, linkDisplayWidth(link) * 0.38));
   object.position.copy(start.clone().add(end).multiplyScalar(0.5));
   object.scale.set(radius, length, radius);
   object.quaternion.setFromUnitVectors(new window.THREE.Vector3(0, 1, 0), direction.normalize());
@@ -1007,7 +1010,7 @@ function syncDashedLinkVisual(link) {
   object.material.color.set(linkDisplayColor(link));
   object.material.opacity = linkDisplayOpacity(link);
   const highlighted = hoverEdgeId === link._id || isHighlightedLink(link);
-  const radius = highlighted ? 1.35 : Math.max(0.62, Math.min(1.2, linkDisplayWidth(link) * 0.38));
+  const radius = highlighted ? 2.7 : Math.max(1.24, Math.min(2.4, linkDisplayWidth(link) * 0.38));
   object.scale.x = radius;
   object.scale.z = radius;
   object.material.needsUpdate = true;

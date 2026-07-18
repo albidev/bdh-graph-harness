@@ -176,6 +176,9 @@ def test_neural_cosmetics_keep_particles_and_install_bloom_on_native_composer():
     assert "new window.THREE.CylinderGeometry(1, 1, 1, 12, 1, false)" in core
     assert "new window.THREE.MeshBasicMaterial({" in core
     assert "new window.THREE.LineDashedMaterial" not in core
+    assert "const EDGE_WIDTH_SCALE = 2;" in core
+    assert "return width * EDGE_WIDTH_SCALE;" in core
+    assert "highlighted ? 2.7" in core
     assert "bloomPass.threshold = 0.62" in core
     assert "bloomPass.strength = 1.15" in core
     assert "bloomPass.radius = 0.82" in core
