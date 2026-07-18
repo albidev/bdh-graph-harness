@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#0d1117">
 <title>BDH Graph Harness — 3D Knowledge Space</title>
-<link rel="stylesheet" href="/static/styles.css?v=3d-v8">
+<link rel="stylesheet" href="/static/styles.css?v=3d-v9">
 <script>
   window.__BDH_RUNTIME_ERRORS__ = [];
   window.addEventListener('error', event => {
@@ -228,19 +228,33 @@
 </main>
 
 <script src="https://unpkg.com/3d-force-graph@1.80.0/dist/3d-force-graph.min.js" crossorigin="anonymous"></script>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.180.0/build/three.module.min.js",
+    "three/addons/": "https://unpkg.com/three@0.180.0/examples/jsm/"
+  }
+}
+</script>
 <script>
   window.BDH3DReady = import('https://unpkg.com/three@0.180.0/build/three.module.min.js')
     .then(module => {
       window.THREE = module;
       return module;
     });
+  window.BDHBloomReady = window.BDH3DReady
+    .then(() => import('https://unpkg.com/three@0.180.0/examples/jsm/postprocessing/UnrealBloomPass.js'))
+    .then(module => {
+      window.UnrealBloomPass = module.UnrealBloomPass;
+      return module;
+    });
 </script>
-<script src="/static/graph-3d-utils.js?v=3d-v8"></script>
-<script src="/static/graph-core.js?v=3d-v8"></script>
-<script src="/static/graph-init.js?v=3d-v8"></script>
-<script src="/static/activation.js?v=3d-v8"></script>
-<script src="/static/vault-selector.js?v=3d-v8"></script>
-<script src="/static/websocket.js?v=3d-v8"></script>
-<script src="/static/ui-controls.js?v=3d-v8"></script>
+<script src="/static/graph-3d-utils.js?v=3d-v9"></script>
+<script src="/static/graph-core.js?v=3d-v9"></script>
+<script src="/static/graph-init.js?v=3d-v9"></script>
+<script src="/static/activation.js?v=3d-v9"></script>
+<script src="/static/vault-selector.js?v=3d-v9"></script>
+<script src="/static/websocket.js?v=3d-v9"></script>
+<script src="/static/ui-controls.js?v=3d-v9"></script>
 </body>
 </html>

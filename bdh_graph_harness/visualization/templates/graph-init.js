@@ -479,6 +479,7 @@ function createGraphInstance() {
   const renderer = graph.renderer();
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, constrained ? 1.25 : 1.75));
   graph.scene().fog = new window.THREE.FogExp2(COLORS.bg, constrained ? 0.00055 : 0.00038);
+  scheduleBloomInstall();
 
   const controls = graph.controls();
   controls.rotateSpeed = 1.15;

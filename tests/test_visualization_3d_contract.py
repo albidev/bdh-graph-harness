@@ -116,7 +116,7 @@ def test_dormant_nodes_remain_visible_instead_of_being_dimmed_three_times():
     assert "dormant: '#718096'" in graph_core
     assert "_opacity: isDormant ? 0.84 : 1" in graph_init
     assert "if (node._dormant) opacity *= 0.82" in graph_core
-    assert "const baseEmissive = dormant ? 0.24 : 0.04;" in graph_core
+    assert "const baseEmissive = dormant ? 0.24 : 0.12;" in graph_core
 
 
 def test_neurogenesis_identity_overrides_dormant_visual_classification():
@@ -160,6 +160,22 @@ def test_page_bootstraps_the_pinned_3d_renderer_and_real_three_dimensional_layou
     assert ".enableNavigationControls(true)" in graph_init
     assert ".enableNodeDrag(true)" in graph_init
     assert ".nodeCanvasObject(" not in graph_init
+
+
+def test_neural_cosmetics_keep_particles_and_install_bloom_on_native_composer():
+    html = (ROOT / "bdh_graph_harness/visualization/templates/index.html").read_text()
+    core = (ROOT / "bdh_graph_harness/visualization/templates/graph-core.js").read_text()
+    graph_init = (ROOT / "bdh_graph_harness/visualization/templates/graph-init.js").read_text()
+
+    assert "UnrealBloomPass.js" in html
+    assert "window.BDHBloomReady" in html
+    assert "postProcessingComposer" in core
+    assert "function installBloomPass()" in core
+    assert "composer.addPass(bloomPass)" in core
+    assert "if (isAmbientFlowLink(link)) return particleConfig.ambientParticles;" in core
+    assert "scheduleBloomInstall();" in graph_init
+    assert "ambientThreshold: 0.62" in core
+    assert "ambientWidth: 1.6" in core
 
 
 def test_camera_model_supports_focus_restore_fit_and_orientation_reset():
