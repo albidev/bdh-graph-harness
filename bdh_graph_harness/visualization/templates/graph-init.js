@@ -484,7 +484,7 @@ function createGraphInstance() {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, constrained ? 1.75 : 2));
   renderer.setClearColor(COLORS.bg, 1);
   graph.scene().background = new window.THREE.Color(COLORS.bg);
-  graph.scene().fog = new window.THREE.FogExp2(COLORS.bg, constrained ? 0.00055 : 0.00038);
+  graph.scene().fog = new window.THREE.FogExp2(COLORS.bg, fogDensity);
   ensureNeuralField();
   scheduleBloomInstall();
 

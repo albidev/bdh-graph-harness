@@ -119,6 +119,12 @@ function restoreGraphControlState() {
   if (['all', 'vault', 'external'].includes(savedSourceFilter)) sourceFilter = savedSourceFilter;
   restoredZoom = clampNumber(loadControlValue(STORAGE_KEYS.zoom, ''), 0.2, 4, null);
 
+  // Neural atmosphere controls (7/8/9/10)
+  edgeFadeStrength = clampNumber(loadControlValue(STORAGE_KEYS.edgeFade, edgeFadeStrength), 0, 0.5, 0.05);
+  fogDensity = clampNumber(loadControlValue(STORAGE_KEYS.fogDensity, fogDensity * 1000), 0, 100, 38) / 1000;
+  particleFlowIntensity = clampNumber(loadControlValue(STORAGE_KEYS.particleFlow, particleFlowIntensity), 0, 1, 0.5);
+  edgeCurvatureBase = clampNumber(loadControlValue(STORAGE_KEYS.edgeCurvature, edgeCurvatureBase), 0, 1, 0.25);
+
   const thresholdSlider = document.getElementById('hebbian-threshold');
   const thresholdValue = document.getElementById('threshold-val');
   const spacingSlider = document.getElementById('spacing-slider');
@@ -131,6 +137,17 @@ function restoreGraphControlState() {
   if (spacingOutput) spacingOutput.textContent = spacingValue;
   if (edgeSlider) edgeSlider.value = edgeLengthMultiplier;
   if (edgeOutput) edgeOutput.textContent = edgeLengthMultiplier;
+
+  // Restore atmosphere slider positions
+  const fadeSlider = document.getElementById('edge-fade-slider');
+  if (fadeSlider) fadeSlider.value = edgeFadeStrength;
+  const fogSlider = document.getElementById('fog-slider');
+  if (fogSlider) fogSlider.value = Math.round(fogDensity * 1000);
+  const flowSlider = document.getElementById('particle-flow-slider');
+  if (flowSlider) flowSlider.value = Math.round(particleFlowIntensity * 100);
+  const curvSlider = document.getElementById('curvature-slider');
+  if (curvSlider) curvSlider.value = Math.round(edgeCurvatureBase * 100);
+
   syncSourceFilterUI();
 }
 
