@@ -160,12 +160,20 @@ async function fetchGraphSnapshot(options = {}) {
   const generation = ++graphFetchGeneration;
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 10000);
-  const task = fetch(vaultApiUrl('/api/graph'), { signal: controller.signal, cache: 'no-store' })
+  const url = vaultApiUrl('/api/graph');
+  console.log('[BDH 3D] fetchGraphSnapshot:', options.reason || 'manual', 'vault=', typeof activeVaultId !== 'undefined' ? activeVaultId : null, 'url=', url);
+  const task = fetch(url, { signal: controller.signal, cache: 'no-store' })
     .then(response => {
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       return response.json();
     })
     .then(data => {
+      if (generation !== graphFetchGeneration) { console.warn('[BDH 3D] graph snapshot stale (generation mismatch)'); return null; }
+      if (!data || !Array.isArray(data.nodes) || data.nodes.length === 0) {
+        console.warn('[BDH 3D] graph snapshot empty or malformed:', data);
+        return null;
+      }
+      console.log('[BDH 3D] graph snapshot received:', data.nodes.length, 'nodes,', data.edges ? data.edges.length : 0, 'edges');
       if (generation !== graphFetchGeneration) return null;
       const preserveView = options.preserveView !== false && !resetCameraOnNextGraph && Boolean(graph);
       initNetwork(data, {
