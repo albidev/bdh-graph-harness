@@ -122,7 +122,24 @@ def _full_graph_build(vault_root, ignore_list=None):
                          if _resolve_target(l['target'], nodes) is not None]
         logger.info(f"Graph ignore: excluded {len(ignored)} nodes")
 
+    _filter_self_links(nodes, edges)
+
     return nodes, dict(edges)
+
+
+def _filter_self_links(nodes, edges):
+    """Drop resolved self-references from a structural graph."""
+    filtered = 0
+    for source_id, links in list(edges.items()):
+        kept = []
+        for link in links:
+            if _resolve_target(link.get('target', ''), nodes) == source_id:
+                filtered += 1
+                continue
+            kept.append(link)
+        edges[source_id] = kept
+    if filtered:
+        logger.info(f"Graph self-loop filter: excluded {filtered} structural self-links")
 
 
 def _incremental_graph_update(vault_root, cached, cache_path, ignore_list=None):
@@ -214,6 +231,8 @@ def _incremental_graph_update(vault_root, cached, cache_path, ignore_list=None):
         }
 
         edges[nid] = [{'target': t, 'display': d} for t, d in links]
+
+    _filter_self_links(nodes, edges)
 
     print(f"   🔄 Incremental update: {len(new_notes)} new, {len(changed_notes)} changed, {len(deleted_notes)} deleted")
     logger.info(f"Graph incremental: +{len(new_notes)} ~{len(changed_notes)} -{len(deleted_notes)}")

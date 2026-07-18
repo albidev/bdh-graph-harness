@@ -273,6 +273,8 @@ def build_federated_graph(
                     "source_path": document.relative_path,
                 })
                 continue
+            if target_id == source_id:
+                continue
             edges[source_id].append({
                 "target": target_id,
                 "display": display,

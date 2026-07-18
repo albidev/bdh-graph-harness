@@ -174,6 +174,16 @@ def test_build_graph_edges(mock_vault):
     assert 'concepts/gamma' in targets
 
 
+def test_legacy_builder_drops_resolved_self_wikilinks(tmp_path):
+    with open(os.path.join(tmp_path, 'self.md'), 'w') as handle:
+        handle.write('# Self\nSee [[self]].')
+
+    nodes, edges = harness.build_graph(str(tmp_path), use_cache=False)
+
+    assert 'self' in nodes
+    assert edges.get('self', []) == []
+
+
 def test_build_graph_edge_display(mock_vault):
     _, edges = harness.build_graph(mock_vault)
     for e in edges['alpha']:

@@ -87,6 +87,23 @@ def test_external_source_include_exclude_and_cross_source_links(tmp_path):
     }]
 
 
+def test_federated_builder_drops_resolved_self_wikilinks(tmp_path):
+    vault = tmp_path / "vault"
+    _write(vault / "wiki/concepts/self.md", "# Self\nSee [[self]] and [[other]].")
+    _write(vault / "wiki/concepts/other.md", "# Other")
+
+    nodes, edges, unresolved = build_federated_graph([
+        VaultMarkdownSource(str(vault)),
+    ])
+
+    self_id = "vault:wiki/concepts/self.md"
+    other_id = "vault:wiki/concepts/other.md"
+    assert self_id in nodes
+    assert any(edge["target"] == other_id for edge in edges[self_id])
+    assert all(edge["target"] != self_id for edge in edges[self_id])
+    assert unresolved == []
+
+
 def test_counterpart_edges_are_reciprocal_without_parent_node(tmp_path):
     vault = tmp_path / "vault"
     projects = tmp_path / "projects"
