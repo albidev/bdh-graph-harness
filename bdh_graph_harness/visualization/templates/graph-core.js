@@ -26,7 +26,7 @@ const COLORS = {
 };
 
 const EDGE_OPACITY = {
-  wikilink: 0.72,
+  wikilink: 0.50,
   hebbian: 0.46,
   phantom: 0.46,
   counterpart: 0.64,
