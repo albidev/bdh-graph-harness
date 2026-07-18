@@ -962,9 +962,12 @@ function updateNodeThreeObject(node) {
     if (node._dormant) {
       glow.visible = false;
     } else {
-      // Cap at 0.22 to avoid blinding clusters. Emphasis adds a little, not a lot.
-      // glowMultiplier is a global scale adjustable from console (BDHGlow.set(2)).
-      const glowOpacity = Math.min(0.22 * glowMultiplier, 0.08 + emphasis * 0.14) * opacity;
+      // Uniform ambient glow creates visual density in clusters; emphasis adds focus.
+      // glowMultiplier scales the whole thing from console (BDHGlow.set(2)).
+      const ambientGlow = 0.06; // light, uniform — forms "nebula" density in clusters
+      const focusGlow = Math.min(0.16, emphasis * 0.16);
+      const baseGlow = (ambientGlow + focusGlow) * opacity;
+      const glowOpacity = Math.min(1, baseGlow * glowMultiplier);
       glow.visible = glowOpacity > 0.02;
       if (glow.visible) {
         glow.material = glowMaterial(baseColor, glowOpacity);
