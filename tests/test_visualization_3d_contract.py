@@ -136,9 +136,9 @@ def test_overview_edges_keep_a_visible_dark_mode_baseline():
     """Fit/overview must not blend the structural graph into the scene background."""
     graph_core = (ROOT / "bdh_graph_harness/visualization/templates/graph-core.js").read_text()
 
-    assert "edgeWikilink: '#6b7787'" in graph_core
-    assert "wikilink: 0.52" in graph_core
-    assert "hebbian: 0.32" in graph_core
+    assert "edgeWikilink: '#8fa8c2'" in graph_core
+    assert "wikilink: 0.72" in graph_core
+    assert "hebbian: 0.46" in graph_core
     assert "phantom: 0.46" in graph_core
     assert "link.type === 'wikilink' ? 0.78 : 0.82" in graph_core
 
@@ -175,7 +175,7 @@ def test_neural_cosmetics_keep_particles_and_install_bloom_on_native_composer():
     assert "composer.addPass(bloomPass)" in core
     assert "if (isAmbientFlowLink(link)) return particleConfig.ambientParticles;" in core
     assert "scheduleBloomInstall();" in graph_init
-    assert "ambientThreshold: 0.62" in core
+    assert "ambientThreshold: 0.28" in core
     assert "ambientWidth: 1.6" in core
     assert "function hasAmbientParticleFlow()" in graph_init
     assert "|| hasAmbientParticleFlow()" in graph_init
@@ -186,6 +186,11 @@ def test_neural_cosmetics_keep_particles_and_install_bloom_on_native_composer():
     assert ".linkDirectionalParticleThreeObject(directionalParticleObject)" in graph_init
     assert "renderer.setClearColor(COLORS.bg, 1)" in graph_init
     assert "graph.scene().background = new window.THREE.Color(COLORS.bg)" in graph_init
+    assert "function ensureNeuralField()" in core
+    assert "new T.PointsMaterial" in core
+    assert "organicLinkCurvature" in core
+    assert ".linkCurveRotation(organicLinkRotation)" in graph_init
+    assert "new window.THREE.MeshBasicMaterial(options)" in core
 
 
 def test_pointer_exit_clears_tooltips_and_desktop_rendering_uses_antialiasing_budget():
