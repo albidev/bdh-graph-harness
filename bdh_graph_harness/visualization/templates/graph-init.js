@@ -860,6 +860,11 @@ function hideGraphLoader() {
     loader.classList.add('loader-fade');
     setTimeout(() => { loader.hidden = true; }, 400);
   }
+  // Restore panel/controls to their saved state once the graph is ready.
+  const panelCollapsed = localStorage.getItem('bdh-panel-collapsed-v2') === 'true';
+  const controlsCollapsed = localStorage.getItem('bdh-controls-collapsed-v1') === 'true';
+  document.body.classList.toggle('panel-collapsed', panelCollapsed);
+  document.body.classList.toggle('controls-collapsed', controlsCollapsed);
 }
 
 function retryVisualization() {

@@ -603,7 +603,8 @@ function recoverWhenRendererArrives() {
 
 async function startVisualization() {
   restoreGraphControlState();
-  restorePanelState();
+  // Force panels closed while the graph loader is visible — restored in hideGraphLoader().
+  document.body.classList.add('panel-collapsed', 'controls-collapsed');
   setConnectionStatus('', 'Connecting');
   recoverWhenRendererArrives();
 
