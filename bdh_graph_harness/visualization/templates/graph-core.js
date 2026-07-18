@@ -512,13 +512,14 @@ function linkDisplayOpacity(link) {
 }
 
 const EDGE_WIDTH_SCALE = 2;
+const HIGHLIGHT_WIDTH_SCALE = 4;
 
 function linkDisplayWidth(link) {
   const key = linkKey(link);
   const stateWidth = linkWidthState.get(key);
   let width;
   if (stateWidth != null) width = Math.min(3.2, Math.max(0, stateWidth * 0.42));
-  else if (hoverEdgeId === link._id || isHighlightedLink(link)) width = Math.max(0.8, Math.min(2.2, (link.width || 1) * 0.55));
+  else if (hoverEdgeId === link._id || isHighlightedLink(link)) width = Math.max(1.6, Math.min(4.4, (link.width || 1) * 1.1));
   else if (currentLodLevel === 'overview') {
     if (link.type === 'wikilink') width = 2.00;
     else if (link.type === 'phantom') width = 1.65;
@@ -532,7 +533,8 @@ function linkDisplayWidth(link) {
   else if (link.type === 'project_context') width = 2.75;
   else if (link.type === 'counterpart' || link.type === 'project_reference' || link.type === 'neurogenesis') width = 3.80;
   else width = 2.10;
-  return width * EDGE_WIDTH_SCALE;
+  const scale = (hoverEdgeId === link._id || isHighlightedLink(link)) ? HIGHLIGHT_WIDTH_SCALE : EDGE_WIDTH_SCALE;
+  return width * scale;
 }
 
 function stableLinkHash(link) {
@@ -980,7 +982,7 @@ function linkMaterial(link) {
 function createDashedLinkObject(link) {
   if (!link._dashes) return null;
   const highlighted = hoverEdgeId === link._id || isHighlightedLink(link);
-  const radius = highlighted ? 2.7 : Math.max(1.24, Math.min(2.4, linkDisplayWidth(link) * 0.38));
+  const radius = highlighted ? 5.4 : Math.max(1.24, Math.min(2.4, linkDisplayWidth(link) * 0.38));
   const geometry = new window.THREE.CylinderGeometry(1, 1, 1, 12, 1, false);
   const material = new window.THREE.MeshBasicMaterial({
     color: linkDisplayColor(link),
@@ -1003,7 +1005,7 @@ function updateDashedLinkPosition(object, coordinates, link) {
   const direction = end.clone().sub(start);
   const length = Math.max(0.001, direction.length());
   const highlighted = hoverEdgeId === link._id || isHighlightedLink(link);
-  const radius = highlighted ? 2.7 : Math.max(1.24, Math.min(2.4, linkDisplayWidth(link) * 0.38));
+  const radius = highlighted ? 5.4 : Math.max(1.24, Math.min(2.4, linkDisplayWidth(link) * 0.38));
   object.position.copy(start.clone().add(end).multiplyScalar(0.5));
   object.scale.set(radius, length, radius);
   object.quaternion.setFromUnitVectors(new window.THREE.Vector3(0, 1, 0), direction.normalize());
@@ -1017,7 +1019,7 @@ function syncDashedLinkVisual(link) {
   object.material.color.set(linkDisplayColor(link));
   object.material.opacity = linkDisplayOpacity(link);
   const highlighted = hoverEdgeId === link._id || isHighlightedLink(link);
-  const radius = highlighted ? 2.7 : Math.max(1.24, Math.min(2.4, linkDisplayWidth(link) * 0.38));
+  const radius = highlighted ? 5.4 : Math.max(1.24, Math.min(2.4, linkDisplayWidth(link) * 0.38));
   object.scale.x = radius;
   object.scale.z = radius;
   object.material.needsUpdate = true;
