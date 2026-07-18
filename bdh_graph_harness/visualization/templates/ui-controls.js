@@ -377,10 +377,44 @@ function focusGraphNode(node, options = {}) {
   if (options.pathIds && options.pathIds.length) setPathHighlight(options.pathIds);
   else setNeighborhoodFocus(node.id);
 
+  // Fit the entire highlighted subgraph in view instead of zooming aggressively on the node.
+  const highlight = activeHighlight();
+  const data = graph.graphData();
+  const focusNodeIds = highlight && highlight.nodeIds && highlight.nodeIds.size
+    ? [...highlight.nodeIds]
+    : [node.id];
+  const focusNodes = data.nodes.filter(n => focusNodeIds.includes(n.id));
+  if (focusNodes.length === 0) return;
+
+  let min = { x: Infinity, y: Infinity, z: Infinity };
+  let max = { x: -Infinity, y: -Infinity, z: -Infinity };
+  focusNodes.forEach(n => {
+    min.x = Math.min(min.x, n.x || 0); max.x = Math.max(max.x, n.x || 0);
+    min.y = Math.min(min.y, n.y || 0); max.y = Math.max(max.y, n.y || 0);
+    min.z = Math.min(min.z, n.z || 0); max.z = Math.max(max.z, n.z || 0);
+  });
+  const center = {
+    x: (min.x + max.x) / 2,
+    y: (min.y + max.y) / 2,
+    z: (min.z + max.z) / 2,
+  };
+  const span = Math.max(
+    max.x - min.x, max.y - min.y, max.z - min.z, 30
+  );
   const currentCamera = graph.cameraPosition();
-  const focusDistance = Math.max(90, nodeRadius(node.val || 4) * nodeWorldScale * 12);
-  const nextPosition = BDH3DUtils.cameraPositionForFocus(node, currentCamera, focusDistance);
-  graph.cameraPosition(nextPosition, { x: node.x, y: node.y, z: node.z }, reducedMotion.matches ? 0 : 620);
+  const dir = {
+    x: (currentCamera.x || 0) - (node.x || 0),
+    y: (currentCamera.y || 0) - (node.y || 0),
+    z: (currentCamera.z || 0) - (node.z || 0),
+  };
+  const dirLen = Math.hypot(dir.x, dir.y, dir.z) || 1;
+  const focusDistance = Math.max(140, span * 2.4);
+  const nextPosition = {
+    x: center.x + (dir.x / dirLen) * focusDistance,
+    y: center.y + (dir.y / dirLen) * focusDistance,
+    z: center.z + (dir.z / dirLen) * focusDistance,
+  };
+  graph.cameraPosition(nextPosition, center, reducedMotion.matches ? 0 : 620);
   selectGraphNode(node);
   updateFocusUI();
   scheduleLabelUpdate();

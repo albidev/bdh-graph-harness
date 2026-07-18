@@ -189,6 +189,8 @@ def test_neural_cosmetics_keep_particles_and_install_bloom_on_native_composer():
     assert "link.__lineObj" in core
     assert "data.links.forEach(syncRegularLinkVisual);" in core
     assert "if (graphLayoutActive) return;" in core
+    assert "Fit the entire highlighted subgraph" in (ROOT / "bdh_graph_harness/visualization/templates/ui-controls.js").read_text()
+    assert "span * 2.4" in (ROOT / "bdh_graph_harness/visualization/templates/ui-controls.js").read_text()
     assert "const perLinkMaterials = new Map();" in core
     assert "perLinkMaterials.set(id, material);" in core
     assert "bloomPass.threshold = 0.62" in core
@@ -247,7 +249,6 @@ def test_camera_model_supports_focus_restore_fit_and_orientation_reset():
     assert "function exitFocusMode(" in controls
     assert "function resetCameraOrientation(" in controls
     assert "graph.cameraPosition(" in controls
-    assert "BDH3DUtils.cameraPositionForFocus" in controls
     assert 'id="focus-back-btn"' in html
     assert ".centerAt(" not in controls
 
