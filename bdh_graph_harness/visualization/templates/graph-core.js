@@ -504,19 +504,19 @@ function linkDisplayWidth(link) {
   if (stateWidth != null) return Math.min(3.2, Math.max(0, stateWidth * 0.42));
   if (hoverEdgeId === link._id || isHighlightedLink(link)) return Math.max(0.8, Math.min(2.2, (link.width || 1) * 0.55));
   if (currentLodLevel === 'overview') {
-    if (link.type === 'wikilink') return 1.50;
-    if (link.type === 'phantom') return 1.25;
-    if (link.type === 'hebbian') return 1.85;
-    if (link.type === 'project_context') return 1.65;
-    if (link.type === 'counterpart' || link.type === 'project_reference' || link.type === 'neurogenesis') return 2.35;
-    return 1.35;
+    if (link.type === 'wikilink') return 2.00;
+    if (link.type === 'phantom') return 1.65;
+    if (link.type === 'hebbian') return 2.45;
+    if (link.type === 'project_context') return 2.20;
+    if (link.type === 'counterpart' || link.type === 'project_reference' || link.type === 'neurogenesis') return 3.10;
+    return 1.80;
   }
-  if (link.type === 'wikilink') return 1.80;
-  if (link.type === 'phantom') return 1.45;
-  if (link.type === 'hebbian') return (link.weight || 0) >= 0.7 ? 2.55 : 1.85;
-  if (link.type === 'project_context') return 2.05;
-  if (link.type === 'counterpart' || link.type === 'project_reference' || link.type === 'neurogenesis') return 2.90;
-  return 1.60;
+  if (link.type === 'wikilink') return 2.35;
+  if (link.type === 'phantom') return 1.95;
+  if (link.type === 'hebbian') return (link.weight || 0) >= 0.7 ? 3.20 : 2.40;
+  if (link.type === 'project_context') return 2.75;
+  if (link.type === 'counterpart' || link.type === 'project_reference' || link.type === 'neurogenesis') return 3.80;
+  return 2.10;
 }
 
 function hoverAwareParticles(link) {
@@ -571,6 +571,7 @@ const threeResources = {
 };
 
 let bloomPass = null;
+let smaaPass = null;
 let bloomInstallPromise = null;
 
 function installBloomPass() {
@@ -592,6 +593,10 @@ function installBloomPass() {
   bloomPass.strength = 0.78;
   bloomPass.radius = 0.55;
   composer.addPass(bloomPass);
+  if (typeof window.SMAAPass === 'function') {
+    smaaPass = new window.SMAAPass(width, height);
+    composer.addPass(smaaPass);
+  }
   return true;
 }
 

@@ -168,6 +168,7 @@ def test_neural_cosmetics_keep_particles_and_install_bloom_on_native_composer():
     graph_init = (ROOT / "bdh_graph_harness/visualization/templates/graph-init.js").read_text()
 
     assert "UnrealBloomPass.js" in html
+    assert "SMAAPass.js" in html
     assert "window.BDHBloomReady" in html
     assert "postProcessingComposer" in core
     assert "function installBloomPass()" in core
@@ -193,9 +194,9 @@ def test_pointer_exit_clears_tooltips_and_desktop_rendering_uses_antialiasing_bu
 
     assert "sphere: new T.SphereGeometry(1, 20, 14)" in core
     assert "hub: new T.IcosahedronGeometry(1, 2)" in core
-    assert ".linkResolution(constrained ? 8 : 12)" in graph_init
-    assert ".linkHoverPrecision(constrained ? 10 : 16)" in graph_init
-    assert ".linkDirectionalParticleResolution(constrained ? 6 : 8)" in graph_init
+    assert ".linkResolution(constrained ? 12 : 20)" in graph_init
+    assert ".linkHoverPrecision(constrained ? 16 : 24)" in graph_init
+    assert ".linkDirectionalParticleResolution(constrained ? 8 : 10)" in graph_init
     assert "Math.min(window.devicePixelRatio || 1, constrained ? 1.75 : 2)" in graph_init
     assert "antialias: true" in graph_init
     assert "area.addEventListener('pointerleave'" in graph_init
