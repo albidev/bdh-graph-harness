@@ -1106,6 +1106,7 @@ function positionTooltip(event) {
 }
 
 function showTooltip(node, event) {
+  if (graphLayoutActive) return;
   ensureTooltip();
   const data = node ? nodeDataMap[node.id] : null;
   if (!data) { hideTooltip(); return; }
@@ -1160,6 +1161,7 @@ function edgeTypeLabel(type) {
 }
 
 function showEdgeTooltip(link, event) {
+  if (graphLayoutActive) return;
   ensureTooltip();
   const info = link ? edgeInfoMap[link._id] : null;
   if (!info) { hideTooltip(); return; }
@@ -1180,6 +1182,7 @@ function showEdgeTooltip(link, event) {
 }
 
 function showActivatedTooltip(note, event) {
+  if (graphLayoutActive) return;
   ensureTooltip();
   if (!note) return;
   const role = note.role === 'seed' ? 'Seed' : 'Graph neighbor';
