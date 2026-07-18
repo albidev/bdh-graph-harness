@@ -10,6 +10,7 @@ from bdh_graph_harness.graph.parser import (
     extract_note_id,
     find_note_by_id,
     parse_frontmatter,
+    parse_json_frontmatter_list,
     extract_wikilinks,
     extract_text,
 )
@@ -46,6 +47,7 @@ __all__ = [
     'extract_note_id',
     'find_note_by_id',
     'parse_frontmatter',
+    'parse_json_frontmatter_list',
     'extract_wikilinks',
     'extract_text',
     'GRAPH_CACHE_FILE',

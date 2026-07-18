@@ -223,7 +223,27 @@ def _sanitize_for_note(text, max_len=200):
     return text[:max_len]
 
 
-def create_note(vault_root, title, definition, source_notes, query, neurogenesis_dir=None):
+def _serialize_source_node_ids(source_node_ids):
+    """Serialize validated source IDs as a deterministic JSON list."""
+    result = []
+    for source_id in source_node_ids or []:
+        if not isinstance(source_id, str):
+            continue
+        source_id = source_id.strip()
+        if source_id and '\n' not in source_id and '\r' not in source_id and source_id not in result:
+            result.append(source_id)
+    return json.dumps(result, ensure_ascii=False)
+
+
+def create_note(
+    vault_root,
+    title,
+    definition,
+    source_notes,
+    query,
+    neurogenesis_dir=None,
+    source_node_ids=None,
+):
     """Create a new atomic note in the vault (neurogenesis)."""
     from datetime import datetime
 
@@ -244,6 +264,7 @@ def create_note(vault_root, title, definition, source_notes, query, neurogenesis
     safe_sources = _yaml_escape(', '.join(
         _sanitize_for_note(str(s), max_len=120) for s in source_notes[:3]
     ))
+    source_ids = _serialize_source_node_ids(source_node_ids)
 
     content = f"""---
 title: {safe_title}
@@ -256,6 +277,7 @@ confidence: low
 created_by: bdh-neurogenesis
 generation_query: {safe_query}
 activated_from: {safe_sources}
+activated_from_ids: {source_ids}
 ---
 
 # {title}

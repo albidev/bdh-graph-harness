@@ -48,6 +48,17 @@ def test_parse_frontmatter_empty_value():
     assert 'title' in fm
 
 
+def test_parse_json_frontmatter_list_sanitizes_source_ids():
+    fm = {'activated_from_ids': '["vault:source.md", "external:projects/demo.md", 42]'}
+    assert harness.parse_json_frontmatter_list(fm, 'activated_from_ids') == [
+        'vault:source.md',
+        'external:projects/demo.md',
+    ]
+    assert harness.parse_json_frontmatter_list(
+        {'activated_from_ids': 'not-json'}, 'activated_from_ids'
+    ) == []
+
+
 # ---------------------------------------------------------------------------
 # extract_wikilinks
 # ---------------------------------------------------------------------------
@@ -172,6 +183,16 @@ def test_build_graph_edges(mock_vault):
     targets = [e['target'] for e in edges['alpha']]
     assert 'beta' in targets
     assert 'concepts/gamma' in targets
+
+
+def test_legacy_builder_drops_resolved_self_wikilinks(tmp_path):
+    with open(os.path.join(tmp_path, 'self.md'), 'w') as handle:
+        handle.write('# Self\nSee [[self]].')
+
+    nodes, edges = harness.build_graph(str(tmp_path), use_cache=False)
+
+    assert 'self' in nodes
+    assert edges.get('self', []) == []
 
 
 def test_build_graph_edge_display(mock_vault):
