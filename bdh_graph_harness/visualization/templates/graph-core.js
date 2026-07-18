@@ -373,10 +373,8 @@ function linkKey(link) {
 }
 
 function isAmbientFlowLink(link) {
-  return particleConfig.enabled
-    && particleConfig.ambient
-    && link.type === 'hebbian'
-    && (link.weight || 0) >= particleConfig.ambientThreshold;
+  // Ambient flow disabled — particles only on directly activated synapses.
+  return false;
 }
 
 function isActiveFlowLink(link) {
