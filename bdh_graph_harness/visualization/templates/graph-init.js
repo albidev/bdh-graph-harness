@@ -510,9 +510,12 @@ function createGraphInstance() {
     const ndc = new T.Vector2();
     const tmpVec = new T.Vector3();
     canvas.addEventListener('wheel', (e) => {
-      if (!graph || e.defaultPrevented) return;
+      if (!graph) return;
       const controls = graph.controls();
       if (!controls || !controls.target) return;
+      // On macOS trackpads, pinch-to-zoom fires wheel with ctrlKey=true.
+      // Prevent the browser from hijacking it as page zoom.
+      if (e.ctrlKey) e.preventDefault();
       const rect = canvas.getBoundingClientRect();
       ndc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
       ndc.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
@@ -525,7 +528,7 @@ function createGraphInstance() {
       // Lerp the orbit target toward the cursor point — the trackball dolly then zooms toward it.
       controls.target.lerp(hit, 0.35);
       controls.update();
-    }, { passive: true, capture: true });
+    }, { passive: false, capture: true });
   })();
 }
 
