@@ -81,9 +81,19 @@ function switchVault(vaultId) {
   setActiveVaultId(vaultId);
   clearVaultView();
   setVaultSelectorStatus('Loading vault…');
+  resetCameraOnNextGraph = true;
+  sourceGraphData = null;
 
+  // Vault isolation is explicit: never leave the previous vault's topology on
+  // screen while the next scoped snapshot is loading.
+  if (graph && typeof graph.graphData === 'function') {
+    graph.graphData({ nodes: [], links: [] });
+    requestGraphRedraw();
+  }
+  const area = document.getElementById('graph-area');
+  if (area) area.classList.add('vault-loading');
+
+  if (typeof stopPollingFallback === 'function') stopPollingFallback();
   if (typeof closeActiveWebSocket === 'function') closeActiveWebSocket();
   if (typeof connectWS === 'function') connectWS();
 }
-
-window.addEventListener('DOMContentLoaded', loadVaultSelector);
