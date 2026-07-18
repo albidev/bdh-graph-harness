@@ -91,7 +91,10 @@ CONFIG = {
     # Memory consolidation (Phase 4)
     'consolidation_downscale_factor': 0.90,    # global weight multiplier per cycle
     'consolidation_prune_weight_floor': 0.02,  # delete synapses below this weight
-    'consolidation_dormant_persist_cycles': 3, # remove nodes dormant for N+ cycles
+    'consolidation_weak_weight_threshold': 0.15,
+    'consolidation_weak_max_frequency': 1.0,
+    'consolidation_weak_min_age_hours': 48,
+    'consolidation_dormant_persist_cycles': 3, # remove nodes dormant for N+ consolidation cycles
     'consolidation_prune_dormant_nodes': True,  # actually delete stale dormant nodes
     # Interactive neurogenesis is conservative but can retain several independent durable concepts.
     'neurogenesis_max_concepts': 3,

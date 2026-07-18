@@ -146,6 +146,9 @@ quality_prune_interval: 50        # re-evaluate every N queries
 # Mirrors biological sleep consolidation: downscaling + pruning + re-evaluation.
 consolidation_downscale_factor: 0.90    # global weight multiplier per cycle
 consolidation_prune_weight_floor: 0.02  # delete synapses below this weight after downscaling
+consolidation_weak_weight_threshold: 0.15 # weak-tail threshold; not online creation threshold
+consolidation_weak_max_frequency: 1.0     # stale weak traces above this frequency survive
+consolidation_weak_min_age_hours: 48      # fresh weak traces get a grace period
 consolidation_dormant_persist_cycles: 3 # remove nodes dormant for N+ consolidation cycles
 consolidation_prune_dormant_nodes: true # actually delete stale dormant nodes (not just hide)
 
