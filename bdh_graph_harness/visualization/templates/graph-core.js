@@ -1016,11 +1016,23 @@ function syncDashedLinkVisual(link) {
   object.material.needsUpdate = true;
 }
 
+function syncRegularLinkVisual(link) {
+  if (!link || link._dashes || !link.__lineObj) return;
+  const object = link.__lineObj;
+  const material = linkMaterial(link);
+  if (object.material !== material) object.material = material;
+  object.visible = effectiveLinkVisibility(link);
+  object.material.color.set(linkDisplayColor(link));
+  object.material.opacity = linkDisplayOpacity(link);
+  object.material.needsUpdate = true;
+}
+
 function syncThreeVisualState() {
   if (!graph || !window.THREE) return;
   const data = graph.graphData();
   data.nodes.forEach(updateNodeThreeObject);
   data.links.forEach(syncDashedLinkVisual);
+  data.links.forEach(syncRegularLinkVisual);
   graph
     .nodeVisibility(isCoreNodeVisible)
     .linkVisibility(effectiveLinkVisibility)
