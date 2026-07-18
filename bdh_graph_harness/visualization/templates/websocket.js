@@ -538,7 +538,7 @@ function connectWS() {
       }
 
       if (event.type === 'graph') {
-        fetchGraphSnapshot({ reason: 'websocket-bootstrap', preserveView: Boolean(graph), reheat: !graph, force: true });
+        // The onopen handler already fetches on connect; skip duplicate bootstrap.
       } else if (event.type === 'activation' || event.type === 'neurogenesis') {
         handleActivation(event);
       } else if (event.type === 'query_response') {
