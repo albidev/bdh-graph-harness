@@ -195,6 +195,9 @@ def test_pointer_exit_clears_tooltips_and_desktop_rendering_uses_antialiasing_bu
     assert "Math.min(window.devicePixelRatio || 1, constrained ? 1.5 : 2)" in graph_init
     assert "area.addEventListener('pointerleave'" in graph_init
     assert "clearHoverHighlight();\n    hideTooltip();" in graph_init
+    assert "canvas.addEventListener('pointerleave', dismissHoverUI" in graph_init
+    assert "tooltipEl.style.display = 'none';" in core
+    assert "tooltipEl.style.display = 'block';" in core
 
 
 def test_camera_model_supports_focus_restore_fit_and_orientation_reset():

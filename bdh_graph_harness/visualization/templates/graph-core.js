@@ -1027,6 +1027,7 @@ function showTooltip(node, event) {
   tooltipEl.innerHTML = html;
   tooltipEl.classList.toggle('mobile-tooltip', mobile);
   tooltipEl.hidden = false;
+  tooltipEl.style.display = 'block';
   positionTooltip(event);
 }
 
@@ -1058,6 +1059,7 @@ function showEdgeTooltip(link, event) {
   tooltipEl.innerHTML = html;
   tooltipEl.classList.remove('mobile-tooltip');
   tooltipEl.hidden = false;
+  tooltipEl.style.display = 'block';
   positionTooltip(event);
 }
 
@@ -1077,11 +1079,14 @@ function showActivatedTooltip(note, event) {
   if (note.parent_id) html += `<div class="tooltip-path">From ${escapeHtml(note.parent_id)}</div>`;
   tooltipEl.innerHTML = html;
   tooltipEl.hidden = false;
+  tooltipEl.style.display = 'block';
   positionTooltip(event);
 }
 
 function hideTooltip() {
-  if (tooltipEl) tooltipEl.hidden = true;
+  if (!tooltipEl) return;
+  tooltipEl.hidden = true;
+  tooltipEl.style.display = 'none';
 }
 
 function dismissMobileSheet() {

@@ -622,14 +622,20 @@ function installGraphInteractionWakeup() {
   const area = document.getElementById('graph-area');
   if (!area || area.dataset.wakeupInstalled === 'true') return;
   area.dataset.wakeupInstalled = 'true';
-  ['pointermove', 'pointerdown', 'wheel', 'touchstart'].forEach(eventName => {
-    area.addEventListener(eventName, () => markGraphActive(1200), { capture: true, passive: true });
-  });
-  area.addEventListener('pointerleave', () => {
+  const dismissHoverUI = () => {
     clearHoverEdge();
     clearHoverHighlight();
     hideTooltip();
-  }, { capture: true, passive: true });
+  };
+  ['pointermove', 'pointerdown', 'wheel', 'touchstart'].forEach(eventName => {
+    area.addEventListener(eventName, () => markGraphActive(1200), { capture: true, passive: true });
+  });
+  area.addEventListener('pointerleave', dismissHoverUI, { capture: true, passive: true });
+  const canvas = area.querySelector('canvas');
+  if (canvas) {
+    canvas.addEventListener('pointerleave', dismissHoverUI, { passive: true });
+    canvas.addEventListener('mouseleave', dismissHoverUI, { passive: true });
+  }
 }
 
 function installMouseTracking() {
