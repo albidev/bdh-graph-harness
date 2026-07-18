@@ -407,7 +407,7 @@ function createGraphInstance() {
     .linkVisibility(effectiveLinkVisibility)
     .linkMaterial(linkMaterial)
     .linkWidth(linkDisplayWidth)
-    .linkResolution(constrained ? 12 : 20)
+    .linkResolution(currentLodLevel === 'overview' ? 8 : 12)
     .linkHoverPrecision(constrained ? 16 : 24)
     .linkCurvature(organicLinkCurvature)
     .linkCurveRotation(organicLinkRotation)

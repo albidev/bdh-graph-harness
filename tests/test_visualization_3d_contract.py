@@ -173,7 +173,7 @@ def test_neural_cosmetics_keep_particles_and_install_bloom_on_native_composer():
     assert "postProcessingComposer" in core
     assert "function installBloomPass()" in core
     assert "composer.addPass(bloomPass)" in core
-    assert "new window.THREE.CylinderGeometry(1, 1, 1, 12, 1, false)" in core
+    assert "getCachedCylinderGeometry" in core
     assert "new window.THREE.MeshBasicMaterial({" in core
     assert "new window.THREE.LineDashedMaterial" not in core
     assert "const EDGE_WIDTH_SCALE = 2;" in core
@@ -187,10 +187,15 @@ def test_neural_cosmetics_keep_particles_and_install_bloom_on_native_composer():
     assert "loader-spinner" in html
     assert "function syncRegularLinkVisual(link)" in core
     assert "link.__lineObj" in core
-    assert "data.links.forEach(syncRegularLinkVisual);" in core
+    assert "linksToSync.forEach(syncRegularLinkVisual);" in core
     assert "if (graphLayoutActive) return;" in core
     assert "Fit the entire highlighted subgraph" in (ROOT / "bdh_graph_harness/visualization/templates/ui-controls.js").read_text()
     assert "span * 2.4" in (ROOT / "bdh_graph_harness/visualization/templates/ui-controls.js").read_text()
+    assert "getCachedCylinderGeometry" in core
+    assert "const dirtyLinks = new Set();" in core
+    assert "let redrawScheduled = false;" in core
+    assert "requestAnimationFrame(() => {" in core
+    assert "currentLodLevel === 'overview' ? 8 : 12" in graph_init
     assert "const perLinkMaterials = new Map();" in core
     assert "perLinkMaterials.set(id, material);" in core
     assert "bloomPass.threshold = 0.62" in core
@@ -225,7 +230,7 @@ def test_pointer_exit_clears_tooltips_and_desktop_rendering_uses_antialiasing_bu
 
     assert "sphere: new T.SphereGeometry(1, 20, 14)" in core
     assert "hub: new T.IcosahedronGeometry(1, 2)" in core
-    assert ".linkResolution(constrained ? 12 : 20)" in graph_init
+    assert "currentLodLevel === 'overview' ? 8 : 12" in graph_init
     assert ".linkHoverPrecision(constrained ? 16 : 24)" in graph_init
     assert ".linkDirectionalParticleResolution(constrained ? 8 : 10)" in graph_init
     assert "Math.min(window.devicePixelRatio || 1, constrained ? 1.75 : 2)" in graph_init
