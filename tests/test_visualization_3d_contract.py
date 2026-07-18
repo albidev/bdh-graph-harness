@@ -115,7 +115,7 @@ def test_dormant_nodes_remain_visible_instead_of_being_dimmed_three_times():
 
     assert "dormant: '#718096'" in graph_core
     assert "_opacity: isDormant ? 0.84 : 1" in graph_init
-    assert "if (node._dormant) opacity *= 0.82" in graph_core
+    assert "if (node._dormant) opacity *= 0.15" in graph_core
     assert "const baseEmissive = dormant ? 0.24 : 0.12;" in graph_core
 
 
@@ -196,12 +196,33 @@ def test_neural_cosmetics_keep_particles_and_install_bloom_on_native_composer():
     assert "let redrawScheduled = false;" in core
     assert "requestAnimationFrame(() => {" in core
     assert "currentLodLevel === 'overview' ? 8 : 12" in graph_init
+    assert "edgeFadeStrength" in core
+    assert "edgeCurvatureBase" in core
+    assert "fogDensity" in core
+    assert "particleFlowIntensity" in core
+    assert "Boost emissive appearance" in core
+    assert "function glowMaterial" in core
+    assert "function createGlowTexture" in core
+    assert "nodeGlowRadius" in core
+    assert "function updateEdgeFade" in core
+    assert "function updateFogDensity" in core
+    assert "function updateParticleFlow" in core
+    assert "function updateEdgeCurvature" in core
+    assert "edge-fade-slider" in html
+    assert "fog-slider" in html
+    assert "particle-flow-slider" in html
+    assert "curvature-slider" in html
+    assert "neural-atmos-label" in html
+    assert "edgeFade: 'bdh-graph-edge-fade-v1'" in core
+    assert "fogDensity: 'bdh-graph-fog-density-v1'" in core
+    assert "particleFlow: 'bdh-graph-particle-flow-v1'" in core
+    assert "edgeCurvature: 'bdh-graph-edge-curvature-v1'" in core
     assert "const perLinkMaterials = new Map();" in core
     assert "perLinkMaterials.set(id, material);" in core
     assert "bloomPass.threshold = 0.62" in core
     assert "bloomPass.strength = 1.15" in core
     assert "bloomPass.radius = 0.82" in core
-    assert "if (isAmbientFlowLink(link)) return particleConfig.ambientParticles;" in core
+    assert "isAmbientFlowLink(link)) return Math.round(particleConfig.ambientParticles" in core
     assert "scheduleBloomInstall();" in graph_init
     assert "ambientThreshold: 0.28" in core
     assert "ambientWidth: 1.6" in core

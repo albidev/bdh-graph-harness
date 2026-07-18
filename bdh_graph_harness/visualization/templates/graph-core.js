@@ -39,8 +39,20 @@ const HEBBIAN_MIN_RENDER_WEIGHT = 0.15;
 const HEBBIAN_OVERVIEW_WEIGHT = 0.42;
 const MAX_DYNAMIC_LABELS = 22;
 
+// Configurable atmospheric parameters (7/8/9/10)
+let edgeFadeStrength = 0.05;   // (7) min opacity for weak edges
+let edgeCurvatureBase = 0.25;  // (8) base organic curvature
+let fogDensity = 0.00038;      // (9) scene fog density (desktop default)
+let particleFlowIntensity = 0.5; // (10) scales particle count per link
+
 function nodeRadius(val) {
   return Math.log2((val || 4) + 1) * 1.35 + 1.5;
+}
+
+function nodeGlowRadius(val) {
+  // Halo is ~2.2x the core, scaled slightly less for very large hubs to avoid overpowering.
+  const core = nodeRadius(val);
+  return core * (2.0 + 0.4 / Math.max(1, core * 0.3));
 }
 
 function computeNodeMass(node, degree, maxDegree) {
@@ -119,6 +131,10 @@ const STORAGE_KEYS = {
   edgeLength: 'bdh-graph-edge-length-v2',
   sourceFilter: 'bdh-graph-source-filter',
   zoom: 'bdh-graph-camera-scale-v1',
+  edgeFade: 'bdh-graph-edge-fade-v1',
+  fogDensity: 'bdh-graph-fog-density-v1',
+  particleFlow: 'bdh-graph-particle-flow-v1',
+  edgeCurvature: 'bdh-graph-edge-curvature-v1',
 };
 
 function clampNumber(value, min, max, fallback) {
@@ -207,6 +223,39 @@ function endQueryParticles(delayMs = 0) {
 
 function toggleAmbientMotion(enabled) {
   particleConfig.ambient = Boolean(enabled);
+  requestGraphRedraw();
+}
+
+// Neural atmosphere handlers (7/8/9/10)
+function updateEdgeFade(value, persist = true) {
+  edgeFadeStrength = clampNumber(value, 0, 0.5, 0.05);
+  const slider = document.getElementById('edge-fade-slider');
+  if (slider) slider.value = edgeFadeStrength;
+  if (persist) saveControlValue(STORAGE_KEYS.edgeFade, edgeFadeStrength);
+  requestGraphRedraw();
+}
+
+function updateFogDensity(value, persist = true) {
+  fogDensity = clampNumber(value, 0, 100, 38) / 1000;
+  const slider = document.getElementById('fog-slider');
+  if (slider) slider.value = Math.round(fogDensity * 1000);
+  if (graph && graph.scene() && graph.scene().fog) graph.scene().fog.density = fogDensity;
+  if (persist) saveControlValue(STORAGE_KEYS.fogDensity, Math.round(fogDensity * 1000));
+}
+
+function updateParticleFlow(value, persist = true) {
+  particleFlowIntensity = clampNumber(value, 0, 1, 0.5);
+  const slider = document.getElementById('particle-flow-slider');
+  if (slider) slider.value = Math.round(particleFlowIntensity * 100);
+  if (persist) saveControlValue(STORAGE_KEYS.particleFlow, particleFlowIntensity);
+  requestGraphRedraw();
+}
+
+function updateEdgeCurvature(value, persist = true) {
+  edgeCurvatureBase = clampNumber(value, 0, 1, 0.25);
+  const slider = document.getElementById('curvature-slider');
+  if (slider) slider.value = Math.round(edgeCurvatureBase * 100);
+  if (persist) saveControlValue(STORAGE_KEYS.edgeCurvature, edgeCurvatureBase);
   requestGraphRedraw();
 }
 
@@ -516,7 +565,13 @@ function linkDisplayColor(link) {
   const key = linkKey(link);
   if (linkActivationColor.has(key)) return linkActivationColor.get(key);
   if (hoverEdgeId === link._id || isHighlightedLink(link)) return COLORS.edgeHebbianPulse;
-  return link.color || COLORS.edgeWikilink;
+  const base = link.color || COLORS.edgeWikilink;
+  // Boost emissive appearance so the bloom pass catches edges as glowing filaments.
+  const c = new window.THREE.Color(base);
+  c.r = Math.min(1, c.r * 1.6);
+  c.g = Math.min(1, c.g * 1.6);
+  c.b = Math.min(1, c.b * 1.6);
+  return '#' + c.getHexString();
 }
 
 function linkDisplayOpacity(link) {
@@ -527,7 +582,14 @@ function linkDisplayOpacity(link) {
   let opacity = EDGE_OPACITY[link.type] || 0.28;
   if (currentLodLevel === 'overview') opacity *= link.type === 'wikilink' ? 0.78 : 0.82;
   if (link.type === 'hebbian') opacity *= 0.7 + Math.min(0.8, link.weight || 0);
-  return Math.max(0.025, Math.min(0.9, opacity));
+  // Weak edge fade: low-weight edges fade toward edgeFadeStrength.
+  const weight = link.type === 'hebbian' ? (link.weight || 0) : (link.type === 'phantom' ? (link.similarity || 0) : 1);
+  const fadeFloor = edgeFadeStrength;
+  if (weight < 0.6) {
+    const blend = Math.max(0, weight) / 0.6;
+    opacity = fadeFloor + (opacity - fadeFloor) * blend;
+  }
+  return Math.max(fadeFloor, Math.min(0.9, opacity));
 }
 
 const EDGE_WIDTH_SCALE = 2;
@@ -569,7 +631,7 @@ function stableLinkHash(link) {
 function organicLinkCurvature(link) {
   if (link && link._dashes) return 0;
   const hash = stableLinkHash(link);
-  return 0.14 + ((hash % 100) / 100) * 0.18;
+  return edgeCurvatureBase + ((hash % 100) / 100) * 0.18;
 }
 
 function organicLinkRotation(link) {
@@ -580,17 +642,17 @@ function organicLinkRotation(link) {
 function hoverAwareParticles(link) {
   if (!effectiveLinkVisibility(link)) return 0;
   const activeCount = linkParticlesState.get(linkKey(link));
-  if (activeCount) return particleConfig.enabled ? particleConfig.activeParticles : 0;
+  if (activeCount) return particleConfig.enabled ? Math.round(particleConfig.activeParticles * particleFlowIntensity) : 0;
   if (hoverEdgeId === link._id || isHighlightedLink(link)) return particleConfig.enabled ? 2 : 0;
-  if (isAmbientFlowLink(link)) return particleConfig.ambientParticles;
+  if (isAmbientFlowLink(link)) return Math.round(particleConfig.ambientParticles * particleFlowIntensity);
   return 0;
 }
 
 function hoverAwareParticleWidth(link) {
   if (!effectiveLinkVisibility(link)) return 0;
-  if (linkParticlesState.has(linkKey(link))) return particleConfig.activeWidth;
+  if (linkParticlesState.has(linkKey(link))) return particleConfig.activeWidth * particleFlowIntensity;
   if (hoverEdgeId === link._id || isHighlightedLink(link)) return 1.8;
-  if (isAmbientFlowLink(link)) return particleConfig.ambientWidth;
+  if (isAmbientFlowLink(link)) return particleConfig.ambientWidth * particleFlowIntensity;
   return 0.5;
 }
 
@@ -720,6 +782,8 @@ function ensureThreeResources() {
   };
   threeResources.geometries.dormant.rotateX(Math.PI);
   threeResources.ringTexture = createRingTexture();
+  threeResources.ringTexture = createRingTexture();
+  threeResources.glowTexture = createGlowTexture();
   threeResources.initialized = true;
   return threeResources;
 }
@@ -735,6 +799,24 @@ function createRingTexture() {
   gradient.addColorStop(0.58, 'rgba(255,255,255,0)');
   gradient.addColorStop(0.72, 'rgba(255,255,255,0.95)');
   gradient.addColorStop(0.82, 'rgba(255,255,255,0.22)');
+  gradient.addColorStop(1, 'rgba(255,255,255,0)');
+  context.fillStyle = gradient;
+  context.fillRect(0, 0, 128, 128);
+  const texture = new T.CanvasTexture(canvas);
+  texture.needsUpdate = true;
+  return texture;
+}
+
+function createGlowTexture() {
+  const T = window.THREE;
+  const canvas = document.createElement('canvas');
+  canvas.width = 128;
+  canvas.height = 128;
+  const context = canvas.getContext('2d');
+  const gradient = context.createRadialGradient(64, 64, 0, 64, 64, 64);
+  gradient.addColorStop(0, 'rgba(255,255,255,1)');
+  gradient.addColorStop(0.25, 'rgba(255,255,255,0.7)');
+  gradient.addColorStop(0.5, 'rgba(255,255,255,0.25)');
   gradient.addColorStop(1, 'rgba(255,255,255,0)');
   context.fillStyle = gradient;
   context.fillRect(0, 0, 128, 128);
@@ -789,6 +871,24 @@ function geometryForNode(node) {
   return geometries.sphere;
 }
 
+function glowMaterial(color, opacity) {
+  const resources = ensureThreeResources();
+  const opacityBucket = Math.round(Math.max(0.05, Math.min(1, opacity)) * 20) / 20;
+  const key = `glow|${color}|${opacityBucket}`;
+  if (!resources.ringMaterials.has(key)) {
+    resources.ringMaterials.set(key, new window.THREE.SpriteMaterial({
+      map: resources.glowTexture,
+      color,
+      transparent: true,
+      opacity: opacityBucket,
+      depthWrite: false,
+      depthTest: true,
+      blending: window.THREE.AdditiveBlending,
+    }));
+  }
+  return resources.ringMaterials.get(key);
+}
+
 function createNodeThreeObject(node) {
   const T = window.THREE;
   ensureThreeResources();
@@ -797,12 +897,18 @@ function createNodeThreeObject(node) {
   const aura = new T.Sprite(ringMaterial(node.color || COLORS.inactive, 0.2));
   aura.visible = false;
   aura.renderOrder = 2;
+  // Glow halo — always present for non-dormant nodes, additive blend, sized by nodeGlowRadius.
+  const glow = new T.Sprite(glowMaterial(node.color || COLORS.inactive, 0.5));
+  glow.renderOrder = 1;
+  glow.userData.isGlow = true;
   group.add(body);
   group.add(aura);
+  group.add(glow);
   group.userData.nodeId = node.id;
   node._threeObject = group;
   node._bodyObject = body;
   node._auraObject = aura;
+  node._glowObject = glow;
   updateNodeThreeObject(node);
   return group;
 }
@@ -812,6 +918,7 @@ function updateNodeThreeObject(node) {
   if (!group || !node._bodyObject || !node._auraObject) return;
   const body = node._bodyObject;
   const aura = node._auraObject;
+  const glow = node._glowObject;
   const activationColor = nodeActivationColor.get(node.id);
   const neurogenesis = isNeurogenesisNode(node);
   const baseColor = activationColor || (neurogenesis ? COLORS.neurogenesis : (node.color || COLORS.inactive));
@@ -821,7 +928,7 @@ function updateNodeThreeObject(node) {
   const direct = isDirectHighlightedNode(node);
   const highlight = activeHighlight();
   if (highlight) opacity = highlighted ? Math.max(opacity, 0.96) : Math.min(opacity, 0.22);
-  if (node._dormant) opacity *= 0.82;
+  if (node._dormant) opacity *= 0.15; // Dormant nodes nearly invisible (4)
 
   const selected = selectedNodeId === node.id;
   const focused = focusedNodeId === node.id;
@@ -836,6 +943,20 @@ function updateNodeThreeObject(node) {
   const birthScale = nodeBirthScaleState.get(node.id) || 1;
   const radius = nodeRadius(node.val || 4) * nodeWorldScale * birthScale * (selected || focused ? 1.08 : 1);
   body.scale.setScalar(radius);
+
+  // Glow halo: hidden for dormant nodes, visible for all others (2).
+  if (glow) {
+    if (node._dormant) {
+      glow.visible = false;
+    } else {
+      const glowOpacity = Math.min(0.65, 0.25 + emphasis * 0.45) * opacity;
+      glow.visible = glowOpacity > 0.02;
+      if (glow.visible) {
+        glow.material = glowMaterial(baseColor, glowOpacity);
+        glow.scale.setScalar(radius * nodeGlowRadius(node.val || 4));
+      }
+    }
+  }
 
   let ringColor = baseColor;
   let ringOpacity = 0;
@@ -852,7 +973,7 @@ function updateNodeThreeObject(node) {
   } else if (highlighted) {
     ringOpacity = 0.42;
   }
-  aura.visible = ringOpacity > 0;
+  aura.visible = ringOpacity > 0 && !node._dormant;
   if (aura.visible) {
     aura.material = ringMaterial(ringColor, ringOpacity * opacity);
     aura.scale.setScalar(radius * (activationColor ? 3.25 : 2.65));
@@ -997,7 +1118,7 @@ function linkMaterial(link) {
     const kind = width > 0 ? 'mesh' : 'line';
     const material = kind === 'mesh'
       ? new window.THREE.MeshBasicMaterial({
-          color: linkDisplayColor(link),
+          color: new window.THREE.Color(linkDisplayColor(link)).multiplyScalar(1.6),
           transparent: true,
           opacity: linkDisplayOpacity(link),
           depthWrite: false,
@@ -1013,7 +1134,7 @@ function linkMaterial(link) {
     perLinkMaterials.set(id, material);
   }
   const mat = perLinkMaterials.get(id);
-  mat.color.set(linkDisplayColor(link));
+  mat.color.set(new window.THREE.Color(linkDisplayColor(link)).multiplyScalar(1.6));
   mat.opacity = linkDisplayOpacity(link);
   return mat;
 }
@@ -1021,10 +1142,10 @@ function linkMaterial(link) {
 function createDashedLinkObject(link) {
   if (!link._dashes) return null;
   const highlighted = hoverEdgeId === link._id || isHighlightedLink(link);
-  const radius = highlighted ? 5.4 : Math.max(1.24, Math.min(2.4, linkDisplayWidth(link) * 0.38));
+  const radius = highlighted ? 5.4 : Math.max(1.24, Math.min(2.4, linkDisplayWidth(link) * 0.28));
   const geometry = getCachedCylinderGeometry(radius, 12);
   const material = new window.THREE.MeshBasicMaterial({
-    color: linkDisplayColor(link),
+    color: new window.THREE.Color(linkDisplayColor(link)).multiplyScalar(1.6),
     transparent: true,
     opacity: linkDisplayOpacity(link),
     depthWrite: false,
@@ -1044,7 +1165,7 @@ function updateDashedLinkPosition(object, coordinates, link) {
   const direction = end.clone().sub(start);
   const length = Math.max(0.001, direction.length());
   const highlighted = hoverEdgeId === link._id || isHighlightedLink(link);
-  const radius = highlighted ? 5.4 : Math.max(1.24, Math.min(2.4, linkDisplayWidth(link) * 0.38));
+  const radius = highlighted ? 5.4 : Math.max(1.24, Math.min(2.4, linkDisplayWidth(link) * 0.28));
   const cached = getCachedCylinderGeometry(radius, 12);
   if (object.geometry !== cached) {
     object.geometry = cached;
@@ -1059,10 +1180,10 @@ function syncDashedLinkVisual(link) {
   const object = link && link._threeLinkObject;
   if (!object) return;
   object.visible = effectiveLinkVisibility(link);
-  object.material.color.set(linkDisplayColor(link));
+  object.material.color.set(new window.THREE.Color(linkDisplayColor(link)).multiplyScalar(1.6));
   object.material.opacity = linkDisplayOpacity(link);
   const highlighted = hoverEdgeId === link._id || isHighlightedLink(link);
-  const radius = highlighted ? 5.4 : Math.max(1.24, Math.min(2.4, linkDisplayWidth(link) * 0.38));
+  const radius = highlighted ? 5.4 : Math.max(1.24, Math.min(2.4, linkDisplayWidth(link) * 0.28));
   const cached = getCachedCylinderGeometry(radius, 12);
   if (object.geometry !== cached) object.geometry = cached;
   object.material.needsUpdate = true;
@@ -1074,7 +1195,7 @@ function syncRegularLinkVisual(link) {
   const material = linkMaterial(link);
   if (object.material !== material) object.material = material;
   object.visible = effectiveLinkVisibility(link);
-  object.material.color.set(linkDisplayColor(link));
+  object.material.color.set(new window.THREE.Color(linkDisplayColor(link)).multiplyScalar(1.6));
   object.material.opacity = linkDisplayOpacity(link);
   object.material.needsUpdate = true;
   // Use cached geometry for the current width — no dispose per frame.
