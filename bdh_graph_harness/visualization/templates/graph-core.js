@@ -964,7 +964,7 @@ function updateNodeThreeObject(node) {
       // Uniform ambient glow creates visual density in clusters; emphasis adds focus.
       // glowMultiplier scales the whole thing from console (BDHGlow.set(2)).
       const ambientGlow = 0.09; // light, uniform — forms "nebula" density in clusters and periphery
-      const focusGlow = Math.min(0.16, emphasis * 0.16);
+      const focusGlow = Math.min(0.08, emphasis * 0.08); // halved — hover/click adds less glow
       const baseGlow = (ambientGlow + focusGlow) * opacity;
       const glowOpacity = Math.min(1, baseGlow * glowMultiplier);
       glow.visible = glowOpacity > 0.02;
