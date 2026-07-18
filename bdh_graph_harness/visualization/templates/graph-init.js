@@ -409,7 +409,8 @@ function createGraphInstance() {
     .linkWidth(linkDisplayWidth)
     .linkResolution(constrained ? 12 : 20)
     .linkHoverPrecision(constrained ? 16 : 24)
-    .linkCurvature(link => link._dashes ? 0 : (link.type === 'hebbian' ? 0.04 : 0.08))
+    .linkCurvature(organicLinkCurvature)
+    .linkCurveRotation(organicLinkRotation)
     .linkThreeObject(createDashedLinkObject)
     .linkThreeObjectExtend(false)
     .linkPositionUpdate(updateDashedLinkPosition)
@@ -483,6 +484,7 @@ function createGraphInstance() {
   renderer.setClearColor(COLORS.bg, 1);
   graph.scene().background = new window.THREE.Color(COLORS.bg);
   graph.scene().fog = new window.THREE.FogExp2(COLORS.bg, constrained ? 0.00055 : 0.00038);
+  ensureNeuralField();
   scheduleBloomInstall();
 
   const controls = graph.controls();

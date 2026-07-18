@@ -9,10 +9,10 @@ const COLORS = {
   selected: '#f0f6fc',
   neurogenesis: '#00e5ff',
   dormant: '#718096',
-  edgeWikilink: '#6b7787',
-  edgeHebbianLow: '#3b2066',
-  edgeHebbianMid: '#8957e5',
-  edgeHebbianHigh: '#d2a8ff',
+  edgeWikilink: '#8fa8c2',
+  edgeHebbianLow: '#7047b7',
+  edgeHebbianMid: '#a879ff',
+  edgeHebbianHigh: '#e4c5ff',
   edgeHebbianPulse: '#f0d2ff',
   edgeNeurogenesis: '#67f3ff',
   edgePhantom: '#1f6feb',
@@ -26,8 +26,8 @@ const COLORS = {
 };
 
 const EDGE_OPACITY = {
-  wikilink: 0.52,
-  hebbian: 0.32,
+  wikilink: 0.72,
+  hebbian: 0.46,
   phantom: 0.46,
   counterpart: 0.64,
   project_context: 0.52,
@@ -153,7 +153,7 @@ const PARTICLE_PRESETS = {
     activeWidth: 3.4,
     ambientParticles: 2,
     ambientWidth: 1.6,
-    ambientThreshold: 0.62,
+    ambientThreshold: 0.28,
     speed: 0.011,
     activeColor: '#f0d2ff',
     ambientColor: '#a371f7',
@@ -165,7 +165,7 @@ const PARTICLE_PRESETS = {
     activeWidth: 5.2,
     ambientParticles: 3,
     ambientWidth: 2.4,
-    ambientThreshold: 0.54,
+    ambientThreshold: 0.24,
     speed: 0.016,
     activeColor: '#f0d2ff',
     ambientColor: '#d2a8ff',
@@ -519,6 +519,27 @@ function linkDisplayWidth(link) {
   return 2.10;
 }
 
+function stableLinkHash(link) {
+  const value = String(link && (link._id || link.id || link.source + ':' + link.target) || 'synapse');
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+function organicLinkCurvature(link) {
+  if (link && link._dashes) return 0;
+  const hash = stableLinkHash(link);
+  return 0.14 + ((hash % 100) / 100) * 0.18;
+}
+
+function organicLinkRotation(link) {
+  if (link && link._dashes) return 0;
+  return (stableLinkHash(link) % 628) / 100;
+}
+
 function hoverAwareParticles(link) {
   if (!effectiveLinkVisibility(link)) return 0;
   const activeCount = linkParticlesState.get(linkKey(link));
@@ -573,6 +594,43 @@ const threeResources = {
 let bloomPass = null;
 let smaaPass = null;
 let bloomInstallPromise = null;
+let neuralField = null;
+
+function ensureNeuralField() {
+  if (neuralField || !graph || !window.THREE) return;
+  const T = window.THREE;
+  const group = new T.Group();
+  const count = isConstrainedDevice() ? 150 : 300;
+  const makeLayer = (color, offset) => {
+    const positions = new Float32Array(count * 3);
+    for (let index = 0; index < count; index += 1) {
+      const radius = 260 * Math.cbrt(Math.random());
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.acos(2 * Math.random() - 1);
+      const slot = index * 3;
+      positions[slot] = Math.sin(phi) * Math.cos(theta) * radius + offset;
+      positions[slot + 1] = Math.sin(phi) * Math.sin(theta) * radius + offset * 0.35;
+      positions[slot + 2] = Math.cos(phi) * radius - offset;
+    }
+    const geometry = new T.BufferGeometry();
+    geometry.setAttribute('position', new T.BufferAttribute(positions, 3));
+    const material = new T.PointsMaterial({
+      color,
+      size: 1.7,
+      sizeAttenuation: true,
+      transparent: true,
+      opacity: 0.24,
+      depthWrite: false,
+      blending: T.AdditiveBlending,
+    });
+    return new T.Points(geometry, material);
+  };
+  group.add(makeLayer('#35d9ff', -26));
+  group.add(makeLayer('#a879ff', 26));
+  group.renderOrder = -1;
+  graph.scene().add(group);
+  neuralField = group;
+}
 
 function installBloomPass() {
   if (!graph || bloomPass || !window.THREE || typeof window.UnrealBloomPass !== 'function') return false;
@@ -889,7 +947,7 @@ function linkMaterial(link) {
       blending: window.THREE.NormalBlending,
     };
     const material = kind === 'mesh'
-      ? new window.THREE.MeshLambertMaterial(options)
+      ? new window.THREE.MeshBasicMaterial(options)
       : new window.THREE.LineBasicMaterial(options);
     resources.linkMaterials.set(key, material);
   }
