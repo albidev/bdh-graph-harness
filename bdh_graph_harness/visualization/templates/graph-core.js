@@ -78,7 +78,8 @@ function massAwareLinkDistance(link, baseDistance) {
   let typeScale = 1;
   if (link.type === 'hebbian') {
     const weight = typeof link.weight === 'number' ? link.weight : 0.3;
-    typeScale = 1.35 - Math.min(0.55, weight * 0.8);
+    // Strong Hebbian synapses get MORE distance to prevent clustering — weak ones stay closer.
+    typeScale = 1.5 + Math.min(0.8, weight * 1.2);
   } else if (link.type === 'phantom') {
     typeScale = 1.35;
   } else if (link.type === 'wikilink') {
