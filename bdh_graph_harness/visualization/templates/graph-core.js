@@ -274,6 +274,20 @@ window.BDHParticles = {
   },
 };
 
+// Global glow multiplier — adjustable from console: BDHGlow.set(0.5), BDHGlow.up(), BDHGlow.down()
+let glowMultiplier = 1;
+window.BDHGlow = {
+  get: () => glowMultiplier,
+  set(value) {
+    glowMultiplier = Math.max(0, Math.min(3, Number(value) || 1));
+    requestGraphRedraw();
+    return glowMultiplier;
+  },
+  up(step = 0.1) { return this.set(glowMultiplier + step); },
+  down(step = 0.1) { return this.set(glowMultiplier - step); },
+  reset() { return this.set(1); },
+};
+
 // ============================================================================
 // Global graph and interaction state
 // ============================================================================
@@ -629,13 +643,14 @@ function stableLinkHash(link) {
 }
 
 function organicLinkCurvature(link) {
-  if (link && link._dashes) return 0;
+  // Only phantom links stay straight; all others get organic curvature.
+  if (link && link.type === 'phantom') return 0;
   const hash = stableLinkHash(link);
   return edgeCurvatureBase + ((hash % 100) / 100) * 0.18;
 }
 
 function organicLinkRotation(link) {
-  if (link && link._dashes) return 0;
+  if (link && link.type === 'phantom') return 0;
   return (stableLinkHash(link) % 628) / 100;
 }
 
@@ -950,7 +965,8 @@ function updateNodeThreeObject(node) {
       glow.visible = false;
     } else {
       // Cap at 0.32 to avoid blinding clusters. Emphasis adds a little, not a lot.
-      const glowOpacity = Math.min(0.32, 0.12 + emphasis * 0.20) * opacity;
+      // glowMultiplier is a global scale adjustable from console (BDHGlow.set(2)).
+      const glowOpacity = Math.min(0.32 * glowMultiplier, 0.12 + emphasis * 0.20) * opacity;
       glow.visible = glowOpacity > 0.02;
       if (glow.visible) {
         glow.material = glowMaterial(baseColor, glowOpacity);
