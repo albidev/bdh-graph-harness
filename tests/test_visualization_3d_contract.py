@@ -179,6 +179,9 @@ def test_neural_cosmetics_keep_particles_and_install_bloom_on_native_composer():
     assert "function hasAmbientParticleFlow()" in graph_init
     assert "|| hasAmbientParticleFlow()" in graph_init
     assert "function directionalParticleObject(link)" in core
+    assert "const particle = new T.Mesh(" in core
+    assert "particle.add(halo);" in core
+    assert "new T.Group()" not in core[core.index("function directionalParticleObject(link)"):core.index("// ============================================================================", core.index("function directionalParticleObject(link)"))]
     assert ".linkDirectionalParticleThreeObject(directionalParticleObject)" in graph_init
     assert "renderer.setClearColor(COLORS.bg, 1)" in graph_init
     assert "graph.scene().background = new window.THREE.Color(COLORS.bg)" in graph_init
