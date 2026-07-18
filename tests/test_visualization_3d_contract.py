@@ -116,7 +116,7 @@ def test_dormant_nodes_remain_visible_instead_of_being_dimmed_three_times():
     assert "dormant: '#718096'" in graph_core
     assert "_opacity: isDormant ? 0.84 : 1" in graph_init
     assert "if (node._dormant) opacity *= 0.15" in graph_core
-    assert "const baseEmissive = dormant ? 0.12 : 0.45;" in graph_core
+    assert "const baseEmissive = dormant ? 0.08 : 0.35;" in graph_core
 
 
 def test_neurogenesis_identity_overrides_dormant_visual_classification():
