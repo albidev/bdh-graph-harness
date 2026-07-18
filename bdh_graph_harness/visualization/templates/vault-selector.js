@@ -96,4 +96,10 @@ function switchVault(vaultId) {
   if (typeof stopPollingFallback === 'function') stopPollingFallback();
   if (typeof closeActiveWebSocket === 'function') closeActiveWebSocket();
   if (typeof connectWS === 'function') connectWS();
+  // Fallback: if the WebSocket doesn't deliver a snapshot promptly, fetch it directly.
+  setTimeout(() => {
+    if (!sourceGraphData && typeof fetchGraphSnapshot === 'function') {
+      fetchGraphSnapshot({ reason: 'vault-switch-fallback', preserveView: false, force: true });
+    }
+  }, 2500);
 }
