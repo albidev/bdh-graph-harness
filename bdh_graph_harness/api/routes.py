@@ -524,6 +524,20 @@ async def api_query(request, app_state: dict, ws_clients: set) -> web.Response:
             'routing': routing,
         }, ws_clients)
 
+    # Activation is broadcast before the LLM finishes. Publish a final ordered
+    # event so queries launched by the plugin are visible in the graph UI too.
+    ctx.event_sequence += 1
+    await broadcast_activation({
+        'type': 'query_response',
+        'sequence': ctx.event_sequence,
+        'vault_id': ctx.config.id,
+        'query': query,
+        'response': response_text,
+        'new_concepts': new_concepts_list,
+        'routing': routing,
+        'queries_processed': ctx.state.get('queries', 0),
+    }, ws_clients)
+
     return web.json_response({
         'response': response_text,
         'activated_notes': activated_notes,

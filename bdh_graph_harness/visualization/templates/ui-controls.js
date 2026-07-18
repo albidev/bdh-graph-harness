@@ -1,571 +1,613 @@
 // ============================================================================
-// Mobile tab switching
+// BDH Graph Harness — controls, camera model, responsive layout and startup
 // ============================================================================
+
 function switchTab(tabClass) {
-  document.body.className = tabClass;
-  document.querySelectorAll('#mobile-tabs .tab').forEach(t => t.classList.remove('active'));
-  const labels = { 'graph-tab': 0, 'panel-tab': 1 };
-  const tabs = document.querySelectorAll('#mobile-tabs .tab');
-  if (tabs[labels[tabClass]]) tabs[labels[tabClass]].classList.add('active');
-  // force-graph auto-resizes, no redraw needed
+  document.body.classList.remove('graph-tab', 'controls-tab', 'panel-tab');
+  document.body.classList.add(tabClass);
+  document.querySelectorAll('#mobile-tabs .tab').forEach(tab => {
+    const active = tab.dataset.tab === tabClass;
+    tab.classList.toggle('active', active);
+    tab.setAttribute('aria-current', active ? 'page' : 'false');
+  });
+  syncPanelWidthForViewport();
+  if (tabClass === 'graph-tab') requestAnimationFrame(() => resizeGraphToContainer());
+  hideTooltip();
+}
+
+function setConnectionStatus(state, label) {
+  const indicator = document.getElementById('status-indicator');
+  const text = document.getElementById('status-text');
+  if (indicator) indicator.className = state || '';
+  if (text) text.textContent = label || 'Connecting';
+}
+
+function setResponseState(label) {
+  const state = document.getElementById('response-state');
+  if (state) state.textContent = label;
 }
 
 // ============================================================================
-// Source filter — Vault / External / All
+// Source, orphan and appearance controls
 // ============================================================================
+function syncSourceFilterUI() {
+  const control = document.getElementById('source-filter');
+  if (!control) return;
+  control.querySelectorAll('button[data-value]').forEach(button => {
+    const active = button.dataset.value === sourceFilter;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-pressed', String(active));
+  });
+}
+
 function setSourceFilter(value, persist = true) {
   sourceFilter = ['all', 'vault', 'external'].includes(value) ? value : 'all';
-  const select = document.getElementById('source-filter');
-  if (select) select.value = sourceFilter;
+  syncSourceFilterUI();
   if (persist) saveControlValue(STORAGE_KEYS.sourceFilter, sourceFilter);
-  if (sourceGraphData) initNetwork(sourceGraphData);
+  if (sourceGraphData) initNetwork(sourceGraphData, { preserveView: true, reheat: true });
 }
 
-// ============================================================================
-// Orphan nodes toggle
-// ============================================================================
 function toggleOrphans(show) {
-  showOrphans = show;
-  if (!graph) return;
-  const currentData = graph.graphData();
-  const currentIds = new Set(currentData.nodes.map(n => n.id));
-
-  // Build fresh copies — never mutate live force-graph data
-  const freshNodes = currentData.nodes.map(n => ({
-    id: n.id, name: n.name, color: n.color, val: n.val,
-    _opacity: n._opacity, _shape: n._shape, _dormant: n._dormant,
-    _mass: n._mass, _synapticGlow: n._synapticGlow,
-    _tags: n._tags, _title: n._title, _path: n._path, _text: n._text,
-    _hidden: n._hidden,
-  }));
-  const freshLinks = currentData.links.map(l => ({
-    source: linkEndpointId(l.source), target: linkEndpointId(l.target),
-    color: l.color, width: l.width, type: l.type,
-    particles: l.particles, _id: l._id, _visible: l._visible,
-    _dashes: l._dashes, weight: l.weight, frequency: l.frequency,
-    particleColor: l.particleColor,
-  }));
-
-  if (show) {
-    // Add orphan nodes
-    orphanNodeIds.forEach(nid => {
-      if (!currentIds.has(nid)) {
-        const n = allGraphNodes.find(x => x.id === nid);
-        if (n) {
-          freshNodes.push({
-            id: n.id,
-            name: n.display_label || n.title,
-            color: '#1c2128',
-            val: 6,
-            _mass: computeNodeMass(n, 0, Math.max(1, ...Object.values(degreeMap))),
-            _synapticGlow: 0,
-            _opacity: 0.5,
-            _shape: 'circle',
-            _dormant: false,
-            _tags: n.tags || '',
-            _title: n.title,
-            _path: n.path || '',
-            _text: n.text || '',
-          });
-          nodeTagColorMap[n.id] = '#1c2128';
-        }
-      }
-    });
-  } else {
-    // Remove orphan nodes
-    const orphanSet = new Set(orphanNodeIds);
-    const filtered = freshNodes.filter(n => !orphanSet.has(n.id));
-    freshNodes.length = 0;
-    freshNodes.push(...filtered);
-  }
-
-  setGraphDataPreservingView({ nodes: freshNodes, links: freshLinks }, { reheat: true });
-
-  // Update neuron count
-  const el = document.getElementById('stat-neurons');
-  if (el) el.textContent = show ? allGraphNodes.length : (allGraphNodes.length - orphanNodeIds.length);
+  showOrphans = Boolean(show);
+  const toggle = document.getElementById('orphan-toggle');
+  if (toggle) toggle.checked = showOrphans;
+  if (sourceGraphData) initNetwork(sourceGraphData, { preserveView: true, reheat: true });
 }
 
-// ============================================================================
-// Tag-based node coloring toggle
-// ============================================================================
-function toggleTagColors(enabled) {
-  showTagColors = enabled;
+function toggleTagColors(enabled, render = true) {
+  showTagColors = Boolean(enabled);
   const legend = document.getElementById('tag-legend');
+  const toggle = document.getElementById('tag-toggle');
+  if (toggle) toggle.checked = showTagColors;
 
   if (legend) {
-    if (enabled && Object.keys(tagColorMap).length > 0) {
-      const seen = new Set();
-      const items = [];
-      Object.entries(tagColorMap)
-        .sort((a, b) => a[0].localeCompare(b[0]))
-        .forEach(([tag, color]) => {
-          const key = tag.trim().toLowerCase();
-          if (!seen.has(key)) {
-            seen.add(key);
-            items.push('<span class="tag-item"><span class="tag-dot" style="background:' + color + '"></span>' + escapeHtml(tag) + '</span>');
-          }
-        });
-      const collapseBtn = '<button class="legend-collapse" onclick="toggleLegendCollapse()" title="Collapse legend">◀</button>';
-      legend.innerHTML = collapseBtn + items.join('');
+    if (showTagColors && Object.keys(tagColorMap).length) {
+      const items = Object.entries(tagColorMap)
+        .sort((first, second) => first[0].localeCompare(second[0]))
+        .map(([tag, color]) => `<span class="tag-item"><i style="background:${color}"></i>${escapeHtml(tag)}</span>`);
+      legend.innerHTML = '<button class="legend-collapse" onclick="toggleLegendCollapse()" title="Collapse legend" aria-label="Collapse tag legend">◀</button>' + items.join('');
       legend.classList.remove('hidden');
-      if (localStorage.getItem('bdh-legend-collapsed') === 'true') {
-        legend.classList.add('collapsed');
-      }
+      legend.classList.toggle('collapsed', localStorage.getItem('bdh-legend-collapsed') === 'true');
     } else {
       legend.classList.add('hidden');
     }
   }
 
-  if (!graph) return;
-  const currentData = graph.graphData();
-  currentData.nodes.forEach(node => {
-    const n = nodeDataMap[node.id] || allGraphNodes.find(x => x.id === node.id);
-    if (!n || node._dormant) return;
-    const isNeurogenesis = (Array.isArray(n.tags) ? n.tags.join(',') : String(n.tags || ''))
-      .toLowerCase().includes('neurogenesis');
-    if (isNeurogenesis) {
-      // Keep neurogenesis identity stable when tag colors are toggled.
-      node.color = COLORS.neurogenesis;
-      nodeTagColorMap[node.id] = COLORS.neurogenesis;
-    } else if (enabled && tagColorMap) {
-      const rawTags = n.tags || '';
-      let primaryTag = '';
-      if (Array.isArray(rawTags) && rawTags.length > 0) {
-        primaryTag = rawTags[0].replace(/^[\[\]]+|[\[\]]+$/g, '').trim();
-      } else if (typeof rawTags === 'string' && rawTags.trim()) {
-        primaryTag = rawTags.replace(/^[\[\]]+|[\[\]]+$/g, '').split(',')[0].trim();
-      }
-      if (primaryTag && tagColorMap[primaryTag]) {
-        node.color = tagColorMap[primaryTag];
-        nodeTagColorMap[node.id] = tagColorMap[primaryTag];
-      } else {
-        node.color = COLORS.inactive;
-        nodeTagColorMap[node.id] = COLORS.inactive;
-      }
-    } else {
-      node.color = sourceColor(n);
-      nodeTagColorMap[node.id] = sourceColor(n);
-    }
+  if (!graph || !render) return;
+  graph.graphData().nodes.forEach(node => {
+    const data = nodeDataMap[node.id] || {};
+    const tags = normalizeTags(data.tags || node._tags || '');
+    const isNeurogenesis = isNeurogenesisNode(node);
+    if (isNeurogenesis) node.color = COLORS.neurogenesis;
+    else if (node._dormant) node.color = COLORS.dormant;
+    else if (showTagColors && tags.length && tagColorMap[tags[0]]) node.color = tagColorMap[tags[0]];
+    else node.color = sourceColor(data);
+    nodeTagColorMap[node.id] = node.color;
   });
   requestGraphRedraw();
 }
 
+function toggleLegendCollapse() {
+  const legend = document.getElementById('tag-legend');
+  if (!legend) return;
+  legend.classList.toggle('collapsed');
+  localStorage.setItem('bdh-legend-collapsed', String(legend.classList.contains('collapsed')));
+}
+
+document.getElementById('tag-legend')?.addEventListener('click', function expandCollapsedLegend(event) {
+  if (this.classList.contains('collapsed') && event.target === this) toggleLegendCollapse();
+});
+
 // ============================================================================
-// Edge filters — direct-only, Hebbian threshold, phantom toggle
+// Edge visibility and layout
 // ============================================================================
+const edgeTypeVisible = {
+  wikilink: true,
+  counterpart: true,
+  project_context: true,
+  project_reference: true,
+  hebbian: true,
+  phantom: true,
+  neurogenesis: true,
+};
+
 function restoreGraphControlState() {
   hebbianThreshold = clampNumber(loadControlValue(STORAGE_KEYS.hebbianThreshold, hebbianThreshold), 0, 1, hebbianThreshold);
   spacingValue = clampNumber(loadControlValue(STORAGE_KEYS.spacing, spacingValue), 0, 100, spacingValue);
   edgeLengthMultiplier = clampNumber(loadControlValue(STORAGE_KEYS.edgeLength, edgeLengthMultiplier), 0, 100, edgeLengthMultiplier);
   const savedSourceFilter = loadControlValue(STORAGE_KEYS.sourceFilter, sourceFilter);
   if (['all', 'vault', 'external'].includes(savedSourceFilter)) sourceFilter = savedSourceFilter;
-  restoredZoom = clampNumber(loadControlValue(STORAGE_KEYS.zoom, ''), ZOOM_MIN, ZOOM_MAX, null);
+  restoredZoom = clampNumber(loadControlValue(STORAGE_KEYS.zoom, ''), 0.2, 4, null);
 
   const thresholdSlider = document.getElementById('hebbian-threshold');
-  const thresholdVal = document.getElementById('threshold-val');
+  const thresholdValue = document.getElementById('threshold-val');
   const spacingSlider = document.getElementById('spacing-slider');
-  const edgeLengthSlider = document.getElementById('edge-length-slider');
-  const edgeLengthVal = document.getElementById('el-val');
-  const sourceFilterSelect = document.getElementById('source-filter');
-  if (sourceFilterSelect) sourceFilterSelect.value = sourceFilter;
+  const spacingOutput = document.getElementById('spacing-val');
+  const edgeSlider = document.getElementById('edge-length-slider');
+  const edgeOutput = document.getElementById('el-val');
   if (thresholdSlider) thresholdSlider.value = hebbianThreshold;
-  if (thresholdVal) thresholdVal.textContent = hebbianThreshold;
+  if (thresholdValue) thresholdValue.textContent = Number(hebbianThreshold).toFixed(2);
   if (spacingSlider) spacingSlider.value = spacingValue;
-  if (edgeLengthSlider) edgeLengthSlider.value = edgeLengthMultiplier;
-  if (edgeLengthVal) edgeLengthVal.textContent = edgeLengthMultiplier;
+  if (spacingOutput) spacingOutput.textContent = spacingValue;
+  if (edgeSlider) edgeSlider.value = edgeLengthMultiplier;
+  if (edgeOutput) edgeOutput.textContent = edgeLengthMultiplier;
+  syncSourceFilterUI();
 }
 
-function applyRestoredGraphControls() {
-  if (!graph) return;
-  setEdgeLengthMultiplier(edgeLengthMultiplier, false);
-  updateSpacing(spacingValue, false);
-  // Saved zoom alone is not enough to restore a view: force-graph layouts are
-  // re-simulated on every page load, so the previous camera center can point at
-  // empty space. First fit the freshly-laid-out graph, then optionally restore
-  // the user's zoom level while keeping the newly-correct center.
-  requestAnimationFrame(() => {
-    if (!graph) return;
-    graph.zoomToFit(0, 60);
-    if (restoredZoom != null) {
-      requestAnimationFrame(() => {
-        if (!graph) return;
-        graph.zoom(restoredZoom);
-        syncZoomUI(false);
-      });
-    } else {
-      syncZoomUI(false);
-    }
-  });
-}
-
-function toggleDirectOnly(on) {
-  directOnly = on;
-  const thresholdCtrl = document.getElementById('threshold-control');
-  if (thresholdCtrl) thresholdCtrl.style.display = on ? 'none' : 'flex';
+function toggleDirectOnly(enabled) {
+  directOnly = Boolean(enabled);
+  const threshold = document.getElementById('hebbian-threshold');
+  if (threshold) threshold.disabled = directOnly;
   applyEdgeFilters();
 }
 
-function updateHebbianThreshold(val, persist = true) {
-  hebbianThreshold = clampNumber(val, 0, 1, 0.15);
+function updateHebbianThreshold(value, persist = true) {
+  hebbianThreshold = clampNumber(value, 0, 1, 0.15);
   const slider = document.getElementById('hebbian-threshold');
+  const output = document.getElementById('threshold-val');
   if (slider) slider.value = hebbianThreshold;
-  document.getElementById('threshold-val').textContent = hebbianThreshold;
+  if (output) output.textContent = Number(hebbianThreshold).toFixed(2);
   if (persist) saveControlValue(STORAGE_KEYS.hebbianThreshold, hebbianThreshold);
   applyEdgeFiltersDebounced();
 }
 
-let _applyEdgeFiltersTimer = null;
+let edgeFilterTimer = null;
 function applyEdgeFiltersDebounced() {
-  clearTimeout(_applyEdgeFiltersTimer);
-  _applyEdgeFiltersTimer = setTimeout(applyEdgeFilters, 30);
+  if (edgeFilterTimer) clearTimeout(edgeFilterTimer);
+  edgeFilterTimer = setTimeout(() => {
+    edgeFilterTimer = null;
+    applyEdgeFilters();
+  }, 35);
+}
+
+function edgeVisibleFromControls(link) {
+  const info = edgeInfoMap[link._id] || {};
+  const type = info.type || link.type || 'wikilink';
+  if (directOnly) {
+    return ['wikilink', 'counterpart', 'project_context', 'project_reference'].includes(type);
+  }
+  if (edgeTypeVisible[type] === false) return false;
+  if (type === 'hebbian') return (info.weight ?? link.weight ?? 0) >= hebbianThreshold;
+  if (type === 'phantom') return showPhantom;
+  return true;
+}
+
+function initEdgeVisibility() {
+  if (!graph) return;
+  linkVisibilityState.clear();
+  graph.graphData().links.forEach(link => linkVisibilityState.set(linkKey(link), edgeVisibleFromControls(link)));
 }
 
 function applyEdgeFilters() {
   if (!graph) return;
-  // Update visibility Map — no graph rebuild needed
-  const currentData = graph.graphData();
-  let visibleCount = 0;
-  linkVisibilityState.clear();
-  currentData.links.forEach(l => {
-    const info = edgeInfoMap[l._id] || {};
-    const type = info.type || l.type || 'wikilink';
-    let visible = true;
-    if (directOnly) {
-      visible = type === 'wikilink' || type === 'counterpart' || type === 'project_context' || type === 'project_reference';
-    } else {
-      // Check edge type toggle first
-      if (edgeTypeVisible[type] === false) {
-        visible = false;
-      } else if (type === 'hebbian') {
-        visible = (info.weight ?? l.weight ?? 0) >= hebbianThreshold;
-      } else if (type === 'phantom') {
-        visible = showPhantom;
-      }
-    }
-    if (visible) visibleCount++;
-    linkVisibilityState.set(linkKey(l), visible);
-  });
-
-  // Keep the top-bar Edges metric as the raw structural count. Visibility filters
-  // affect rendering only; they must not masquerade as graph mutations.
-  setGraphDataPreservingView({ nodes: currentData.nodes, links: currentData.links });
+  initEdgeVisibility();
+  requestGraphRedraw();
 }
 
-// Populate linkVisibilityState Map WITHOUT triggering a graph rebuild.
-// Used during init to apply saved filter state without breaking interactions.
-function initEdgeVisibility() {
-  if (!graph) return;
-  const currentData = graph.graphData();
-  linkVisibilityState.clear();
-  currentData.links.forEach(l => {
-    const info = edgeInfoMap[l._id] || {};
-    const type = info.type || l.type || 'wikilink';
-    let visible = true;
-    if (directOnly) {
-      visible = type === 'wikilink' || type === 'counterpart' || type === 'project_context' || type === 'project_reference';
-    } else {
-      if (edgeTypeVisible[type] === false) {
-        visible = false;
-      } else if (type === 'hebbian') {
-        visible = (info.weight ?? l.weight ?? 0) >= hebbianThreshold;
-      } else if (type === 'phantom') {
-        visible = showPhantom;
-      }
-    }
-    linkVisibilityState.set(linkKey(l), visible);
-  });
+function togglePhantom(enabled) {
+  showPhantom = Boolean(enabled);
+  const toggle = document.getElementById('phantom-toggle');
+  if (toggle) toggle.checked = showPhantom;
+  applyEdgeFilters();
 }
 
-function togglePhantom(on) {
-  showPhantom = on;
+function toggleEdgeType(type, button) {
+  edgeTypeVisible[type] = !edgeTypeVisible[type];
+  if (button) {
+    button.classList.toggle('active', edgeTypeVisible[type]);
+    button.setAttribute('aria-pressed', String(edgeTypeVisible[type]));
+  }
+  applyEdgeFilters();
+}
+
+function setEdgeLengthMultiplier(value, persist = true) {
+  edgeLengthMultiplier = clampNumber(value, 0, 100, 10);
+  const slider = document.getElementById('edge-length-slider');
+  const output = document.getElementById('el-val');
+  if (slider) slider.value = edgeLengthMultiplier;
+  if (output) output.textContent = edgeLengthMultiplier;
+  if (persist) saveControlValue(STORAGE_KEYS.edgeLength, edgeLengthMultiplier);
+  if (graph) {
+    const distance = 42 + edgeLengthMultiplier * 2.45;
+    graph.d3Force('link').distance(link => massAwareLinkDistance(link, distance));
+    reheatGraphLayout();
+    markGraphActive(1800);
+  }
+}
+
+function updateSpacing(value, persist = true) {
+  spacingValue = clampNumber(value, 0, 100, 50);
+  const slider = document.getElementById('spacing-slider');
+  const output = document.getElementById('spacing-val');
+  if (slider) slider.value = spacingValue;
+  if (output) output.textContent = spacingValue;
+  if (persist) saveControlValue(STORAGE_KEYS.spacing, spacingValue);
+  if (graph) {
+    const chargeStrength = Math.round(-280 - (spacingValue / 100) * 820);
+    graph.d3Force('charge').strength(node => massAwareChargeStrength(node, chargeStrength));
+    reheatGraphLayout();
+    markGraphActive(1800);
+  }
+}
+
+// ============================================================================
+// Query, reset and input state
+// ============================================================================
+const queryInput = document.getElementById('query-input');
+const queryClear = document.getElementById('query-clear');
+
+function updateClearBtn() {
+  if (queryClear && queryInput) queryClear.classList.toggle('visible', queryInput.value.length > 0);
+}
+
+function clearQuery() {
+  if (!queryInput) return;
+  queryInput.value = '';
+  updateClearBtn();
+  queryInput.focus();
+}
+
+queryInput?.addEventListener('input', updateClearBtn);
+queryInput?.addEventListener('keydown', event => {
+  if (event.key === 'Enter') sendQuery();
+});
+
+function resetQuery() {
+  if (typeof invalidateActivationAnimations === 'function') invalidateActivationAnimations();
+  clearQuery();
+  document.getElementById('response-text').textContent = '—';
+  document.getElementById('activated-list').innerHTML = '<li class="empty-state">No activations yet.</li>';
+  document.getElementById('activation-count').textContent = '0';
+  const concepts = document.getElementById('new-concepts-section');
+  const conceptsList = document.getElementById('new-concepts-list');
+  if (concepts) concepts.hidden = true;
+  if (conceptsList) conceptsList.replaceChildren();
+  activatedNotesById.clear();
+  clearActivationState();
+  endQueryParticles();
+  setResponseState('Ready');
+  if (focusMode) exitFocusMode();
   applyEdgeFilters();
 }
 
 // ============================================================================
-// Edge length multiplier — d3Force link distance
+// Explicit 3D camera model
 // ============================================================================
-function setEdgeLengthMultiplier(m, persist = true) {
-  edgeLengthMultiplier = clampNumber(m, 0, 100, 10);
-  const slider = document.getElementById('edge-length-slider');
-  const valEl = document.getElementById('el-val');
-  if (slider) slider.value = edgeLengthMultiplier;
-  if (valEl) valEl.textContent = edgeLengthMultiplier;
-  if (persist) saveControlValue(STORAGE_KEYS.edgeLength, edgeLengthMultiplier);
-
-  if (graph) {
-    // Map 0-100 to link distance 40-300, then adjust per edge type/mass.
-    const distance = 40 + edgeLengthMultiplier * 2.6;
-    graph.d3Force('link').distance(link => massAwareLinkDistance(link, distance));
-    // Re-heat simulation so nodes react to new distance
-    graph.d3ReheatSimulation();
-  }
-
-  // Scale node sizes in-place (no graphData reset — avoids jump/pan)
-  if (graph) {
-    const currentData = graph.graphData();
-    const maxDeg = Math.max(1, ...Object.values(degreeMap));
-    const nodeScale = 0.5 + (edgeLengthMultiplier / 50);
-    const MIN_VAL = 4, MAX_VAL = 40;
-    currentData.nodes.forEach(node => {
-      const deg = degreeMap[node.id] || 0;
-      // Modify node directly — it's a reference, next render frame picks it up
-      node.val = Math.max(2, (MIN_VAL + (deg / maxDeg) * (MAX_VAL - MIN_VAL)) * nodeScale);
-    });
-    // Do NOT call graph.graphData() — that would reset positions and cause a jump
-  }
-
-  console.log('Edge length: ' + edgeLengthMultiplier + ', node scale: ' + (0.5 + edgeLengthMultiplier / 50).toFixed(2) + 'x');
-}
-
-// ============================================================================
-// Network spacing — d3Force charge strength
-// ============================================================================
-function updateSpacing(val, persist = true) {
-  spacingValue = clampNumber(val, 0, 100, 50);
-  const slider = document.getElementById('spacing-slider');
-  if (slider) slider.value = spacingValue;
-  if (persist) saveControlValue(STORAGE_KEYS.spacing, spacingValue);
-
-  const t = spacingValue / 100; // 0..1
-  // Map: 0=dense (charge -300) → 1=sparse (charge -1200), then scale by node mass
-  const chargeStrength = Math.round(-300 - t * 900);
-  if (graph) {
-    graph.d3Force('charge').strength(node => massAwareChargeStrength(node, chargeStrength));
-    graph.d3ReheatSimulation();
-  }
-}
-
-// ============================================================================
-// Legend collapse toggle
-// ============================================================================
-function toggleLegendCollapse() {
-  const legend = document.getElementById('tag-legend');
-  if (!legend) return;
-  legend.classList.toggle('collapsed');
-  localStorage.setItem('bdh-legend-collapsed', legend.classList.contains('collapsed'));
-}
-
-document.getElementById('tag-legend').addEventListener('click', function(e) {
-  if (this.classList.contains('collapsed') && e.target === this) {
-    toggleLegendCollapse();
-  }
-});
-
-// ============================================================================
-// Query input
-// ============================================================================
-document.getElementById('query-input').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') sendQuery();
-});
-
-const qInput = document.getElementById('query-input');
-const qClear = document.getElementById('query-clear');
-function updateClearBtn() { qClear.classList.toggle('visible', qInput.value.length > 0); }
-qInput.addEventListener('input', updateClearBtn);
-function clearQuery() { qInput.value = ''; updateClearBtn(); qInput.focus(); }
-
-// ============================================================================
-// Reset — clears results and restores graph to pre-query state
-// ============================================================================
-function resetQuery() {
-  qInput.value = '';
-  updateClearBtn();
-  document.getElementById('response-text').textContent = '—';
-  document.getElementById('activated-list').innerHTML = '<div class="empty">No activations yet</div>';
-
-  if (graph) {
-    if (typeof invalidateActivationAnimations === 'function') invalidateActivationAnimations();
-    clearActivationState();
-    endQueryParticles();
-    requestGraphRedraw();
-    applyEdgeFilters();
-  }
-}
-
-// ============================================================================
-// Zoom controls
-// ============================================================================
-const ZOOM_MIN = 0.1;
+const ZOOM_MIN = 0.2;
 const ZOOM_MAX = 4;
 const zoomSlider = document.getElementById('zoom-slider');
 const zoomLabel = document.getElementById('zoom-value');
+const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 
 function syncZoomUI(persist = false) {
-  if (!graph) return;
-  const s = graph.zoom();
-  zoomSlider.value = s;
-  zoomLabel.textContent = Math.round(s * 100) + '%';
-  if (persist) saveControlValue(STORAGE_KEYS.zoom, s);
+  const scale = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, currentViewScale || 1));
+  if (zoomSlider) zoomSlider.value = scale;
+  if (zoomLabel) zoomLabel.textContent = Math.round(scale * 100) + '%';
+  if (persist) saveControlValue(STORAGE_KEYS.zoom, scale);
 }
 
-function zoomTo(val, persist = true) {
+function cameraTarget() {
+  const controls = graph && graph.controls ? graph.controls() : null;
+  const target = controls && controls.target ? controls.target : { x: 0, y: 0, z: 0 };
+  return { x: target.x, y: target.y, z: target.z };
+}
+
+function cameraDistance() {
+  if (!graph) return 1;
+  const camera = graph.cameraPosition();
+  const target = cameraTarget();
+  return Math.max(1, Math.hypot(camera.x - target.x, camera.y - target.y, camera.z - target.z));
+}
+
+function zoomTo(value, persist = true) {
   if (!graph) return;
-  const s = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, parseFloat(val)));
-  graph.zoom(s);
+  const scale = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, Number(value)));
+  const camera = graph.cameraPosition();
+  const target = cameraTarget();
+  if (!fitCameraDistance) fitCameraDistance = cameraDistance();
+  const desiredDistance = fitCameraDistance / scale;
+  const dx = camera.x - target.x;
+  const dy = camera.y - target.y;
+  const dz = camera.z - target.z;
+  const length = Math.hypot(dx, dy, dz) || 1;
+  const next = {
+    x: target.x + (dx / length) * desiredDistance,
+    y: target.y + (dy / length) * desiredDistance,
+    z: target.z + (dz / length) * desiredDistance,
+  };
+  graph.cameraPosition(next, target, reducedMotion.matches ? 0 : 160);
+  currentViewScale = scale;
+  currentLodLevel = scale < 0.9 ? 'overview' : scale < 1.7 ? 'balanced' : 'detail';
   syncZoomUI(persist);
+  updateSceneModeUI();
+  requestGraphRedraw();
 }
 
 function zoomStep(delta) {
-  if (!graph) return;
-  zoomTo(graph.zoom() + delta, true);
+  zoomTo((currentViewScale || 1) + delta, true);
+}
+
+function clearFocusStateWithoutCameraRestore() {
+  focusMode = null;
+  focusedNodeId = null;
+  focusHighlight = null;
+  updateFocusUI();
+  requestGraphRedraw();
 }
 
 function fitToScreen() {
   if (!graph) return;
-  graph.zoomToFit(300, 60);
-  setTimeout(() => syncZoomUI(true), 350);
+  clearFocusStateWithoutCameraRestore();
+  graph.zoomToFit(reducedMotion.matches ? 0 : 520, 72);
+  setTimeout(() => {
+    if (!graph) return;
+    fitCameraDistance = cameraDistance();
+    updateSceneFog(fitCameraDistance);
+    updateNodeWorldScale(fitCameraDistance);
+    currentViewScale = 1;
+    currentLodLevel = 'balanced';
+    syncZoomUI(true);
+    updateSceneModeUI();
+    requestGraphRedraw();
+  }, reducedMotion.matches ? 0 : 560);
 }
 
-// Poll zoom value to keep slider in sync (force-graph has no zoom event)
-function startZoomPoll() {
-  if (zoomPollTimer) clearInterval(zoomPollTimer);
-  zoomPollTimer = setInterval(() => {
-    if (graph) {
-      const s = graph.zoom();
-      if (Math.abs(parseFloat(zoomSlider.value) - s) > 0.01) {
-        zoomSlider.value = s;
-        zoomLabel.textContent = Math.round(s * 100) + '%';
-      }
+function resetCameraOrientation() {
+  if (!graph) return;
+  const target = cameraTarget();
+  const distance = cameraDistance();
+  graph.camera().up.set(0, 1, 0);
+  graph.cameraPosition(
+    { x: target.x, y: target.y, z: target.z + distance },
+    target,
+    reducedMotion.matches ? 0 : 480,
+  );
+  markGraphActive(700);
+}
+
+function focusGraphNode(node, options = {}) {
+  if (!graph || !node) return;
+  const previousCamera = focusMode ? focusMode.previousCamera : captureCameraState();
+  focusMode = {
+    nodeId: node.id,
+    kind: options.kind || 'node',
+    previousCamera,
+  };
+  focusedNodeId = node.id;
+  if (options.pathIds && options.pathIds.length) setPathHighlight(options.pathIds);
+  else setNeighborhoodFocus(node.id);
+
+  // Fit the entire highlighted subgraph in view instead of zooming aggressively on the node.
+  const highlight = activeHighlight();
+  const data = graph.graphData();
+  const focusNodeIds = highlight && highlight.nodeIds && highlight.nodeIds.size
+    ? [...highlight.nodeIds]
+    : [node.id];
+  const focusNodes = data.nodes.filter(n => focusNodeIds.includes(n.id));
+  if (focusNodes.length === 0) return;
+
+  let min = { x: Infinity, y: Infinity, z: Infinity };
+  let max = { x: -Infinity, y: -Infinity, z: -Infinity };
+  focusNodes.forEach(n => {
+    min.x = Math.min(min.x, n.x || 0); max.x = Math.max(max.x, n.x || 0);
+    min.y = Math.min(min.y, n.y || 0); max.y = Math.max(max.y, n.y || 0);
+    min.z = Math.min(min.z, n.z || 0); max.z = Math.max(max.z, n.z || 0);
+  });
+  const center = {
+    x: (min.x + max.x) / 2,
+    y: (min.y + max.y) / 2,
+    z: (min.z + max.z) / 2,
+  };
+  const span = Math.max(
+    max.x - min.x, max.y - min.y, max.z - min.z, 30
+  );
+  const currentCamera = graph.cameraPosition();
+  const dir = {
+    x: (currentCamera.x || 0) - (node.x || 0),
+    y: (currentCamera.y || 0) - (node.y || 0),
+    z: (currentCamera.z || 0) - (node.z || 0),
+  };
+  const dirLen = Math.hypot(dir.x, dir.y, dir.z) || 1;
+  const focusDistance = Math.max(140, span * 2.4);
+  const nextPosition = {
+    x: center.x + (dir.x / dirLen) * focusDistance,
+    y: center.y + (dir.y / dirLen) * focusDistance,
+    z: center.z + (dir.z / dirLen) * focusDistance,
+  };
+  graph.cameraPosition(nextPosition, center, reducedMotion.matches ? 0 : 620);
+  selectGraphNode(node);
+  updateFocusUI();
+  scheduleLabelUpdate();
+  markGraphActive(900);
+}
+
+function exitFocusMode() {
+  if (!focusMode) return;
+  const previousCamera = focusMode.previousCamera;
+  focusMode = null;
+  focusedNodeId = null;
+  focusHighlight = null;
+  if (previousCamera) restoreCameraState(previousCamera, reducedMotion.matches ? 0 : 520);
+  updateFocusUI();
+  scheduleLabelUpdate();
+  requestGraphRedraw();
+}
+
+function updateFocusUI() {
+  const hud = document.getElementById('focus-hud');
+  const title = document.getElementById('focus-title');
+  const back = document.getElementById('focus-back-btn');
+  if (hud) hud.hidden = !focusMode;
+  if (back) back.hidden = !focusMode;
+  if (title && focusMode) {
+    const data = nodeDataMap[focusMode.nodeId] || {};
+    title.textContent = data.display_label || data.title || focusMode.nodeId;
+  }
+  updateSceneModeUI();
+}
+
+function searchNode(query) {
+  if (!query || !graph) return;
+  const needle = query.trim().toLowerCase();
+  if (!needle) return;
+  const nodes = graph.graphData().nodes;
+  const ranked = nodes
+    .map(node => {
+      const name = String(node.name || '').toLowerCase();
+      const score = name === needle ? 0 : name.startsWith(needle) ? 1 : name.includes(needle) ? 2 : 99;
+      return { node, score };
+    })
+    .filter(item => item.score < 99)
+    .sort((first, second) => first.score - second.score || first.node.name.length - second.node.name.length);
+  if (!ranked.length) {
+    const input = document.getElementById('search-input');
+    if (input) {
+      input.classList.add('not-found');
+      setTimeout(() => input.classList.remove('not-found'), 900);
     }
-  }, 200);
+    return;
+  }
+  const node = ranked[0].node;
+  selectGraphNode(node);
+  focusGraphNode(node, { kind: 'search' });
+  showTooltip(node, lastMouseEvent || { clientX: 200, clientY: 120 });
 }
 
 // ============================================================================
-// Panel resize & collapse
+// Inspector and control dock layout
 // ============================================================================
-const PANEL_WIDTH_KEY = 'bdh-panel-width';
-const PANEL_COLLAPSED_KEY = 'bdh-panel-collapsed';
+const PANEL_WIDTH_KEY = 'bdh-panel-width-v2';
+const PANEL_COLLAPSED_KEY = 'bdh-panel-collapsed-v2';
+const CONTROLS_COLLAPSED_KEY = 'bdh-controls-collapsed-v1';
 const sidePanel = document.getElementById('side-panel');
 const panelResize = document.getElementById('panel-resize');
-const collapseBtn = document.getElementById('collapse-btn');
+const collapseButton = document.getElementById('collapse-btn');
 let isResizing = false;
 
-function savePanelWidth() {
-  if (sidePanel.style.width) localStorage.setItem(PANEL_WIDTH_KEY, sidePanel.style.width);
-}
-
-function restorePanelWidth() {
-  const saved = localStorage.getItem(PANEL_WIDTH_KEY);
-  if (saved) {
-    const pct = Math.max(15, Math.min(60, parseFloat(saved)));
-    sidePanel.style.width = pct + '%';
+function syncPanelWidthForViewport() {
+  if (!sidePanel) return;
+  if (isMobile()) {
+    // Desktop width is persisted as an inline percentage, which otherwise wins
+    // over the mobile width rule and crushes Inspector to roughly one third.
+    sidePanel.style.removeProperty('width');
+    return;
   }
+  const savedWidth = clampNumber(localStorage.getItem(PANEL_WIDTH_KEY), 22, 48, 31);
+  sidePanel.style.width = savedWidth + '%';
 }
 
 function restorePanelState() {
-  if (localStorage.getItem(PANEL_COLLAPSED_KEY) === 'true') {
-    document.body.classList.add('panel-collapsed');
-    if (collapseBtn) collapseBtn.textContent = '▸';
-  }
+  syncPanelWidthForViewport();
+  const collapsed = localStorage.getItem(PANEL_COLLAPSED_KEY) === 'true';
+  document.body.classList.toggle('panel-collapsed', collapsed);
+  if (collapseButton) collapseButton.textContent = collapsed ? '◂' : '▸';
+  const controlsCollapsed = localStorage.getItem(CONTROLS_COLLAPSED_KEY) === 'true';
+  document.body.classList.toggle('controls-collapsed', controlsCollapsed);
+  const controlsButton = document.getElementById('controls-collapse');
+  if (controlsButton) controlsButton.textContent = controlsCollapsed ? '›' : '‹';
 }
 
-panelResize.addEventListener('mousedown', (e) => {
-  e.preventDefault();
+panelResize?.addEventListener('mousedown', event => {
+  event.preventDefault();
   isResizing = true;
   panelResize.classList.add('dragging');
-  document.body.style.cursor = 'col-resize';
-  document.body.style.userSelect = 'none';
+  document.body.classList.add('panel-resizing');
 });
 
-document.addEventListener('mousemove', (e) => {
-  if (!isResizing) return;
-  const mainRect = document.getElementById('main').getBoundingClientRect();
-  const handleX = e.clientX - mainRect.left;
-  const totalW = mainRect.width;
-  let panelPct = ((totalW - handleX) / totalW) * 100;
-  panelPct = Math.max(15, Math.min(60, panelPct));
-  sidePanel.style.width = panelPct + '%';
+document.addEventListener('mousemove', event => {
+  if (!isResizing || !sidePanel) return;
+  const main = document.getElementById('main').getBoundingClientRect();
+  const percentage = Math.max(22, Math.min(48, ((main.right - event.clientX) / main.width) * 100));
+  sidePanel.style.width = percentage + '%';
 });
 
 document.addEventListener('mouseup', () => {
   if (!isResizing) return;
   isResizing = false;
   panelResize.classList.remove('dragging');
-  document.body.style.cursor = '';
-  document.body.style.userSelect = '';
-  savePanelWidth();
+  document.body.classList.remove('panel-resizing');
+  if (sidePanel) localStorage.setItem(PANEL_WIDTH_KEY, String(parseFloat(sidePanel.style.width)));
+  requestAnimationFrame(() => resizeGraphToContainer());
 });
 
 function togglePanel() {
   document.body.classList.toggle('panel-collapsed');
   const collapsed = document.body.classList.contains('panel-collapsed');
-  if (collapseBtn) collapseBtn.textContent = collapsed ? '◂' : '▸';
-  localStorage.setItem(PANEL_COLLAPSED_KEY, collapsed);
+  if (collapseButton) collapseButton.textContent = collapsed ? '◂' : '▸';
+  localStorage.setItem(PANEL_COLLAPSED_KEY, String(collapsed));
+  requestAnimationFrame(() => resizeGraphToContainer());
 }
 
-// ============================================================================
-// Window resize — force-graph auto-resizes to container
-// ============================================================================
+function toggleControlsDock() {
+  document.body.classList.toggle('controls-collapsed');
+  const collapsed = document.body.classList.contains('controls-collapsed');
+  const button = document.getElementById('controls-collapse');
+  if (button) button.textContent = collapsed ? '›' : '‹';
+  localStorage.setItem(CONTROLS_COLLAPSED_KEY, String(collapsed));
+}
+
 window.addEventListener('resize', () => {
-  // force-graph handles resize automatically via its container
+  syncPanelWidthForViewport();
+  requestAnimationFrame(() => resizeGraphToContainer());
+});
+window.addEventListener('keydown', event => {
+  if (event.key === 'Escape') {
+    if (focusMode) exitFocusMode();
+    else hideTooltip();
+  }
 });
 
 // ============================================================================
-// Init
+// Startup — connect transport independently from optional renderer dependencies
 // ============================================================================
-restoreGraphControlState();
-restorePanelWidth();
-restorePanelState();
-connectWS();
+const RENDERER_READY_TIMEOUT_MS = 5000;
 
-// ============================================================================
-// Search + focus — find node by name, center viewport and zoom in
-// ============================================================================
-function searchNode(query) {
-  if (!query || !graph) return;
-  const q = query.trim().toLowerCase();
-  if (!q) return;
+function waitForRendererReady(timeoutMs = RENDERER_READY_TIMEOUT_MS) {
+  const rendererPromise = window.BDH3DReady;
+  if (!rendererPromise || typeof rendererPromise.then !== 'function') return Promise.resolve(false);
+  return Promise.race([
+    Promise.resolve(rendererPromise).then(() => true).catch(() => false),
+    new Promise(resolve => setTimeout(() => resolve(false), timeoutMs)),
+  ]);
+}
 
-  const data = graph.graphData();
-  // Find first node whose name contains the query
-  const match = data.nodes.find(n => (n.name || '').toLowerCase().includes(q));
-  if (!match) {
-    // Flash the search input red briefly
-    const el = document.getElementById('search-input');
-    if (el) { el.style.borderColor = '#f97583'; setTimeout(() => { el.style.borderColor = ''; }, 800); }
+function recoverWhenRendererArrives() {
+  const rendererPromise = window.BDH3DReady;
+  if (!rendererPromise || typeof rendererPromise.then !== 'function') return;
+  Promise.resolve(rendererPromise).then(() => {
+    if (typeof window.ForceGraph3D !== 'function' || !window.THREE) return;
+    webglUnavailable = false;
+    hideWebGLFallback();
+    fetchGraphSnapshot({ reason: 'renderer-late', preserveView: false, force: true });
+  }).catch(error => {
+    console.warn('[BDH 3D] Renderer dependency failed:', error);
+  });
+}
+
+async function startVisualization() {
+  restoreGraphControlState();
+  restorePanelState();
+  setConnectionStatus('', 'Connecting');
+  recoverWhenRendererArrives();
+
+  try {
+    if (typeof loadVaultSelector === 'function') await loadVaultSelector();
+  } catch (error) {
+    console.warn('[BDH 3D] Vault selector bootstrap failed:', error);
+  }
+
+  // Never hold the live transport hostage to a CDN/WebGL dependency.
+  connectWS();
+
+  const rendererReady = await waitForRendererReady();
+  if (!rendererReady) {
+    webglUnavailable = true;
+    showWebGLFallback('The 3D renderer dependency is unavailable or still loading.');
     return;
   }
 
-  // Center on the node and zoom in
-  graph.centerAt(match.x, match.y, 600);
-  graph.zoom(2.5, 600);
-
-  // Highlight the found node
-  setHoverHighlight([match.id]);
-  showTooltip(match, lastMouseEvent || { clientX: 200, clientY: 200 });
+  hideWebGLFallback();
+  fetchGraphSnapshot({ reason: 'renderer-ready', preserveView: false, force: true });
 }
 
-// ============================================================================
-// Edge type filtering — toggle visibility by edge type (wikilink/hebbian/phantom)
-// ============================================================================
-const edgeTypeVisible = { wikilink: true, counterpart: true, project_context: true, project_reference: true, hebbian: true, phantom: true };
-
-function toggleEdgeType(type, btn) {
-  edgeTypeVisible[type] = !edgeTypeVisible[type];
-  if (btn) btn.classList.toggle('active', edgeTypeVisible[type]);
-  applyEdgeFilters();
-}
-
-// ============================================================================
-// Stats dashboard — sync bottom-left mini-dashboard with top-bar stats
-// ============================================================================
-function updateStatsDashboard() {
-  const neurons = document.getElementById('stat-neurons')?.textContent || '—';
-  const edges = document.getElementById('stat-synapses')?.textContent || '—';
-  const wikilinks = document.getElementById('stat-wikilinks')?.textContent || '—';
-  const hebbian = document.getElementById('stat-hebbian')?.textContent || '—';
-  const queries = document.getElementById('stat-queries')?.textContent || '—';
-  const dashN = document.getElementById('dash-neurons');
-  const dashS = document.getElementById('dash-synapses');
-  const dashW = document.getElementById('dash-wikilinks');
-  const dashH = document.getElementById('dash-hebbian');
-  const dashQ = document.getElementById('dash-queries');
-  if (dashN) dashN.textContent = neurons;
-  if (dashS) dashS.textContent = edges;
-  if (dashW) dashW.textContent = wikilinks;
-  if (dashH) dashH.textContent = hebbian;
-  if (dashQ) dashQ.textContent = queries;
-}
-// Periodic sync — dashboard mirrors the top-bar stats
-setInterval(updateStatsDashboard, 1000);
+startVisualization();

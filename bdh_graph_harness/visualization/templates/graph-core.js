@@ -1,38 +1,48 @@
 // ============================================================================
-// BDH Graph Harness — force-graph visualization
-// Replaces vis.js with WebGL-powered force-graph for 60 FPS on large vaults
+// BDH Graph Harness — shared 3D graph state, rendering, tooltips and inspectors
 // ============================================================================
 
 const COLORS = {
   inactive: '#6e7681',
   activated: '#f0883e',
   seed: '#58a6ff',
-  neurogenesis: '#00E5FF',  // electric aqua — newly generated nodes
-  dormant: '#30363d',       // dark gray — dormant/low-quality nodes
-  edgeWikilink: '#484f58',
-  edgeHebbianLow: '#3b2066',
-  edgeHebbianMid: '#8957e5',
-  edgeHebbianHigh: '#d2a8ff',
-  edgeHebbianPulse: '#d2a8ff',
-  edgeNeurogenesis: '#67F3FF',  // electric aqua dashed edges for new connections
-  edgePhantom: '#1f6feb',       // blue dashed edges for phantom links
-  edgeCounterpart: '#56d4dd',   // cyan dashed edges between project anchors
-  edgeProjectContext: '#2f81f7', // blue dashed edges to same-project context
-  edgeProjectReference: '#f2cc60', // gold dashed cross-project references
+  selected: '#f0f6fc',
+  neurogenesis: '#00e5ff',
+  dormant: '#718096',
+  edgeWikilink: '#8fa8c2',
+  edgeHebbianLow: '#7047b7',
+  edgeHebbianMid: '#a879ff',
+  edgeHebbianHigh: '#e4c5ff',
+  edgeHebbianPulse: '#f0d2ff',
+  edgeNeurogenesis: '#67f3ff',
+  edgePhantom: '#1f6feb',
+  edgeCounterpart: '#56d4dd',
+  edgeProjectContext: '#2f81f7',
+  edgeProjectReference: '#f2cc60',
   sourceVault: '#58a6ff',
   sourceExternal: '#f0883e',
-  bg: '#0d1117',
+  bg: '#070a0f',
+  surface: '#161b22',
 };
 
-// Logarithmic node radius — compresses high-degree hubs so they don't dominate.
-// val=4 → r≈5.6, val=20 → r≈9.3, val=40 → r≈10.7 (vs old sqrt: 4→8.9, 20→20, 40→28.3)
+const EDGE_OPACITY = {
+  wikilink: 0.72,
+  hebbian: 0.46,
+  phantom: 0.46,
+  counterpart: 0.64,
+  project_context: 0.52,
+  project_reference: 0.62,
+  neurogenesis: 0.86,
+};
+
+const HEBBIAN_MIN_RENDER_WEIGHT = 0.15;
+const HEBBIAN_OVERVIEW_WEIGHT = 0.42;
+const MAX_DYNAMIC_LABELS = 22;
+
 function nodeRadius(val) {
-  return Math.log2((val || 4) + 1) * 4 + 2;
+  return Math.log2((val || 4) + 1) * 1.35 + 1.5;
 }
 
-// Semantic/structural mass used by the physics layer. d3-force itself has no
-// real per-node mass, so we emulate it consistently: heavier nodes repel more,
-// drift less toward tag centroids, and move less when collision resolution runs.
 function computeNodeMass(node, degree, maxDegree) {
   const degNorm = maxDegree > 0 ? Math.max(0, Math.min(1, degree / maxDegree)) : 0;
   let mass = degree <= 0 ? 0.45 : 0.7 + Math.sqrt(degNorm) * 2.4;
@@ -53,10 +63,8 @@ function endpointMass(endpoint) {
 
 function massAwareLinkDistance(link, baseDistance) {
   const avgMass = (endpointMass(link.source) + endpointMass(link.target)) / 2;
-  let typeScale = 1.0;
+  let typeScale = 1;
   if (link.type === 'hebbian') {
-    // Strong Hebbian links should be closer, but weak rendered Hebbian links
-    // should not act like rubber bands that collapse the whole graph.
     const weight = typeof link.weight === 'number' ? link.weight : 0.3;
     typeScale = 1.35 - Math.min(0.55, weight * 0.8);
   } else if (link.type === 'phantom') {
@@ -70,7 +78,6 @@ function massAwareLinkDistance(link, baseDistance) {
   return baseDistance * typeScale * massSpread;
 }
 
-// Convert hex color to rgba with alpha (for edge opacity by type)
 function withAlpha(hex, alpha) {
   if (!hex || hex[0] !== '#') return hex;
   const r = parseInt(hex.slice(1, 3), 16);
@@ -79,17 +86,6 @@ function withAlpha(hex, alpha) {
   return `rgba(${r},${g},${b},${alpha})`;
 }
 
-// Edge opacity by type — reduces visual noise from 3500+ Hebbian edges
-const EDGE_OPACITY = {
-  wikilink: 0.45,
-  hebbian: 0.22,
-  phantom: 0.35,
-  counterpart: 0.75,
-  neurogenesis: 0.7,
-};
-const HEBBIAN_MIN_RENDER_WEIGHT = 0.15;
-
-// Hebbian edge color by weight (dim → bright green)
 function weightColor(weight) {
   if (weight < 0.3) return COLORS.edgeHebbianLow;
   if (weight < 0.6) return COLORS.edgeHebbianMid;
@@ -97,9 +93,14 @@ function weightColor(weight) {
 }
 
 function sourceColor(node) {
-  return (node && node.source_type === 'external')
-    ? COLORS.sourceExternal
-    : COLORS.sourceVault;
+  return node && node.source_type === 'external' ? COLORS.sourceExternal : COLORS.sourceVault;
+}
+
+function isNeurogenesisNode(node) {
+  if (!node) return false;
+  if (node._shape === 'diamond') return true;
+  const tags = normalizeTags(node._tags || node.tags || '');
+  return tags.some(tag => tag.toLowerCase() === 'neurogenesis');
 }
 
 function nodeMatchesSourceFilter(node) {
@@ -107,102 +108,81 @@ function nodeMatchesSourceFilter(node) {
   return (node && (node.source_type || 'vault')) === sourceFilter;
 }
 
-// Tag-based color palette (distinct, readable on dark bg)
 const TAG_COLORS = [
-  '#f97583', // red (entities)
-  '#79c0ff', // blue (concepts)
-  '#7ee787', // green (lessons)
-  '#d2a8ff', // purple (comparisons)
-  '#ffa657', // orange (queries)
-  '#ff7b72', // coral
-  '#56d4dd', // cyan
-  '#e3b341', // yellow
-  '#db61a2', // pink
-  '#a5d6ff', // light blue
-  '#b392f0', // lavender
-  '#85e89d', // mint
+  '#f97583', '#79c0ff', '#7ee787', '#d2a8ff', '#ffa657', '#ff7b72',
+  '#56d4dd', '#e3b341', '#db61a2', '#a5d6ff', '#b392f0', '#85e89d',
 ];
 
 const STORAGE_KEYS = {
-  hebbianThreshold: 'bdh-graph-hebbian-threshold-v2',
-  spacing: 'bdh-graph-spacing',
-  edgeLength: 'bdh-graph-edge-length',
+  hebbianThreshold: 'bdh-graph-hebbian-threshold-v3',
+  spacing: 'bdh-graph-spacing-v2',
+  edgeLength: 'bdh-graph-edge-length-v2',
   sourceFilter: 'bdh-graph-source-filter',
-  zoom: 'bdh-graph-zoom',
+  zoom: 'bdh-graph-camera-scale-v1',
 };
 
 function clampNumber(value, min, max, fallback) {
   if (value == null || value === '') return fallback;
-  const n = Number(value);
-  if (!Number.isFinite(n)) return fallback;
-  return Math.max(min, Math.min(max, n));
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.max(min, Math.min(max, number));
 }
 
 function saveControlValue(key, value) {
   try { localStorage.setItem(key, String(value)); }
-  catch(e) { /* Storage can be blocked; controls still work for this session. */ }
+  catch (error) { /* Storage is optional. */ }
 }
 
 function loadControlValue(key, fallback) {
   try {
     const value = localStorage.getItem(key);
     return value == null ? fallback : value;
-  } catch(e) {
+  } catch (error) {
     return fallback;
   }
 }
 
-// Console-tunable neural particle bloom. Default mode is subtle ambient flow:
-//   BDHParticles.preset('insane')   // manual temporary fireworks
-//   BDHParticles.preset('subtle')   // return to always-on calm synapses
-//   BDHParticles.get()
-const PARTICLE_CONFIG_KEY = 'bdh-particle-bloom-config';
+// ============================================================================
+// Particle configuration — 3D particles are native low-resolution spheres
+// ============================================================================
 const PARTICLE_PRESETS = {
   subtle: {
-    enabled: true, ambient: true,
-    activeBloom: 18, activeCore: 3.6, activeHalo: 13, activeParticles: 6,
-    ambientBloom: 6, ambientCore: 1.4, ambientHalo: 6, ambientAlpha: 0.28,
-    ambientParticles: 1, ambientThreshold: 0.78, speed: 0.01,
-    activeAlpha: 0.95, ambientColor: '#d2a8ff', activeColor: '#f0d2ff',
+    enabled: true,
+    ambient: true,
+    activeParticles: 9,
+    activeWidth: 3.4,
+    ambientParticles: 2,
+    ambientWidth: 1.6,
+    ambientThreshold: 0.28,
+    speed: 0.011,
+    activeColor: '#f0d2ff',
+    ambientColor: '#a371f7',
   },
   loud: {
-    enabled: true, ambient: true,
-    activeBloom: 38, activeCore: 5.8, activeHalo: 24, activeParticles: 11,
-    ambientBloom: 12, ambientCore: 2.2, ambientHalo: 10, ambientAlpha: 0.5,
-    ambientParticles: 1, ambientThreshold: 0.68, speed: 0.016,
-    activeAlpha: 0.95, ambientColor: '#d2a8ff', activeColor: '#f0d2ff',
-  },
-  insane: {
-    enabled: true, ambient: true,
-    activeBloom: 58, activeCore: 7, activeHalo: 32, activeParticles: 16,
-    ambientBloom: 18, ambientCore: 2.8, ambientHalo: 14, ambientAlpha: 0.65,
-    ambientParticles: 1, ambientThreshold: 0.6, speed: 0.02,
-    activeAlpha: 0.98, ambientColor: '#d2a8ff', activeColor: '#f0d2ff',
+    enabled: true,
+    ambient: true,
+    activeParticles: 16,
+    activeWidth: 5.2,
+    ambientParticles: 3,
+    ambientWidth: 2.4,
+    ambientThreshold: 0.24,
+    speed: 0.016,
+    activeColor: '#f0d2ff',
+    ambientColor: '#d2a8ff',
   },
   off: { enabled: false, ambient: false },
   ambientOff: { enabled: true, ambient: false },
 };
+
 const DEFAULT_PARTICLE_CONFIG = { ...PARTICLE_PRESETS.subtle };
 let particleConfig = { ...DEFAULT_PARTICLE_CONFIG };
 let queryParticleMode = false;
 let queryParticleTimer = null;
 
-function loadParticleConfig() {
-  // The app default is intentionally subtle. Old localStorage values (especially
-  // a manually saved `insane`) must not make the graph rave forever after reload.
-  particleConfig = { ...DEFAULT_PARTICLE_CONFIG };
-}
-
-function saveParticleConfig() {
-  try { localStorage.setItem(PARTICLE_CONFIG_KEY, JSON.stringify(particleConfig)); }
-  catch(e) { /* Ignore storage failures; console controls still work in-session. */ }
-}
-
-function applyParticlePreset(name, { persist = true } = {}) {
+function applyParticlePreset(name) {
   const preset = PARTICLE_PRESETS[name];
   if (!preset) return { error: 'Unknown preset', presets: Object.keys(PARTICLE_PRESETS) };
   particleConfig = { ...particleConfig, ...preset };
-  if (persist) saveParticleConfig();
   requestGraphRedraw();
   return { ...particleConfig, preset: name };
 }
@@ -210,380 +190,161 @@ function applyParticlePreset(name, { persist = true } = {}) {
 function beginQueryParticles() {
   queryParticleMode = true;
   if (queryParticleTimer) clearTimeout(queryParticleTimer);
-  applyParticlePreset('insane', { persist: false });
+  particleConfig = { ...particleConfig, ...PARTICLE_PRESETS.loud };
+  if (typeof markGraphActive === 'function') markGraphActive(5000);
+  requestGraphRedraw();
 }
 
 function endQueryParticles(delayMs = 0) {
   if (queryParticleTimer) clearTimeout(queryParticleTimer);
   queryParticleTimer = setTimeout(() => {
     queryParticleMode = false;
-    applyParticlePreset('subtle', { persist: false });
+    particleConfig = { ...DEFAULT_PARTICLE_CONFIG, ambient: particleConfig.ambient };
     queryParticleTimer = null;
+    requestGraphRedraw();
   }, Math.max(0, delayMs));
+}
+
+function toggleAmbientMotion(enabled) {
+  particleConfig.ambient = Boolean(enabled);
+  requestGraphRedraw();
+}
+
+window.BDHParticles = {
+  get: () => ({ ...particleConfig }),
+  set(next = {}) {
+    particleConfig = { ...particleConfig, ...next };
+    requestGraphRedraw();
+    return { ...particleConfig };
+  },
+  preset: applyParticlePreset,
+  reset() {
+    particleConfig = { ...DEFAULT_PARTICLE_CONFIG };
+    requestGraphRedraw();
+    return { ...particleConfig };
+  },
+};
+
+// ============================================================================
+// Global graph and interaction state
+// ============================================================================
+let graph = null;
+let allGraphNodes = [];
+let fgNodes = [];
+let fgLinks = [];
+let hebbianMap = {};
+let orphanNodeIds = [];
+let tagColorMap = {};
+let showTagColors = true;
+let directOnly = false;
+let hebbianThreshold = 0.15;
+let showPhantom = true;
+let degreeMap = {};
+let neighborMap = {};
+let neurogenesisNodes = {};
+let nodeDataMap = {};
+let edgeInfoMap = {};
+let nodeTagColorMap = {};
+let totalConcepts = 0;
+let edgeLengthMultiplier = 10;
+let spacingValue = 50;
+let restoredZoom = null;
+let showOrphans = true;
+let sourceFilter = 'all';
+let sourceGraphData = null;
+let lastMouseEvent = { clientX: 0, clientY: 0 };
+let mouseTrackingInstalled = false;
+let hoverHighlight = null;
+let hoverHighlightKey = null;
+let hoverClearFrame = null;
+let hoverEdgeId = null;
+let focusHighlight = null;
+let selectedNodeId = null;
+let selectedLinkId = null;
+let focusedNodeId = null;
+let currentViewScale = 1;
+let nodeWorldScale = 1;
+let currentLodLevel = 'overview';
+let fitCameraDistance = null;
+let focusMode = null;
+let graphRenderPaused = false;
+let graphLayoutActive = false;
+let graphIdleTimer = null;
+let webglUnavailable = false;
+
+const activatedNotesById = new Map();
+
+const nodeActivationOpacity = new Map();
+const nodeActivationColor = new Map();
+const nodeBirthScaleState = new Map();
+const linkActivationVisible = new Map();
+const linkActivationColor = new Map();
+const linkParticlesState = new Map();
+const linkParticleColorState = new Map();
+const linkWidthState = new Map();
+const linkVisibilityState = new Map();
+
+function clearActivationState() {
+  nodeActivationOpacity.clear();
+  nodeActivationColor.clear();
+  nodeBirthScaleState.clear();
+  linkActivationVisible.clear();
+  linkActivationColor.clear();
+  linkParticlesState.clear();
+  linkParticleColorState.clear();
+  linkWidthState.clear();
+  scheduleLabelUpdate();
+}
+
+function linkEndpointId(endpoint) {
+  return typeof endpoint === 'object' && endpoint ? endpoint.id : endpoint;
+}
+
+function linkKey(link) {
+  const source = linkEndpointId(link.source);
+  const target = linkEndpointId(link.target);
+  return source < target
+    ? `${source}→${target}:${link.type || 'syn'}`
+    : `${target}→${source}:${link.type || 'syn'}`;
+}
+
+function isAmbientFlowLink(link) {
+  return particleConfig.enabled
+    && particleConfig.ambient
+    && link.type === 'hebbian'
+    && (link.weight || 0) >= particleConfig.ambientThreshold;
 }
 
 function isActiveFlowLink(link) {
   return linkParticlesState.has(linkKey(link));
 }
 
-function isAmbientFlowLink(link) {
-  return particleConfig.enabled && particleConfig.ambient && link.type === 'hebbian' && (link.weight || 0) >= particleConfig.ambientThreshold;
-}
-
 function particleSpeed(link) {
-  return isActiveFlowLink(link) ? particleConfig.speed * 1.35 : particleConfig.speed;
-}
-
-function drawNeuralParticle(x, y, link, ctx, globalScale) {
-  if (!particleConfig.enabled) return;
-  const active = isActiveFlowLink(link);
-  const core = active ? particleConfig.activeCore : particleConfig.ambientCore;
-  const halo = active ? particleConfig.activeHalo : particleConfig.ambientHalo;
-  const alpha = active ? particleConfig.activeAlpha : particleConfig.ambientAlpha;
-  const color = active
-    ? (linkParticleColorState.get(linkKey(link)) || particleConfig.activeColor)
-    : (particleConfig.ambientColor || link.color || COLORS.edgeHebbianHigh);
-  const scaleDamp = Math.max(0.6, Math.min(1.4, 1 / Math.sqrt(globalScale || 1)));
-  const coreR = Math.max(0.8, core * scaleDamp);
-  const haloR = Math.max(coreR + 1, halo * scaleDamp);
-
-  ctx.save();
-  ctx.globalCompositeOperation = 'lighter';
-  // The radial gradient already provides the halo. shadowBlur forces expensive
-  // software rasterization on Canvas 2D and caused query-time frame drops.
-  ctx.shadowBlur = 0;
-
-  const grad = ctx.createRadialGradient(x, y, 0, x, y, haloR);
-  grad.addColorStop(0, withAlpha(color, alpha));
-  grad.addColorStop(0.35, withAlpha(color, alpha * 0.38));
-  grad.addColorStop(1, withAlpha(color, 0));
-  ctx.fillStyle = grad;
-  ctx.beginPath();
-  ctx.arc(x, y, haloR, 0, 2 * Math.PI);
-  ctx.fill();
-
-  ctx.fillStyle = withAlpha('#ffffff', active ? 0.92 : 0.55);
-  ctx.beginPath();
-  ctx.arc(x, y, coreR, 0, 2 * Math.PI);
-  ctx.fill();
-
-  ctx.fillStyle = withAlpha(color, active ? 0.95 : 0.65);
-  ctx.beginPath();
-  ctx.arc(x, y, coreR * 1.55, 0, 2 * Math.PI);
-  ctx.fill();
-  ctx.restore();
-}
-
-function installParticleConsoleControls() {
-  loadParticleConfig();
-  window.BDHParticles = {
-    get() { return { ...particleConfig }; },
-    set(next = {}) {
-      particleConfig = { ...particleConfig, ...next };
-      saveParticleConfig();
-      requestGraphRedraw();
-      return { ...particleConfig };
-    },
-    reset() {
-      particleConfig = { ...DEFAULT_PARTICLE_CONFIG };
-      saveParticleConfig();
-      requestGraphRedraw();
-      return { ...particleConfig, preset: 'subtle' };
-    },
-    preset(name) {
-      return applyParticlePreset(name, { persist: true });
-    },
-    beginQuery() { beginQueryParticles(); return { ...particleConfig, mode: 'query' }; },
-    endQuery() { endQueryParticles(); return { ...particleConfig, mode: 'subtle' }; },
-  };
-}
-installParticleConsoleControls();
-
-// ============================================================================
-// Global state
-// ============================================================================
-let graph = null;             // force-graph instance
-let allGraphNodes = [];       // full node list from server
-let fgNodes = [];             // force-graph node objects
-let fgLinks = [];             // force-graph link objects
-let hebbianMap = {};          // "a|b" -> weight
-let orphanNodeIds = [];       // nodes with no connections (hidden by default)
-let tagColorMap = {};         // tag -> color for tag-based node coloring
-let showTagColors = true;     // toggle for tag-based coloring (on by default)
-let directOnly = false;       // toggle for showing only direct wikilink edges
-let hebbianThreshold = 0.15;   // minimum weight for Hebbian edges to show
-let showPhantom = true;       // toggle for phantom (semantic similarity) edges
-let degreeMap = {};           // node_id -> degree (computed from edges)
-let neighborMap = {};         // node_id -> [connected node titles]
-let neurogenesisNodes = {};   // node_id -> node data (preserved across graph refresh)
-let nodeDataMap = {};         // node_id -> full node data (fast tooltip lookup)
-let edgeInfoMap = {};         // edge_id -> {source_title, target_title, type, weight?, frequency?}
-let nodeTagColorMap = {};     // node_id -> color string (preserves tag color across dim/restore)
-let totalConcepts = 0;        // cumulative neurogenesis counter
-let edgeLengthMultiplier = 10; // default: 10px per degree unit
-let spacingValue = 50;        // default: balanced graph spacing
-let restoredZoom = null;      // saved zoom slider value, applied after graph init
-let showOrphans = true;
-let sourceFilter = 'all';
-let sourceGraphData = null;
-let zoomPollTimer = null;
-let lastMouseEvent = { clientX: 0, clientY: 0 }; // tracked for tooltip positioning
-let mouseTrackingInstalled = false;
-let hoverHighlight = null;       // { nodeIds:Set, linkIds:Set, hoverNodeId?, hoverLinkId? }
-let hoverHighlightKey = null;
-let hoverClearFrame = null;
-let hoverEdgeId = null;           // edge-only hover cue; does not dim/highlight the graph
-
-// ============================================================================
-// Custom HTML tooltip
-// ============================================================================
-let tooltipEl = null;
-const activatedNotesById = new Map();
-
-function ensureTooltip() {
-  if (tooltipEl) return;
-  tooltipEl = document.createElement('div');
-  tooltipEl.id = 'custom-tooltip';
-  tooltipEl.style.cssText = 'display:none;position:fixed;z-index:9999;background:#161b22;border:1px solid #30363d;border-radius:8px;padding:10px 14px;pointer-events:none;max-width:300px;font-size:12px;line-height:1.5;color:#c9d1d9;box-shadow:0 4px 12px rgba(0,0,0,0.4)';
-  document.body.appendChild(tooltipEl);
-}
-
-function showTooltip(node, evt) {
-  ensureTooltip();
-  const n = node ? nodeDataMap[node.id] : null;
-  if (!n) { hideTooltip(); return; }
-  const mobile = isMobile();
-
-  const title = escapeHtml(n.display_label || n.title || n.id);
-  const path = n._path || n.path || '';
-  const sourceType = n.source_type || 'vault';
-  const sourceId = n.source_id || sourceType;
-  const sourceColorValue = sourceColor(n);
-  const openUrl = sourceType === 'vault'
-    ? 'obsidian://open?path=' + encodeURIComponent(path)
-    : 'file://' + path;
-  const shortPath = n.relative_path || path;
-  const text = (n._text || n.text || '').replace(/\n/g, ' ').substring(0, mobile ? 80 : 150);
-  const deg = degreeMap[n.id] || 0;
-
-  // Tags
-  const rawTags = n._tags || n.tags || '';
-  let tagList = [];
-  if (Array.isArray(rawTags)) {
-    tagList = rawTags.map(t => t.replace(/^[\[\]]+|[\[\]]+$/g, '').trim()).filter(Boolean);
-  } else if (typeof rawTags === 'string' && rawTags.trim()) {
-    tagList = rawTags.replace(/^[\[\]]+|[\[\]]+$/g, '').split(',').map(t => t.trim()).filter(Boolean);
-  }
-  const tagHtml = tagList.map(t => {
-    const c = tagColorMap[t] || '#6e7681';
-    return '<span style="display:inline-flex;align-items:center;gap:3px;margin:1px 6px 1px 0;font-size:11px"><span style="width:7px;height:7px;border-radius:50%;background:' + c + ';display:inline-block"></span>' + escapeHtml(t) + '</span>';
-  }).join('');
-
-  // Connected nodes (first 6)
-  const neighbors = neighborMap[n.id] || [];
-  const neighborLimit = mobile ? 2 : 6;
-  const neighborHtml = neighbors.slice(0, mobile ? 2 : 6).map(nb => '<span style="color:#58a6ff">' + escapeHtml(nb) + '</span>').join(', ') + (neighbors.length > neighborLimit ? ' <span style="color:#6e7681">+' + (neighbors.length - neighborLimit) + ' more</span>' : '');
-
-  let html = mobile ? '<button class="mobile-sheet-close" onclick="dismissMobileSheet()" aria-label="Close node details">×</button>' : '';
-  html += '<div style="font-weight:600;color:#f0883e;margin-bottom:4px;font-size:13px">' + title + '</div>';
-  html += '<div style="color:' + sourceColorValue + ';font-size:11px;margin-bottom:4px">' + escapeHtml(sourceType) + ' · ' + escapeHtml(sourceId) + '</div>';
-  if (tagHtml) html += '<div style="margin-bottom:6px">' + tagHtml + '</div>';
-  if (shortPath) html += '<div style="color:#8b949e;font-size:11px;margin-bottom:3px">📄 ' + escapeHtml(shortPath) + '</div>';
-  if (path) html += '<a href="' + escapeHtml(openUrl) + '" target="_blank" rel="noopener" style="color:#79c0ff;font-size:11px">Open file ↗</a>';
-  html += '<div style="color:#8b949e;font-size:11px;margin-bottom:3px">🔗 ' + deg + ' connection' + (deg !== 1 ? 's' : '') + '</div>';
-  if (neighborHtml) html += '<div style="color:#6e7681;font-size:11px;margin-bottom:4px;border-top:1px solid #30363d;padding-top:4px">→ ' + neighborHtml + '</div>';
-  if (text) html += '<div style="color:#6e7681;font-size:11px;border-top:1px solid #30363d;padding-top:4px">' + escapeHtml(text) + '…</div>';
-
-  tooltipEl.innerHTML = html;
-  tooltipEl.classList.toggle('mobile-tooltip', isMobile());
-  tooltipEl.style.display = 'block';
-  positionTooltip(evt);
-}
-
-function showEdgeTooltip(link, evt) {
-  ensureTooltip();
-  const info = edgeInfoMap[link._id];
-  if (!info) { hideTooltip(); return; }
-
-  const isHebbian = info.type === 'hebbian';
-  const isCounterpart = info.type === 'counterpart';
-  const isProjectContext = info.type === 'project_context';
-  const isProjectReference = info.type === 'project_reference';
-  const icon = isHebbian ? '⚡' : (info.type === 'phantom' ? '👻' : (isCounterpart ? '⇄' : (isProjectContext ? '⌁' : (isProjectReference ? '↗' : '🔗'))));
-  const typeLabel = isHebbian ? 'Hebbian Synapse' : (info.type === 'phantom' ? 'Phantom Link' : (isCounterpart ? 'Project Counterpart' : (isProjectContext ? 'Project Context' : (isProjectReference ? 'Project Reference' : 'Wikilink'))));
-
-  let html = '<div style="max-width:280px">';
-  html += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">';
-  html += '<span style="font-size:14px">' + icon + '</span>';
-  html += '<span style="font-weight:600;color:' + (isHebbian ? weightColor(info.weight || 0) : (isCounterpart ? COLORS.edgeCounterpart : (isProjectContext ? COLORS.edgeProjectContext : (isProjectReference ? COLORS.edgeProjectReference : '#8b949e')))) + '">' + typeLabel + '</span>';
-  html += '</div>';
-  html += '<div style="margin-bottom:4px">';
-  html += '<span style="color:#58a6ff">' + escapeHtml(info.source_title) + '</span>';
-  html += ' <span style="color:#6e7681">→</span> ';
-  html += '<span style="color:#58a6ff">' + escapeHtml(info.target_title) + '</span>';
-  html += '</div>';
-
-  if (isHebbian) {
-    html += '<div style="display:flex;gap:16px;font-size:11px;color:#8b949e">';
-    html += '<span>Weight: <b style="color:' + weightColor(info.weight) + '">' + info.weight.toFixed(3) + '</b></span>';
-    html += '<span>Freq: <b>' + info.frequency + '</b></span>';
-    html += '</div>';
-  } else if (info.type === 'phantom') {
-    html += '<div style="font-size:11px;color:#8b949e">Similarity: <b>' + (info.similarity || 0).toFixed(2) + '</b></div>';
-  } else if (isCounterpart) {
-    html += '<div style="font-size:11px;color:' + COLORS.edgeCounterpart + '">Same project';
-    if (info.group_id) html += ': <b>' + escapeHtml(info.group_id) + '</b>';
-    html += '</div>';
-  } else if (isProjectContext) {
-    html += '<div style="font-size:11px;color:' + COLORS.edgeProjectContext + '">Same project context';
-    if (info.group_id) html += ': <b>' + escapeHtml(info.group_id) + '</b>';
-    html += '</div>';
-  } else if (isProjectReference) {
-    html += '<div style="font-size:11px;color:' + COLORS.edgeProjectReference + '">References project';
-    if (info.group_id) html += ': <b>' + escapeHtml(info.group_id) + '</b>';
-    html += '</div>';
-  }
-
-  html += '</div>';
-
-  tooltipEl.innerHTML = html;
-  tooltipEl.style.display = 'block';
-  positionTooltip(evt);
-}
-
-function showActivatedTooltip(note, evt) {
-  ensureTooltip();
-  if (!note) { hideTooltip(); return; }
-  const role = note.role === 'seed' ? 'Seed' : 'Graph neighbor';
-  const roleColor = note.role === 'seed' ? '#58a6ff' : '#8b949e';
-  let html = '<div style="max-width:300px">';
-  html += '<div style="font-weight:600;color:' + roleColor + ';margin-bottom:5px">' + escapeHtml(role) + '</div>';
-  html += '<div style="font-weight:600;color:#f0883e;margin-bottom:6px">' + escapeHtml(note.title || note.id) + '</div>';
-  html += '<div style="display:grid;grid-template-columns:auto auto;gap:3px 14px;font-size:11px;color:#8b949e">';
-  html += '<span>Final score</span><b>' + Number(note.final_score ?? note.score ?? 0).toFixed(4) + '</b>';
-  html += '<span>Hybrid</span><b>' + Number(note.hybrid_score || 0).toFixed(4) + '</b>';
-  html += '<span>Vector</span><b>' + Number(note.vector_score || 0).toFixed(4) + '</b>';
-  html += '<span>BM25</span><b>' + Number(note.bm25_score || 0).toFixed(4) + '</b>';
-  html += '<span>Hebbian boost</span><b>' + Number(note.hebbian_boost || 0).toFixed(4) + '</b>';
-  html += '<span>Hop</span><b>' + (note.hop ?? 0) + '</b>';
-  html += '</div>';
-  if (note.parent_id) html += '<div style="color:#6e7681;font-size:11px;border-top:1px solid #30363d;padding-top:5px;margin-top:6px">From: ' + escapeHtml(note.parent_id) + '</div>';
-  html += '</div>';
-  tooltipEl.innerHTML = html;
-  tooltipEl.style.display = 'block';
-  positionTooltip(evt);
-}
-
-function focusActivatedNote(note) {
-  if (!graph || !note) return;
-  const data = graph.graphData();
-  const target = data.nodes.find(node => node.id === note.id);
-  if (!target) return;
-
-  const path = [note.id];
-  let current = note;
-  const seen = new Set(path);
-  while (current && current.parent_id && !seen.has(current.parent_id)) {
-    path.push(current.parent_id);
-    seen.add(current.parent_id);
-    current = activatedNotesById.get(current.parent_id);
-  }
-  setPathHighlight(path);
-  graph.centerAt(target.x, target.y, 600);
-  graph.zoom(note.role === 'seed' ? 2.5 : 3.0, 600);
-  showActivatedTooltip(note, lastMouseEvent || { clientX: 200, clientY: 200 });
-}
-
-function setPathHighlight(pathIds = []) {
-  if (!graph || !pathIds.length) return;
-  const pathSet = new Set(pathIds);
-  const pathPairs = new Set();
-  for (let i = 0; i < pathIds.length - 1; i++) {
-    const a = pathIds[i], b = pathIds[i + 1];
-    pathPairs.add(a < b ? a + '→' + b : b + '→' + a);
-  }
-  const linkIds = new Set();
-  graph.graphData().links.forEach(link => {
-    const source = linkEndpointId(link.source);
-    const target = linkEndpointId(link.target);
-    const pair = source < target ? source + '→' + target : target + '→' + source;
-    if (pathPairs.has(pair)) linkIds.add(link._id);
-  });
-  hoverHighlight = { nodeIds: pathSet, linkIds, hoverNodeId: pathIds[0], hoverLinkId: null };
-  hoverHighlightKey = 'path::' + pathIds.join('→');
-  requestGraphRedraw();
-}
-
-function isMobile() {
-  return window.matchMedia('(max-width: 768px)').matches;
-}
-
-function positionTooltip(evt) {
-  if (!tooltipEl) return;
-  if (isMobile()) {
-    const bottom = 'calc(env(safe-area-inset-bottom) + 12px)';
-    tooltipEl.style.left = '10px';
-    tooltipEl.style.right = '10px';
-    tooltipEl.style.bottom = bottom;
-    tooltipEl.style.top = 'auto';
-    tooltipEl.style.maxWidth = 'calc(100vw - 20px)';
-    tooltipEl.style.width = 'auto';
-  } else {
-    const pad = 16;
-    let x = (evt.clientX || evt.pageX || 0) + pad;
-    let y = (evt.clientY || evt.pageY || 0) + pad;
-    tooltipEl.style.width = '';
-    tooltipEl.style.right = '';
-    tooltipEl.style.bottom = '';
-    tooltipEl.classList.remove('mobile-tooltip');
-    const rect = tooltipEl.getBoundingClientRect();
-    if (x + rect.width > window.innerWidth) x = (evt.clientX || evt.pageX || 0) - rect.width - pad;
-    if (y + rect.height > window.innerHeight) y = (evt.clientY || evt.pageY || 0) - rect.height - pad;
-    tooltipEl.style.left = x + 'px';
-    tooltipEl.style.top = y + 'px';
-  }
-}
-
-function envInset() {
-  try { return parseInt(getComputedStyle(document.documentElement).getPropertyValue('env(safe-area-inset-bottom)')) || 0; }
-  catch(e) { return 0; }
-}
-
-function hideTooltip() {
-  if (tooltipEl) tooltipEl.style.display = 'none';
-}
-
-// Exposed for the mobile sheet close button. Kept separate from hover cleanup so
-// a deliberate dismiss does not disturb the selected graph context.
-function dismissMobileSheet() {
-  hideTooltip();
-}
-
-function linkEndpointId(endpoint) {
-  return typeof endpoint === 'object' ? endpoint.id : endpoint;
-}
-
-// Stable key for a link: "sourceId→targetId:type" sorted alphabetically.
-function linkKey(link) {
-  const s = linkEndpointId(link.source);
-  const t = linkEndpointId(link.target);
-  return s < t ? s + '→' + t + ':' + (link.type || 'syn') : t + '→' + s + ':' + (link.type || 'syn');
+  return isActiveFlowLink(link) ? particleConfig.speed * 1.4 : particleConfig.speed;
 }
 
 function isHoverActive() {
-  return !!(hoverHighlight && (hoverHighlight.nodeIds.size || hoverHighlight.linkIds.size));
+  return Boolean(hoverHighlight && (hoverHighlight.nodeIds.size || hoverHighlight.linkIds.size));
 }
 
-function isHoverNode(node) {
-  return isHoverActive() && hoverHighlight.nodeIds.has(node.id);
+function activeHighlight() {
+  if (isHoverActive()) return hoverHighlight;
+  return focusHighlight;
 }
 
-function isHoverLink(link) {
-  return isHoverActive() && hoverHighlight.linkIds.has(link._id);
+function isHighlightedNode(node) {
+  const highlight = activeHighlight();
+  return Boolean(highlight && highlight.nodeIds.has(node.id));
 }
 
-function isHoverEdge(link) {
-  return hoverEdgeId && link && link._id === hoverEdgeId;
+function isHighlightedLink(link) {
+  const highlight = activeHighlight();
+  return Boolean(highlight && highlight.linkIds.has(link._id));
+}
+
+function isDirectHighlightedNode(node) {
+  const highlight = activeHighlight();
+  return Boolean(highlight && highlight.hoverNodeId === node.id);
 }
 
 function hoverKey(seedNodeIds = [], seedLinkId = null) {
@@ -601,28 +362,26 @@ function setHoverHighlight(seedNodeIds = [], seedLinkId = null) {
   const nodeIds = new Set(seedSet);
   const linkIds = new Set(seedLinkId ? [seedLinkId] : []);
 
-  // DEBUG: log traversal for hovered node
-  const _debugLinks = { total: 0, phantomSkip: 0, invisSkip: 0, actSkip: 0, visSkip: 0, matched: 0 };
-  _debugLinks.total = data.links.length;
+  // Mark previously highlighted links as dirty (so they get restored to normal).
+  if (hoverHighlight) {
+    hoverHighlight.linkIds.forEach(id => dirtyLinks.add(id));
+    hoverHighlight.nodeIds.forEach(id => dirtyNodes.add(id));
+  }
 
   data.links.forEach(link => {
-    if (link._visible === false) { _debugLinks.invisSkip++; return; }
-    if (linkActivationVisible.get(linkKey(link)) === false) { _debugLinks.actSkip++; return; }
-    if (link.type === 'phantom') { _debugLinks.phantomSkip++; return; }
-    // Skip links hidden by hebbian threshold slider — they're not visually connected
-    const linkVis = linkVisibilityState.get(linkKey(link));
-    if (linkVis === false) { _debugLinks.visSkip++; return; }
-    const sourceId = linkEndpointId(link.source);
-    const targetId = linkEndpointId(link.target);
-    if (seedSet.has(sourceId) || seedSet.has(targetId) || link._id === seedLinkId) {
-      _debugLinks.matched++;
+    if (!effectiveLinkVisibility(link, { ignoreHighlight: true })) return;
+    if (link.type === 'phantom') return;
+    const source = linkEndpointId(link.source);
+    const target = linkEndpointId(link.target);
+    if (seedSet.has(source) || seedSet.has(target) || link._id === seedLinkId) {
       linkIds.add(link._id);
-      nodeIds.add(sourceId);
-      nodeIds.add(targetId);
+      nodeIds.add(source);
+      nodeIds.add(target);
+      dirtyLinks.add(link._id);
+      dirtyNodes.add(source);
+      dirtyNodes.add(target);
     }
   });
-  // Expose for console debugging
-  window._hoverDebug = { seed: seedNodeIds[0], nodeIds: [...nodeIds], links: _debugLinks, totalNodes: data.nodes.length };
 
   hoverHighlight = {
     nodeIds,
@@ -631,6 +390,7 @@ function setHoverHighlight(seedNodeIds = [], seedLinkId = null) {
     hoverLinkId: seedLinkId,
   };
   hoverHighlightKey = nextKey;
+  scheduleLabelUpdate();
   requestGraphRedraw();
 }
 
@@ -652,8 +412,11 @@ function scheduleClearHoverHighlight() {
 function clearHoverHighlight() {
   cancelScheduledHoverClear();
   if (!hoverHighlight) return;
+  hoverHighlight.linkIds.forEach(id => dirtyLinks.add(id));
+  hoverHighlight.nodeIds.forEach(id => dirtyNodes.add(id));
   hoverHighlight = null;
   hoverHighlightKey = null;
+  scheduleLabelUpdate();
   requestGraphRedraw();
 }
 
@@ -672,281 +435,943 @@ function clearHoverEdge(redraw = true) {
   if (redraw) requestGraphRedraw();
 }
 
-function hoverAwareLinkColor(link) {
-  const key = linkKey(link);
-  const actVisible = linkActivationVisible.get(key);
-  if (actVisible === false) return 'rgba(0,0,0,0)';
-  const mapColor = linkActivationColor.get(key);
-  if (mapColor) return mapColor;
-  if (isHoverEdge(link)) return COLORS.edgeHebbianPulse;
-  if (!isHoverActive()) {
-    // Apply type-based opacity to reduce visual noise
-    // LOD: at low zoom, further reduce opacity
-    const zoom = graph ? graph.zoom() : 1;
-    const lodFactor = zoom < 0.5 ? 0.5 : 1.0;
-    const opacity = (EDGE_OPACITY[link.type] || 0.5) * lodFactor;
-    return withAlpha(link.color, opacity);
+function setPathHighlight(pathIds = []) {
+  if (!graph || !pathIds.length) return;
+  const pathSet = new Set(pathIds);
+  const pathPairs = new Set();
+  for (let index = 0; index < pathIds.length - 1; index += 1) {
+    const first = pathIds[index];
+    const second = pathIds[index + 1];
+    pathPairs.add(first < second ? first + '→' + second : second + '→' + first);
   }
-  return isHoverLink(link) ? COLORS.edgeHebbianPulse : 'rgba(139,148,158,0.1)';
+  const linkIds = new Set();
+  graph.graphData().links.forEach(link => {
+    const source = linkEndpointId(link.source);
+    const target = linkEndpointId(link.target);
+    const pair = source < target ? source + '→' + target : target + '→' + source;
+    if (pathPairs.has(pair)) linkIds.add(link._id);
+  });
+  focusHighlight = { nodeIds: pathSet, linkIds, hoverNodeId: pathIds[0], hoverLinkId: null };
+  scheduleLabelUpdate();
+  requestGraphRedraw();
 }
 
-function hoverAwareLinkWidth(link) {
+function setNeighborhoodFocus(nodeId) {
+  if (!graph || !nodeId) return;
+  // Mark previously focused links/nodes as dirty.
+  if (focusHighlight) {
+    focusHighlight.linkIds.forEach(id => dirtyLinks.add(id));
+    focusHighlight.nodeIds.forEach(id => dirtyNodes.add(id));
+  }
+  const nodeIds = new Set([nodeId]);
+  const linkIds = new Set();
+  graph.graphData().links.forEach(link => {
+    if (!effectiveLinkVisibility(link, { ignoreHighlight: true })) return;
+    const source = linkEndpointId(link.source);
+    const target = linkEndpointId(link.target);
+    if (source === nodeId || target === nodeId) {
+      nodeIds.add(source);
+      nodeIds.add(target);
+      linkIds.add(link._id);
+      dirtyLinks.add(link._id);
+      dirtyNodes.add(source);
+      dirtyNodes.add(target);
+    }
+  });
+  focusHighlight = { nodeIds, linkIds, hoverNodeId: nodeId, hoverLinkId: null };
+  scheduleLabelUpdate();
+  requestGraphRedraw();
+}
+
+// ============================================================================
+// Link LOD and visual state
+// ============================================================================
+function isCoreNodeVisible(node) {
+  if (!node || node._hidden) return false;
+  if (currentLodLevel !== 'overview') return true;
+  if (selectedNodeId === node.id || focusedNodeId === node.id || activatedNotesById.has(node.id)) return true;
+  if (isNeurogenesisNode(node)) return true;
+  return (degreeMap[node.id] || 0) >= 2;
+}
+
+function effectiveLinkVisibility(link, options = {}) {
+  if (!link || link._visible === false) return false;
+  if (linkActivationVisible.get(linkKey(link)) === false) return false;
+  if (linkVisibilityState.get(linkKey(link)) === false) return false;
+
+  const highlighted = !options.ignoreHighlight && isHighlightedLink(link);
+  if (highlighted) return true;
+  if (currentLodLevel === 'overview') {
+    const source = nodeDataMap[linkEndpointId(link.source)] || {};
+    const target = nodeDataMap[linkEndpointId(link.target)] || {};
+    if (!isCoreNodeVisible(source) || !isCoreNodeVisible(target)) return false;
+  }
+  if (currentLodLevel === 'overview' && link.type === 'hebbian') {
+    return (link.weight || 0) >= Math.max(hebbianThreshold, HEBBIAN_OVERVIEW_WEIGHT);
+  }
+  return true;
+}
+
+function linkDisplayColor(link) {
   const key = linkKey(link);
-  const actVisible = linkActivationVisible.get(key);
-  if (actVisible === false) return 0;
-  const mapWidth = linkWidthState.get(key);
-  const baseWidth = mapWidth != null ? mapWidth : (link.width || 1);
-  if (isHoverEdge(link)) return Math.max(baseWidth * 2.4, 2.8);
-  if (!isHoverActive()) return baseWidth;
-  return isHoverLink(link) ? Math.max(baseWidth * 2.2, 2.5) : Math.max(baseWidth * 0.85, 0.75);
+  if (linkActivationColor.has(key)) return linkActivationColor.get(key);
+  if (hoverEdgeId === link._id || isHighlightedLink(link)) return COLORS.edgeHebbianPulse;
+  return link.color || COLORS.edgeWikilink;
+}
+
+function linkDisplayOpacity(link) {
+  if (!effectiveLinkVisibility(link)) return 0;
+  if (hoverEdgeId === link._id || isHighlightedLink(link)) return 0.92;
+  const highlight = activeHighlight();
+  if (highlight) return 0.055;
+  let opacity = EDGE_OPACITY[link.type] || 0.28;
+  if (currentLodLevel === 'overview') opacity *= link.type === 'wikilink' ? 0.78 : 0.82;
+  if (link.type === 'hebbian') opacity *= 0.7 + Math.min(0.8, link.weight || 0);
+  return Math.max(0.025, Math.min(0.9, opacity));
+}
+
+const EDGE_WIDTH_SCALE = 2;
+const HIGHLIGHT_WIDTH_SCALE = 4;
+
+function linkDisplayWidth(link) {
+  const key = linkKey(link);
+  const stateWidth = linkWidthState.get(key);
+  let width;
+  if (stateWidth != null) width = Math.min(3.2, Math.max(0, stateWidth * 0.42));
+  else if (hoverEdgeId === link._id || isHighlightedLink(link)) width = Math.max(1.6, Math.min(4.4, (link.width || 1) * 1.1));
+  else if (currentLodLevel === 'overview') {
+    if (link.type === 'wikilink') width = 2.00;
+    else if (link.type === 'phantom') width = 1.65;
+    else if (link.type === 'hebbian') width = 2.45;
+    else if (link.type === 'project_context') width = 2.20;
+    else if (link.type === 'counterpart' || link.type === 'project_reference' || link.type === 'neurogenesis') width = 3.10;
+    else width = 1.80;
+  } else if (link.type === 'wikilink') width = 2.35;
+  else if (link.type === 'phantom') width = 1.95;
+  else if (link.type === 'hebbian') width = (link.weight || 0) >= 0.7 ? 3.20 : 2.40;
+  else if (link.type === 'project_context') width = 2.75;
+  else if (link.type === 'counterpart' || link.type === 'project_reference' || link.type === 'neurogenesis') width = 3.80;
+  else width = 2.10;
+  const scale = (hoverEdgeId === link._id || isHighlightedLink(link)) ? HIGHLIGHT_WIDTH_SCALE : EDGE_WIDTH_SCALE;
+  return width * scale;
+}
+
+function stableLinkHash(link) {
+  const value = String(link && (link._id || link.id || link.source + ':' + link.target) || 'synapse');
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+function organicLinkCurvature(link) {
+  if (link && link._dashes) return 0;
+  const hash = stableLinkHash(link);
+  return 0.14 + ((hash % 100) / 100) * 0.18;
+}
+
+function organicLinkRotation(link) {
+  if (link && link._dashes) return 0;
+  return (stableLinkHash(link) % 628) / 100;
 }
 
 function hoverAwareParticles(link) {
-  const key = linkKey(link);
-  if (link._visible === false) return 0;
-  if (linkActivationVisible.get(key) === false) return 0;
-  if (linkVisibilityState.get(key) === false) return 0;
-  const mapParticles = linkParticlesState.get(key) || 0;
-  if (mapParticles) return particleConfig.enabled ? particleConfig.activeParticles : 0;
-  if (isHoverEdge(link)) return Math.max(link.particles || 0, 4);
-  if (isHoverLink(link) && hoverHighlight && link._id === hoverHighlight.hoverLinkId) return Math.max(link.particles || 0, 4);
-  // Ambient flow: always animate only strong Hebbian edges. Animating all 3k+
-  // Hebbian links turns the graph into Times Square and eats frames; a single
-  // particle on high-weight links gives a living synapse feel without soup.
+  if (!effectiveLinkVisibility(link)) return 0;
+  const activeCount = linkParticlesState.get(linkKey(link));
+  if (activeCount) return particleConfig.enabled ? particleConfig.activeParticles : 0;
+  if (hoverEdgeId === link._id || isHighlightedLink(link)) return particleConfig.enabled ? 2 : 0;
   if (isAmbientFlowLink(link)) return particleConfig.ambientParticles;
-  return link.particles || 0;
+  return 0;
 }
 
 function hoverAwareParticleWidth(link) {
-  const key = linkKey(link);
-  if (linkActivationVisible.get(key) === false) return 0;
-  if (linkParticlesState.get(key)) return particleConfig.activeCore;
-  if (isHoverEdge(link) || (isHoverLink(link) && hoverHighlight && link._id === hoverHighlight.hoverLinkId)) return 4;
-  if (isAmbientFlowLink(link)) return particleConfig.ambientCore;
-  return 2;
+  if (!effectiveLinkVisibility(link)) return 0;
+  if (linkParticlesState.has(linkKey(link))) return particleConfig.activeWidth;
+  if (hoverEdgeId === link._id || isHighlightedLink(link)) return 1.8;
+  if (isAmbientFlowLink(link)) return particleConfig.ambientWidth;
+  return 0.5;
+}
+
+function particleColor(link) {
+  return linkParticleColorState.get(linkKey(link))
+    || (isActiveFlowLink(link) ? particleConfig.activeColor : particleConfig.ambientColor)
+    || linkDisplayColor(link);
+}
+
+function directionalParticleObject(link) {
+  const T = window.THREE;
+  if (!T) return null;
+  const color = particleColor(link);
+  const particle = new T.Mesh(
+    new T.SphereGeometry(1.9, 10, 8),
+    new T.MeshBasicMaterial({ color, transparent: true, opacity: 0.98 }),
+  );
+  const halo = new T.Sprite(ringMaterial(color, 0.58));
+  halo.scale.setScalar(8.5);
+  halo.renderOrder = 4;
+  particle.add(halo);
+  particle.renderOrder = 4;
+  return particle;
 }
 
 // ============================================================================
-// Node canvas rendering — custom shapes, neural bloom, 💤 text
+// Reused Three.js resources and selective labels
 // ============================================================================
-function hashNodeId(id) {
-  const s = String(id || '');
-  let h = 2166136261;
-  for (let i = 0; i < s.length; i++) {
-    h ^= s.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return h >>> 0;
-}
+const threeResources = {
+  initialized: false,
+  geometries: {},
+  nodeMaterials: new Map(),
+  linkMaterials: new Map(),
+  ringMaterials: new Map(),
+  ringTexture: null,
+};
 
-function nodeGlowBoost(node, hoverMatch, isDirectHover) {
-  const active = nodeActivationColor.has(node.id);
-  const synGlow = Math.max(0, Math.min(1, node._synapticGlow || 0));
-  let boost = 0.85 + synGlow * 1.1;
-  if (node._dormant) boost *= 0.35;
-  if (node._shape === 'hexagon') boost *= 1.28;
-  if (node._shape === 'diamond') boost *= 1.55;
-  if (active) boost *= 2.75;
-  if (hoverMatch) boost *= 1.8;
-  if (isDirectHover) boost *= 1.45;
-  return Math.max(0.15, Math.min(5.0, boost));
-}
+let bloomPass = null;
+let smaaPass = null;
+let bloomInstallPromise = null;
+let neuralField = null;
 
-function drawNodeGlow(node, ctx, globalScale, color, opacity, radius, boost) {
-  const x = node.x;
-  const y = node.y;
-  const t = performance.now() * 0.001;
-  const phase = (hashNodeId(node.id) % 628) / 100;
-  const pulse = 0.9 + Math.sin(t * 0.72 + phase) * 0.1;
-  const scaleDamp = Math.max(0.72, Math.min(1.28, 1 / Math.sqrt(globalScale || 1)));
-  const glowR = radius * (2.7 + boost * 0.72) * pulse * scaleDamp;
-  const alpha = Math.min(0.55, (0.045 + boost * 0.045) * opacity);
-
-  ctx.save();
-  ctx.globalCompositeOperation = 'lighter';
-  const grad = ctx.createRadialGradient(x, y, 0, x, y, glowR);
-  grad.addColorStop(0, withAlpha(color, alpha * 1.45));
-  grad.addColorStop(0.33, withAlpha(color, alpha * 0.52));
-  grad.addColorStop(0.72, withAlpha(color, alpha * 0.16));
-  grad.addColorStop(1, withAlpha(color, 0));
-  ctx.fillStyle = grad;
-  ctx.beginPath();
-  ctx.arc(x, y, glowR, 0, 2 * Math.PI);
-  ctx.fill();
-  ctx.restore();
-}
-
-function nodeBodyGradient(ctx, x, y, r, color, opacity) {
-  const grad = ctx.createRadialGradient(x - r * 0.32, y - r * 0.42, 0, x, y, r * 1.25);
-  grad.addColorStop(0, withAlpha('#ffffff', Math.min(0.5, 0.3 * opacity)));
-  grad.addColorStop(0.24, withAlpha(color, Math.min(1, 0.96 * opacity)));
-  grad.addColorStop(0.7, withAlpha(color, Math.min(0.84, 0.72 * opacity)));
-  grad.addColorStop(1, withAlpha(color, Math.min(0.5, 0.42 * opacity)));
-  return grad;
-}
-
-function pathNodeShape(ctx, shape, x, y, r) {
-  ctx.beginPath();
-  if (shape === 'diamond') {
-    ctx.moveTo(x, y - r);
-    ctx.lineTo(x + r, y);
-    ctx.lineTo(x, y + r);
-    ctx.lineTo(x - r, y);
-  } else if (shape === 'triangleDown') {
-    ctx.moveTo(x, y + r);
-    ctx.lineTo(x + r, y - r * 0.7);
-    ctx.lineTo(x - r, y - r * 0.7);
-  } else if (shape === 'hexagon') {
-    for (let i = 0; i < 6; i++) {
-      const angle = (Math.PI / 3) * i;
-      const px = x + r * Math.cos(angle);
-      const py = y + r * Math.sin(angle);
-      if (i === 0) ctx.moveTo(px, py);
-      else ctx.lineTo(px, py);
+function ensureNeuralField() {
+  if (neuralField || !graph || !window.THREE) return;
+  const T = window.THREE;
+  const group = new T.Group();
+  const count = isConstrainedDevice() ? 150 : 300;
+  const makeLayer = (color, offset) => {
+    const positions = new Float32Array(count * 3);
+    for (let index = 0; index < count; index += 1) {
+      const radius = 260 * Math.cbrt(Math.random());
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.acos(2 * Math.random() - 1);
+      const slot = index * 3;
+      positions[slot] = Math.sin(phi) * Math.cos(theta) * radius + offset;
+      positions[slot + 1] = Math.sin(phi) * Math.sin(theta) * radius + offset * 0.35;
+      positions[slot + 2] = Math.cos(phi) * radius - offset;
     }
-  } else {
-    ctx.arc(x, y, r, 0, 2 * Math.PI);
-  }
-  ctx.closePath();
+    const geometry = new T.BufferGeometry();
+    geometry.setAttribute('position', new T.BufferAttribute(positions, 3));
+    const material = new T.PointsMaterial({
+      color,
+      size: 1.7,
+      sizeAttenuation: true,
+      transparent: true,
+      opacity: 0.24,
+      depthWrite: false,
+      blending: T.AdditiveBlending,
+    });
+    return new T.Points(geometry, material);
+  };
+  group.add(makeLayer('#35d9ff', -26));
+  group.add(makeLayer('#a879ff', 26));
+  group.renderOrder = -1;
+  graph.scene().add(group);
+  neuralField = group;
 }
 
-function drawNode(node, ctx, globalScale) {
+function installBloomPass() {
+  if (!graph || bloomPass || !window.THREE || typeof window.UnrealBloomPass !== 'function') return false;
+  const composer = typeof graph.postProcessingComposer === 'function'
+    ? graph.postProcessingComposer()
+    : null;
+  if (!composer) return false;
+  const container = document.getElementById('graph-container');
+  const width = Math.max(1, container ? container.clientWidth : window.innerWidth);
+  const height = Math.max(1, container ? container.clientHeight : window.innerHeight);
+  bloomPass = new window.UnrealBloomPass(
+    new window.THREE.Vector2(width, height),
+    0.95,
+    0.68,
+    0.52,
+  );
+  bloomPass.threshold = 0.62;
+  bloomPass.strength = 1.15;
+  bloomPass.radius = 0.82;
+  composer.addPass(bloomPass);
+  if (typeof window.SMAAPass === 'function') {
+    smaaPass = new window.SMAAPass(width, height);
+    composer.addPass(smaaPass);
+  }
+  return true;
+}
+
+function scheduleBloomInstall() {
+  if (bloomPass || bloomInstallPromise || !window.BDHBloomReady) return;
+  bloomInstallPromise = Promise.resolve(window.BDHBloomReady)
+    .then(() => {
+      bloomInstallPromise = null;
+      if (installBloomPass()) requestGraphRedraw();
+    })
+    .catch(error => {
+      bloomInstallPromise = null;
+      console.warn('[BDH 3D] Bloom unavailable; continuing without post-processing:', error);
+    });
+}
+
+function ensureThreeResources() {
+  if (threeResources.initialized) return threeResources;
+  if (!window.THREE) throw new Error('Three.js module is not ready');
+  const T = window.THREE;
+  threeResources.geometries = {
+    sphere: new T.SphereGeometry(1, 20, 14),
+    hub: new T.IcosahedronGeometry(1, 2),
+    diamond: new T.OctahedronGeometry(1, 0),
+    dormant: new T.ConeGeometry(1, 1.5, 4, 1),
+  };
+  threeResources.geometries.dormant.rotateX(Math.PI);
+  threeResources.ringTexture = createRingTexture();
+  threeResources.initialized = true;
+  return threeResources;
+}
+
+function createRingTexture() {
+  const T = window.THREE;
+  const canvas = document.createElement('canvas');
+  canvas.width = 128;
+  canvas.height = 128;
+  const context = canvas.getContext('2d');
+  const gradient = context.createRadialGradient(64, 64, 30, 64, 64, 62);
+  gradient.addColorStop(0, 'rgba(255,255,255,0)');
+  gradient.addColorStop(0.58, 'rgba(255,255,255,0)');
+  gradient.addColorStop(0.72, 'rgba(255,255,255,0.95)');
+  gradient.addColorStop(0.82, 'rgba(255,255,255,0.22)');
+  gradient.addColorStop(1, 'rgba(255,255,255,0)');
+  context.fillStyle = gradient;
+  context.fillRect(0, 0, 128, 128);
+  const texture = new T.CanvasTexture(canvas);
+  texture.needsUpdate = true;
+  return texture;
+}
+
+function nodeMaterial(color, opacity, emphasis, dormant = false) {
+  const resources = ensureThreeResources();
+  const opacityBucket = Math.round(Math.max(0.05, Math.min(1, opacity)) * 20) / 20;
+  const emphasisBucket = Math.round(Math.max(0, Math.min(1, emphasis)) * 4) / 4;
+  const key = `${color}|${opacityBucket}|${emphasisBucket}|${dormant ? 'dormant' : 'active'}`;
+  if (!resources.nodeMaterials.has(key)) {
+    const baseEmissive = dormant ? 0.24 : 0.12;
+    const material = new window.THREE.MeshLambertMaterial({
+      color,
+      emissive: color,
+      emissiveIntensity: baseEmissive + emphasisBucket * 0.78,
+      transparent: opacityBucket < 1,
+      opacity: opacityBucket,
+      depthWrite: opacityBucket >= 0.55,
+    });
+    resources.nodeMaterials.set(key, material);
+  }
+  return resources.nodeMaterials.get(key);
+}
+
+function ringMaterial(color, opacity) {
+  const resources = ensureThreeResources();
+  const opacityBucket = Math.round(Math.max(0.05, Math.min(1, opacity)) * 20) / 20;
+  const key = `${color}|${opacityBucket}`;
+  if (!resources.ringMaterials.has(key)) {
+    resources.ringMaterials.set(key, new window.THREE.SpriteMaterial({
+      map: resources.ringTexture,
+      color,
+      transparent: true,
+      opacity: opacityBucket,
+      depthWrite: false,
+      depthTest: true,
+      blending: window.THREE.AdditiveBlending,
+    }));
+  }
+  return resources.ringMaterials.get(key);
+}
+
+function geometryForNode(node) {
+  const geometries = ensureThreeResources().geometries;
+  if (node._shape === 'diamond') return geometries.diamond;
+  if (node._shape === 'hexagon') return geometries.hub;
+  if (node._shape === 'triangleDown') return geometries.dormant;
+  return geometries.sphere;
+}
+
+function createNodeThreeObject(node) {
+  const T = window.THREE;
+  ensureThreeResources();
+  const group = new T.Group();
+  const body = new T.Mesh(geometryForNode(node), nodeMaterial(node.color || COLORS.inactive, 1, 0, node._dormant));
+  const aura = new T.Sprite(ringMaterial(node.color || COLORS.inactive, 0.2));
+  aura.visible = false;
+  aura.renderOrder = 2;
+  group.add(body);
+  group.add(aura);
+  group.userData.nodeId = node.id;
+  node._threeObject = group;
+  node._bodyObject = body;
+  node._auraObject = aura;
+  updateNodeThreeObject(node);
+  return group;
+}
+
+function updateNodeThreeObject(node) {
+  const group = node && node._threeObject;
+  if (!group || !node._bodyObject || !node._auraObject) return;
+  const body = node._bodyObject;
+  const aura = node._auraObject;
+  const activationColor = nodeActivationColor.get(node.id);
+  const neurogenesis = isNeurogenesisNode(node);
+  const baseColor = activationColor || (neurogenesis ? COLORS.neurogenesis : (node.color || COLORS.inactive));
+  const activationOpacity = nodeActivationOpacity.get(node.id);
+  let opacity = activationOpacity != null ? activationOpacity : (node._opacity != null ? node._opacity : 1);
+  const highlighted = isHighlightedNode(node);
+  const direct = isDirectHighlightedNode(node);
+  const highlight = activeHighlight();
+  if (highlight) opacity = highlighted ? Math.max(opacity, 0.96) : Math.min(opacity, 0.22);
+  if (node._dormant) opacity *= 0.82;
+
+  const selected = selectedNodeId === node.id;
+  const focused = focusedNodeId === node.id;
+  const synapticGlow = Number(node._synapticGlow || 0);
+  const emphasis = activationColor ? 1 : Math.max(
+    synapticGlow * 0.72,
+    selected || focused || direct ? 0.85 : (highlighted ? 0.45 : 0),
+  );
+  body.geometry = geometryForNode(node);
+  body.material = nodeMaterial(baseColor, opacity, emphasis, node._dormant);
+
   const birthScale = nodeBirthScaleState.get(node.id) || 1;
-  const val = (node.val || 4) * birthScale;
-  const actColor = nodeActivationColor.get(node.id);
-  const color = actColor || node.color || COLORS.inactive;
-  const actOpacity = nodeActivationOpacity.get(node.id);
-  const baseOpacity = actOpacity != null ? actOpacity : 1.0;
-  const hoverActive = isHoverActive();
-  const hoverMatch = isHoverNode(node);
-  const isDirectHover = hoverMatch && hoverHighlight && node.id === hoverHighlight.hoverNodeId;
-  // Ensure baseOpacity is a valid number — Math.min(undefined, 0.38) === NaN
-  // which makes ctx.globalAlpha default to 1.0, so non-query nodes appear
-  // full-bright during hover and look "highlighted" when they shouldn't be.
-  const safeBase = (typeof baseOpacity === 'number' && !isNaN(baseOpacity)) ? baseOpacity : 1.0;
-  const opacity = hoverActive ? (hoverMatch ? Math.max(safeBase, 0.95) : Math.min(safeBase, 0.38)) : safeBase;
-  const x = node.x;
-  const y = node.y;
-  const shape = node._shape || 'circle';
-  // Logarithmic radius — hubs stay readable without dominating
-  const r = nodeRadius(val);
-  const boost = nodeGlowBoost(node, hoverMatch, isDirectHover);
+  const radius = nodeRadius(node.val || 4) * nodeWorldScale * birthScale * (selected || focused ? 1.08 : 1);
+  body.scale.setScalar(radius);
 
-  // Ambient aura first: nodes become condensations of light inside the synaptic web.
-  drawNodeGlow(node, ctx, globalScale, color, opacity, r, boost);
-  if (actColor || isDirectHover) {
-    drawNodeGlow(node, ctx, globalScale, actColor || COLORS.edgeHebbianPulse, opacity, r * 1.18, boost * 1.15);
+  let ringColor = baseColor;
+  let ringOpacity = 0;
+  if (activationColor) ringOpacity = 0.92;
+  else if (selected || focused || direct) {
+    ringColor = selected ? COLORS.selected : baseColor;
+    ringOpacity = 0.78;
+  } else if (neurogenesis) {
+    ringColor = COLORS.neurogenesis;
+    ringOpacity = 0.46;
+  } else if (synapticGlow >= 0.58) {
+    ringColor = baseColor;
+    ringOpacity = 0.16 + synapticGlow * 0.16;
+  } else if (highlighted) {
+    ringOpacity = 0.42;
+  }
+  aura.visible = ringOpacity > 0;
+  if (aura.visible) {
+    aura.material = ringMaterial(ringColor, ringOpacity * opacity);
+    aura.scale.setScalar(radius * (activationColor ? 3.25 : 2.65));
+  }
+  group.visible = !node._hidden;
+}
+
+function roundedRect(context, x, y, width, height, radius) {
+  const r = Math.min(radius, height / 2, width / 2);
+  context.beginPath();
+  context.moveTo(x + r, y);
+  context.arcTo(x + width, y, x + width, y + height, r);
+  context.arcTo(x + width, y + height, x, y + height, r);
+  context.arcTo(x, y + height, x, y, r);
+  context.arcTo(x, y, x + width, y, r);
+  context.closePath();
+}
+
+function ensureNodeLabelSprite(node) {
+  if (node._labelObject) return node._labelObject;
+  if (!node._threeObject || !window.THREE) return null;
+  const label = node.name || node._title || node.id;
+  const display = label.length > 34 ? label.slice(0, 31) + '…' : label;
+  const canvas = document.createElement('canvas');
+  canvas.width = 512;
+  canvas.height = 96;
+  const context = canvas.getContext('2d');
+  context.font = '600 28px system-ui, -apple-system, sans-serif';
+  const measured = Math.min(460, Math.ceil(context.measureText(display).width + 42));
+  const x = (512 - measured) / 2;
+  roundedRect(context, x, 14, measured, 68, 18);
+  context.fillStyle = 'rgba(13,17,23,0.88)';
+  context.fill();
+  context.strokeStyle = 'rgba(139,148,158,0.38)';
+  context.lineWidth = 2;
+  context.stroke();
+  context.fillStyle = '#f0f6fc';
+  context.textAlign = 'center';
+  context.textBaseline = 'middle';
+  context.fillText(display, 256, 49, 450);
+
+  const texture = new window.THREE.CanvasTexture(canvas);
+  texture.needsUpdate = true;
+  const material = new window.THREE.SpriteMaterial({
+    map: texture,
+    transparent: true,
+    depthWrite: false,
+    depthTest: false,
+  });
+  const sprite = new window.THREE.Sprite(material);
+  const width = Math.max(34, measured * 0.11);
+  sprite.scale.set(width, 10.5, 1);
+  sprite.position.set(0, nodeRadius(node.val || 4) * nodeWorldScale + 9, 0);
+  sprite.renderOrder = 4;
+  sprite.visible = false;
+  node._threeObject.add(sprite);
+  node._labelObject = sprite;
+  node._labelTexture = texture;
+  return sprite;
+}
+
+function disposeNodeVisual(node) {
+  if (!node) return;
+  if (node._labelTexture) node._labelTexture.dispose();
+  if (node._labelObject && node._labelObject.material) node._labelObject.material.dispose();
+  node._labelObject = null;
+  node._labelTexture = null;
+  node._threeObject = null;
+  node._bodyObject = null;
+  node._auraObject = null;
+}
+
+let labelUpdateTimer = null;
+function scheduleLabelUpdate() {
+  if (labelUpdateTimer) clearTimeout(labelUpdateTimer);
+  labelUpdateTimer = setTimeout(() => {
+    labelUpdateTimer = null;
+    updateVisibleLabels();
+  }, 70);
+}
+
+function updateVisibleLabels() {
+  if (!graph) return;
+  const data = graph.graphData();
+  const wanted = new Set();
+  if (selectedNodeId) wanted.add(selectedNodeId);
+  if (focusedNodeId) wanted.add(focusedNodeId);
+  const highlight = activeHighlight();
+  if (highlight) highlight.nodeIds.forEach(id => wanted.add(id));
+  nodeActivationColor.forEach((value, id) => wanted.add(id));
+
+  if (currentViewScale >= 1.25 && graph.controls) {
+    const target = graph.controls().target || { x: 0, y: 0, z: 0 };
+    data.nodes
+      .filter(node => Number.isFinite(node.x) && Number.isFinite(node.y) && Number.isFinite(node.z))
+      .sort((first, second) => {
+        const firstDistance = (first.x - target.x) ** 2 + (first.y - target.y) ** 2 + (first.z - target.z) ** 2;
+        const secondDistance = (second.x - target.x) ** 2 + (second.y - target.y) ** 2 + (second.z - target.z) ** 2;
+        return firstDistance - secondDistance || (degreeMap[second.id] || 0) - (degreeMap[first.id] || 0);
+      })
+      .slice(0, 14)
+      .forEach(node => wanted.add(node.id));
   }
 
-  // LOD: simplify ordinary nodes to dots, but preserve semantic shapes so
-  // neurogenesis/hub/dormant identity survives zooming out.
-  const lod = globalScale < 0.5;
-  if (lod) {
-    const lodRadius = Math.max(1.6, r * 0.72);
-    const semanticShape = ['diamond', 'hexagon', 'triangleDown'].includes(shape);
-    ctx.save();
-    ctx.globalCompositeOperation = 'lighter';
-    ctx.globalAlpha = opacity;
-    if (semanticShape) {
-      pathNodeShape(ctx, shape, x, y, lodRadius);
-    } else {
-      ctx.beginPath();
-      ctx.arc(x, y, lodRadius, 0, 2 * Math.PI);
+  const capped = new Set([...wanted].slice(0, MAX_DYNAMIC_LABELS));
+  data.nodes.forEach(node => {
+    if (capped.has(node.id)) {
+      const label = ensureNodeLabelSprite(node);
+      if (label) label.visible = true;
+    } else if (node._labelObject) {
+      node._labelObject.visible = false;
     }
-    ctx.fillStyle = withAlpha(color, node._dormant ? 0.48 : 0.82);
-    ctx.fill();
-    ctx.restore();
+  });
+}
+
+// --- Performance: geometry cache (A) + dirty-set sync (C) ---
+const cylinderGeometryCache = new Map();
+function getCachedCylinderGeometry(radius, segments) {
+  const key = `${radius.toFixed(2)}|${segments}`;
+  if (!cylinderGeometryCache.has(key)) {
+    cylinderGeometryCache.set(key, new window.THREE.CylinderGeometry(radius, radius, 1, segments, 1, false));
+  }
+  return cylinderGeometryCache.get(key);
+}
+
+const dirtyLinks = new Set();
+const dirtyNodes = new Set();
+
+function markLinkDirty(link) {
+  if (link && link._id) dirtyLinks.add(link._id);
+}
+function markNodeDirty(node) {
+  if (node && node.id) dirtyNodes.add(node.id);
+}
+
+const perLinkMaterials = new Map();
+
+function linkMaterial(link) {
+  const id = link._id || linkKey(link);
+  if (!perLinkMaterials.has(id)) {
+    const width = linkDisplayWidth(link);
+    const kind = width > 0 ? 'mesh' : 'line';
+    const material = kind === 'mesh'
+      ? new window.THREE.MeshBasicMaterial({
+          color: linkDisplayColor(link),
+          transparent: true,
+          opacity: linkDisplayOpacity(link),
+          depthWrite: false,
+          blending: window.THREE.NormalBlending,
+        })
+      : new window.THREE.LineBasicMaterial({
+          color: linkDisplayColor(link),
+          transparent: true,
+          opacity: linkDisplayOpacity(link),
+          depthWrite: false,
+          blending: window.THREE.NormalBlending,
+        });
+    perLinkMaterials.set(id, material);
+  }
+  const mat = perLinkMaterials.get(id);
+  mat.color.set(linkDisplayColor(link));
+  mat.opacity = linkDisplayOpacity(link);
+  return mat;
+}
+
+function createDashedLinkObject(link) {
+  if (!link._dashes) return null;
+  const highlighted = hoverEdgeId === link._id || isHighlightedLink(link);
+  const radius = highlighted ? 5.4 : Math.max(1.24, Math.min(2.4, linkDisplayWidth(link) * 0.38));
+  const geometry = getCachedCylinderGeometry(radius, 12);
+  const material = new window.THREE.MeshBasicMaterial({
+    color: linkDisplayColor(link),
+    transparent: true,
+    opacity: linkDisplayOpacity(link),
+    depthWrite: false,
+    blending: window.THREE.NormalBlending,
+  });
+  const filament = new window.THREE.Mesh(geometry, material);
+  filament.scale.set(1, 1, 1);
+  filament.frustumCulled = false;
+  link._threeLinkObject = filament;
+  return filament;
+}
+
+function updateDashedLinkPosition(object, coordinates, link) {
+  if (!link || !link._dashes || !object || !coordinates) return false;
+  const start = new window.THREE.Vector3(coordinates.start.x, coordinates.start.y, coordinates.start.z);
+  const end = new window.THREE.Vector3(coordinates.end.x, coordinates.end.y, coordinates.end.z);
+  const direction = end.clone().sub(start);
+  const length = Math.max(0.001, direction.length());
+  const highlighted = hoverEdgeId === link._id || isHighlightedLink(link);
+  const radius = highlighted ? 5.4 : Math.max(1.24, Math.min(2.4, linkDisplayWidth(link) * 0.38));
+  const cached = getCachedCylinderGeometry(radius, 12);
+  if (object.geometry !== cached) {
+    object.geometry = cached;
+  }
+  object.position.copy(start.clone().add(end).multiplyScalar(0.5));
+  object.scale.set(1, length, 1);
+  object.quaternion.setFromUnitVectors(new window.THREE.Vector3(0, 1, 0), direction.normalize());
+  return true;
+}
+
+function syncDashedLinkVisual(link) {
+  const object = link && link._threeLinkObject;
+  if (!object) return;
+  object.visible = effectiveLinkVisibility(link);
+  object.material.color.set(linkDisplayColor(link));
+  object.material.opacity = linkDisplayOpacity(link);
+  const highlighted = hoverEdgeId === link._id || isHighlightedLink(link);
+  const radius = highlighted ? 5.4 : Math.max(1.24, Math.min(2.4, linkDisplayWidth(link) * 0.38));
+  const cached = getCachedCylinderGeometry(radius, 12);
+  if (object.geometry !== cached) object.geometry = cached;
+  object.material.needsUpdate = true;
+}
+
+function syncRegularLinkVisual(link) {
+  if (!link || link._dashes || !link.__lineObj) return;
+  const object = link.__lineObj;
+  const material = linkMaterial(link);
+  if (object.material !== material) object.material = material;
+  object.visible = effectiveLinkVisibility(link);
+  object.material.color.set(linkDisplayColor(link));
+  object.material.opacity = linkDisplayOpacity(link);
+  object.material.needsUpdate = true;
+  // Use cached geometry for the current width — no dispose per frame.
+  if (object.geometry && object.geometry.parameters) {
+    const currentWidth = linkDisplayWidth(link);
+    const cached = getCachedCylinderGeometry(currentWidth, currentLodLevel === 'overview' ? 8 : 12);
+    if (object.geometry !== cached) object.geometry = cached;
+  }
+}
+
+let redrawScheduled = false;
+function syncThreeVisualState() {
+  if (!graph || !window.THREE) return;
+  if (redrawScheduled) return;
+  redrawScheduled = true;
+  requestAnimationFrame(() => {
+    redrawScheduled = false;
+    const data = graph.graphData();
+    graph
+      .nodeVisibility(isCoreNodeVisible)
+      .linkVisibility(effectiveLinkVisibility)
+      .linkMaterial(linkMaterial)
+      .linkWidth(linkDisplayWidth)
+      .linkDirectionalParticles(hoverAwareParticles)
+      .linkDirectionalParticleSpeed(particleSpeed)
+      .linkDirectionalParticleWidth(hoverAwareParticleWidth)
+      .linkDirectionalParticleColor(particleColor);
+    graph.refresh();
+    // Only sync dirty links (C) — most hover/highlight changes touch 1-20 links, not all 700+.
+    const linksToSync = dirtyLinks.size > 0 ? data.links.filter(l => dirtyLinks.has(l._id)) : data.links;
+    const nodesToSync = dirtyNodes.size > 0 ? data.nodes.filter(n => dirtyNodes.has(n.id)) : data.nodes;
+    nodesToSync.forEach(updateNodeThreeObject);
+    linksToSync.forEach(syncDashedLinkVisual);
+    linksToSync.forEach(syncRegularLinkVisual);
+    dirtyLinks.clear();
+    dirtyNodes.clear();
+    scheduleLabelUpdate();
+  });
+}
+
+// ============================================================================
+// Tooltips
+// ============================================================================
+let tooltipEl = null;
+
+function ensureTooltip() {
+  if (tooltipEl) return;
+  tooltipEl = document.createElement('div');
+  tooltipEl.id = 'custom-tooltip';
+  tooltipEl.className = 'graph-tooltip';
+  tooltipEl.hidden = true;
+  document.body.appendChild(tooltipEl);
+}
+
+function isMobile() {
+  return window.matchMedia('(max-width: 768px)').matches;
+}
+
+function positionTooltip(event) {
+  if (!tooltipEl || tooltipEl.hidden) return;
+  if (isMobile()) {
+    tooltipEl.style.left = '12px';
+    tooltipEl.style.right = '12px';
+    tooltipEl.style.bottom = 'calc(env(safe-area-inset-bottom) + 12px)';
+    tooltipEl.style.top = 'auto';
+    tooltipEl.style.width = 'auto';
     return;
   }
-
-  ctx.save();
-  ctx.globalAlpha = opacity;
-  pathNodeShape(ctx, shape, x, y, r);
-  ctx.fillStyle = nodeBodyGradient(ctx, x, y, r, color, opacity);
-  ctx.fill();
-
-  // Thin inner rim, not a hard cartoon border. Keeps shapes readable without
-  // breaking the bloom aesthetic.
-  ctx.globalAlpha = Math.min(0.9, opacity * (hoverMatch ? 0.75 : 0.38));
-  ctx.strokeStyle = withAlpha('#ffffff', hoverMatch ? 0.55 : 0.22);
-  ctx.lineWidth = Math.max(0.7, 1.1 / globalScale);
-  ctx.stroke();
-
-  if (hoverMatch) {
-    pathNodeShape(ctx, shape, x, y, r + (2.4 / globalScale));
-    ctx.strokeStyle = COLORS.edgeHebbianPulse;
-    ctx.lineWidth = 2.4 / globalScale;
-    ctx.globalAlpha = 0.82;
-    ctx.stroke();
-  }
-
-  // Draw 💤 text above dormant nodes
-  if (shape === 'triangleDown' && globalScale >= 1.5) {
-    ctx.font = (10 / globalScale) + 'px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'bottom';
-    ctx.fillStyle = '#6e7681';
-    ctx.globalAlpha = opacity * 0.85;
-    ctx.fillText('\u{1F4A4}', x, y - r - 2);
-  }
-
-  // Highlight ring around the directly hovered node only
-  if (isDirectHover) {
-    ctx.beginPath();
-    ctx.arc(x, y, r + (5 / globalScale), 0, 2 * Math.PI);
-    ctx.strokeStyle = COLORS.edgeHebbianPulse;
-    ctx.lineWidth = 1.5 / globalScale;
-    ctx.globalAlpha = 0.9;
-    ctx.stroke();
-  }
-  ctx.restore();
-
-  // Node label (visible when zoomed in)
-  if (globalScale >= 1.2 && node.name) {
-    ctx.save();
-    ctx.font = (10 / globalScale) + 'px system-ui, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'top';
-    ctx.fillStyle = '#c9d1d9';
-    ctx.globalAlpha = opacity * 0.8;
-    const label = node.name.length > 25 ? node.name.substring(0, 22) + '\u2026' : node.name;
-    ctx.fillText(label, x, y + r + 2);
-    ctx.restore();
-  }
+  const source = event || lastMouseEvent || { clientX: 0, clientY: 0 };
+  const pad = 16;
+  let x = (source.clientX || source.pageX || 0) + pad;
+  let y = (source.clientY || source.pageY || 0) + pad;
+  tooltipEl.style.right = '';
+  tooltipEl.style.bottom = '';
+  tooltipEl.style.width = '';
+  const rect = tooltipEl.getBoundingClientRect();
+  if (x + rect.width > window.innerWidth) x -= rect.width + pad * 2;
+  if (y + rect.height > window.innerHeight) y -= rect.height + pad * 2;
+  tooltipEl.style.left = Math.max(8, x) + 'px';
+  tooltipEl.style.top = Math.max(8, y) + 'px';
 }
 
+function showTooltip(node, event) {
+  if (graphLayoutActive) return;
+  ensureTooltip();
+  const data = node ? nodeDataMap[node.id] : null;
+  if (!data) { hideTooltip(); return; }
+  const mobile = isMobile();
+  const title = escapeHtml(data.display_label || data.title || data.id);
+  const path = data.absolute_path || data._path || data.path || '';
+  const shortPath = data.relative_path || data.path || '';
+  const sourceType = data.source_type || 'vault';
+  const sourceId = data.source_id || sourceType;
+  const rawTags = data._tags || data.tags || '';
+  const tags = normalizeTags(rawTags);
+  const tagHtml = tags.map(tag => {
+    const color = tagColorMap[tag] || COLORS.inactive;
+    return `<span class="tooltip-tag"><i style="background:${color}"></i>${escapeHtml(tag)}</span>`;
+  }).join('');
+  const preview = (data._text || data.text || '').replace(/\s+/g, ' ').trim().slice(0, mobile ? 90 : 180);
+  const degree = degreeMap[data.id] || 0;
+  const neighbors = neighborMap[data.id] || [];
+  const neighborLimit = mobile ? 2 : 6;
+  const neighborsHtml = neighbors.slice(0, neighborLimit).map(value => `<span>${escapeHtml(value)}</span>`).join(', ');
+  const openUrl = sourceType === 'vault'
+    ? 'obsidian://open?path=' + encodeURIComponent(path)
+    : 'file://' + path;
 
-// ============================================================================
-// Activation state — stored in maps, never mutates live force-graph objects
-// Defined here (graph-core.js) so they're available to graph-init.js and
-// activation.js which load after this file.
-// ============================================================================
-const nodeActivationOpacity = new Map(); // nodeId → opacity
-const nodeActivationColor = new Map();   // nodeId → color string
-const nodeBirthScaleState = new Map();   // nodeId → temporary birth scale
-const linkActivationVisible = new Map(); // linkKey → bool
-const linkActivationColor = new Map();   // linkKey → color string
-const linkParticlesState = new Map();    // linkKey → number
-const linkParticleColorState = new Map();// linkKey → color string
-const linkWidthState = new Map();        // linkKey → number
-const linkVisibilityState = new Map();  // linkKey → bool (threshold/direct filter)
+  let html = mobile ? '<button class="mobile-sheet-close" onclick="dismissMobileSheet()" aria-label="Close node details">×</button>' : '';
+  html += `<div class="tooltip-kicker">${escapeHtml(sourceType)} · ${escapeHtml(sourceId)}</div>`;
+  html += `<strong class="tooltip-title">${title}</strong>`;
+  if (tagHtml) html += `<div class="tooltip-tags">${tagHtml}</div>`;
+  if (shortPath) html += `<div class="tooltip-path">${escapeHtml(shortPath)}</div>`;
+  html += `<div class="tooltip-metric">${degree} connection${degree === 1 ? '' : 's'}</div>`;
+  if (neighborsHtml) html += `<div class="tooltip-neighbors">${neighborsHtml}${neighbors.length > neighborLimit ? ` <em>+${neighbors.length - neighborLimit}</em>` : ''}</div>`;
+  if (preview) html += `<p>${escapeHtml(preview)}${preview.length >= (mobile ? 90 : 180) ? '…' : ''}</p>`;
+  if (path) html += `<a href="${escapeHtml(openUrl)}" target="_blank" rel="noopener">Open file ↗</a>`;
 
-function clearActivationState() {
-  nodeActivationOpacity.clear();
-  nodeActivationColor.clear();
-  nodeBirthScaleState.clear();
-  linkActivationVisible.clear();
-  linkActivationColor.clear();
-  linkParticlesState.clear();
-  linkParticleColorState.clear();
-  linkWidthState.clear();
+  tooltipEl.innerHTML = html;
+  tooltipEl.classList.toggle('mobile-tooltip', mobile);
+  tooltipEl.hidden = false;
+  tooltipEl.style.display = 'block';
+  positionTooltip(event);
+}
+
+function edgeTypeLabel(type) {
+  return {
+    hebbian: 'Hebbian synapse',
+    phantom: 'Phantom link',
+    counterpart: 'Project counterpart',
+    project_context: 'Project context',
+    project_reference: 'Project reference',
+    neurogenesis: 'Neurogenesis link',
+    wikilink: 'Wikilink',
+  }[type] || type || 'Wikilink';
+}
+
+function showEdgeTooltip(link, event) {
+  if (graphLayoutActive) return;
+  ensureTooltip();
+  const info = link ? edgeInfoMap[link._id] : null;
+  if (!info) { hideTooltip(); return; }
+  let html = `<div class="tooltip-kicker">${escapeHtml(edgeTypeLabel(info.type))}</div>`;
+  html += `<strong class="tooltip-title">${escapeHtml(info.source_title)} <span>→</span> ${escapeHtml(info.target_title)}</strong>`;
+  if (info.type === 'hebbian') {
+    html += `<div class="tooltip-metrics"><span>Weight <b>${Number(info.weight || 0).toFixed(3)}</b></span><span>Frequency <b>${Number(info.frequency || 0)}</b></span></div>`;
+  } else if (info.type === 'phantom') {
+    html += `<div class="tooltip-metric">Similarity <b>${Number(info.similarity || 0).toFixed(3)}</b></div>`;
+  }
+  if (info.relation) html += `<div class="tooltip-metric">Relation <b>${escapeHtml(info.relation)}</b></div>`;
+  if (info.group_id) html += `<div class="tooltip-metric">Project <b>${escapeHtml(info.group_id)}</b></div>`;
+  tooltipEl.innerHTML = html;
+  tooltipEl.classList.remove('mobile-tooltip');
+  tooltipEl.hidden = false;
+  tooltipEl.style.display = 'block';
+  positionTooltip(event);
+}
+
+function showActivatedTooltip(note, event) {
+  if (graphLayoutActive) return;
+  ensureTooltip();
+  if (!note) return;
+  const role = note.role === 'seed' ? 'Seed' : 'Graph neighbor';
+  let html = `<div class="tooltip-kicker">${role}</div><strong class="tooltip-title">${escapeHtml(note.title || note.id)}</strong>`;
+  html += '<div class="score-grid">';
+  html += `<span>Final score</span><b>${Number(note.final_score ?? note.score ?? 0).toFixed(4)}</b>`;
+  html += `<span>Hybrid</span><b>${Number(note.hybrid_score || 0).toFixed(4)}</b>`;
+  html += `<span>Vector</span><b>${Number(note.vector_score || 0).toFixed(4)}</b>`;
+  html += `<span>BM25</span><b>${Number(note.bm25_score || 0).toFixed(4)}</b>`;
+  html += `<span>Hebbian boost</span><b>${Number(note.hebbian_boost || 0).toFixed(4)}</b>`;
+  html += `<span>Hop</span><b>${note.hop ?? 0}</b>`;
+  html += '</div>';
+  if (note.parent_id) html += `<div class="tooltip-path">From ${escapeHtml(note.parent_id)}</div>`;
+  tooltipEl.innerHTML = html;
+  tooltipEl.hidden = false;
+  tooltipEl.style.display = 'block';
+  positionTooltip(event);
+}
+
+function hideTooltip() {
+  if (!tooltipEl) return;
+  tooltipEl.hidden = true;
+  tooltipEl.style.display = 'none';
+}
+
+function dismissMobileSheet() {
+  hideTooltip();
 }
 
 // ============================================================================
-// Utilities
+// Selection inspector
 // ============================================================================
-function escapeHtml(s) {
-  const d = document.createElement('div');
-  d.textContent = s;
-  return d.innerHTML;
+function normalizeTags(rawTags) {
+  if (Array.isArray(rawTags)) {
+    return rawTags.map(tag => String(tag).replace(/^[\[\]]+|[\[\]]+$/g, '').trim()).filter(Boolean);
+  }
+  if (typeof rawTags === 'string' && rawTags.trim()) {
+    return rawTags.replace(/^[\[\]]+|[\[\]]+$/g, '').split(',').map(tag => tag.trim()).filter(Boolean);
+  }
+  return [];
+}
+
+function renderNodeInspector(node) {
+  const content = document.getElementById('selection-content');
+  const clearButton = document.getElementById('clear-selection-btn');
+  if (!content || !node) return;
+  const data = nodeDataMap[node.id] || {};
+  const path = data.absolute_path || data.path || '';
+  const tags = normalizeTags(data.tags || node._tags);
+  content.className = 'selection-detail';
+  content.innerHTML = `
+    <div class="selection-type">Node · ${escapeHtml(data.source_type || 'vault')}</div>
+    <h3>${escapeHtml(data.display_label || data.title || node.name || node.id)}</h3>
+    <div class="selection-metrics">
+      <span><small>Degree</small><b>${degreeMap[node.id] || 0}</b></span>
+      <span><small>Shape</small><b>${escapeHtml(node._shape || 'sphere')}</b></span>
+      <span><small>Source</small><b>${escapeHtml(data.source_id || 'vault')}</b></span>
+    </div>
+    ${tags.length ? `<div class="selection-tags">${tags.map(tag => `<span>${escapeHtml(tag)}</span>`).join('')}</div>` : ''}
+    ${data.relative_path || data.path ? `<p class="selection-path">${escapeHtml(data.relative_path || data.path)}</p>` : ''}
+    <div class="selection-actions"><button type="button" id="selection-focus-action">Focus neighborhood</button>${path ? `<a href="${escapeHtml((data.source_type || 'vault') === 'vault' ? 'obsidian://open?path=' + encodeURIComponent(path) : 'file://' + path)}" target="_blank" rel="noopener">Open file</a>` : ''}</div>
+  `;
+  const focusButton = document.getElementById('selection-focus-action');
+  if (focusButton) focusButton.addEventListener('click', () => focusGraphNode(node, { kind: 'node' }));
+  if (clearButton) clearButton.hidden = false;
+}
+
+function renderEdgeInspector(link) {
+  const content = document.getElementById('selection-content');
+  const clearButton = document.getElementById('clear-selection-btn');
+  const info = link ? edgeInfoMap[link._id] : null;
+  if (!content || !info) return;
+  content.className = 'selection-detail';
+  content.innerHTML = `
+    <div class="selection-type">${escapeHtml(edgeTypeLabel(info.type))}</div>
+    <h3>${escapeHtml(info.source_title)} <span class="arrow">→</span> ${escapeHtml(info.target_title)}</h3>
+    <div class="selection-metrics">
+      ${info.weight != null ? `<span><small>Weight</small><b>${Number(info.weight).toFixed(3)}</b></span>` : ''}
+      ${info.frequency != null ? `<span><small>Frequency</small><b>${Number(info.frequency)}</b></span>` : ''}
+      ${info.similarity != null ? `<span><small>Similarity</small><b>${Number(info.similarity).toFixed(3)}</b></span>` : ''}
+    </div>
+    ${info.relation ? `<p class="selection-path">Relation: ${escapeHtml(info.relation)}</p>` : ''}
+    ${info.group_id ? `<p class="selection-path">Project: ${escapeHtml(info.group_id)}</p>` : ''}
+  `;
+  if (clearButton) clearButton.hidden = false;
+}
+
+function selectGraphNode(node) {
+  if (!node) return;
+  selectedNodeId = node.id;
+  selectedLinkId = null;
+  renderNodeInspector(node);
+  requestGraphRedraw();
+}
+
+function selectGraphLink(link) {
+  if (!link) return;
+  selectedLinkId = link._id;
+  selectedNodeId = null;
+  renderEdgeInspector(link);
+  requestGraphRedraw();
+}
+
+function clearSelection(options = {}) {
+  selectedNodeId = null;
+  selectedLinkId = null;
+  const content = document.getElementById('selection-content');
+  const clearButton = document.getElementById('clear-selection-btn');
+  if (content) {
+    content.className = 'empty-state';
+    content.textContent = 'Select a node or edge to inspect it.';
+  }
+  if (clearButton) clearButton.hidden = true;
+  if (!options.keepFocus && focusMode && typeof exitFocusMode === 'function') exitFocusMode();
+  requestGraphRedraw();
+}
+
+function focusActivatedNote(note) {
+  if (!graph || !note) return;
+  const target = graph.graphData().nodes.find(node => node.id === note.id);
+  if (!target) return;
+  const path = [note.id];
+  let current = note;
+  const seen = new Set(path);
+  while (current && current.parent_id && !seen.has(current.parent_id)) {
+    path.push(current.parent_id);
+    seen.add(current.parent_id);
+    current = activatedNotesById.get(current.parent_id);
+  }
+  setPathHighlight(path);
+  selectGraphNode(target);
+  focusGraphNode(target, { kind: note.role === 'seed' ? 'seed' : 'activation-path', pathIds: path });
+  showActivatedTooltip(note, lastMouseEvent || { clientX: 200, clientY: 200 });
+}
+
+function escapeHtml(value) {
+  const element = document.createElement('div');
+  element.textContent = value == null ? '' : String(value);
+  return element.innerHTML;
 }

@@ -392,8 +392,12 @@ async def test_api_query_broadcasts_neurogenesis_after_activation(mock_app_setup
         assert resp.status == 200
         data = await resp.json()
         assert data['new_concepts'][0]['id'] == 'wiki/concepts/test-concept'
-        assert len(events) == 2
+        assert len(events) == 3
         assert events[1]['new_concepts'][0]['id'] == 'wiki/concepts/test-concept'
         assert events[1]['sequence'] > events[0]['sequence']
+        assert events[2]['type'] == 'query_response'
+        assert events[2]['query'] == 'test concept'
+        assert 'response' in events[2]
+        assert events[2]['sequence'] > events[1]['sequence']
     finally:
         await client.close()
