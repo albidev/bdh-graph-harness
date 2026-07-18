@@ -178,6 +178,10 @@ def test_neural_cosmetics_keep_particles_and_install_bloom_on_native_composer():
     assert "ambientWidth: 1.6" in core
     assert "function hasAmbientParticleFlow()" in graph_init
     assert "|| hasAmbientParticleFlow()" in graph_init
+    assert "function directionalParticleObject(link)" in core
+    assert ".linkDirectionalParticleThreeObject(directionalParticleObject)" in graph_init
+    assert "renderer.setClearColor(COLORS.bg, 1)" in graph_init
+    assert "graph.scene().background = new window.THREE.Color(COLORS.bg)" in graph_init
 
 
 def test_camera_model_supports_focus_restore_fit_and_orientation_reset():

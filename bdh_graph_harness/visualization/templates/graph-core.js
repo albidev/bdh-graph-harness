@@ -504,19 +504,19 @@ function linkDisplayWidth(link) {
   if (stateWidth != null) return Math.min(3.2, Math.max(0, stateWidth * 0.42));
   if (hoverEdgeId === link._id || isHighlightedLink(link)) return Math.max(0.8, Math.min(2.2, (link.width || 1) * 0.55));
   if (currentLodLevel === 'overview') {
-    if (link.type === 'wikilink') return 0.58;
-    if (link.type === 'phantom') return 0.48;
-    if (link.type === 'hebbian') return 0.72;
-    if (link.type === 'project_context') return 0.68;
-    if (link.type === 'counterpart' || link.type === 'project_reference' || link.type === 'neurogenesis') return 1.05;
-    return 0.52;
+    if (link.type === 'wikilink') return 1.10;
+    if (link.type === 'phantom') return 0.92;
+    if (link.type === 'hebbian') return 1.45;
+    if (link.type === 'project_context') return 1.25;
+    if (link.type === 'counterpart' || link.type === 'project_reference' || link.type === 'neurogenesis') return 1.95;
+    return 1.00;
   }
-  if (link.type === 'wikilink') return 0.72;
-  if (link.type === 'phantom') return 0.58;
-  if (link.type === 'hebbian') return (link.weight || 0) >= 0.7 ? 1.05 : 0.72;
-  if (link.type === 'project_context') return 0.82;
-  if (link.type === 'counterpart' || link.type === 'project_reference' || link.type === 'neurogenesis') return 1.22;
-  return 0.65;
+  if (link.type === 'wikilink') return 1.45;
+  if (link.type === 'phantom') return 1.15;
+  if (link.type === 'hebbian') return (link.weight || 0) >= 0.7 ? 2.10 : 1.45;
+  if (link.type === 'project_context') return 1.65;
+  if (link.type === 'counterpart' || link.type === 'project_reference' || link.type === 'neurogenesis') return 2.60;
+  return 1.25;
 }
 
 function hoverAwareParticles(link) {
@@ -540,6 +540,24 @@ function particleColor(link) {
   return linkParticleColorState.get(linkKey(link))
     || (isActiveFlowLink(link) ? particleConfig.activeColor : particleConfig.ambientColor)
     || linkDisplayColor(link);
+}
+
+function directionalParticleObject(link) {
+  const T = window.THREE;
+  if (!T) return null;
+  const color = particleColor(link);
+  const group = new T.Group();
+  const core = new T.Mesh(
+    new T.SphereGeometry(1.9, 10, 8),
+    new T.MeshBasicMaterial({ color, transparent: true, opacity: 0.98 }),
+  );
+  const halo = new T.Sprite(ringMaterial(color, 0.58));
+  halo.scale.setScalar(8.5);
+  halo.renderOrder = 4;
+  group.add(halo);
+  group.add(core);
+  group.renderOrder = 4;
+  return group;
 }
 
 // ============================================================================

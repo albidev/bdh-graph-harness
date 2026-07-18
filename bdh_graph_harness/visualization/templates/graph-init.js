@@ -416,6 +416,7 @@ function createGraphInstance() {
     .linkDirectionalParticleSpeed(particleSpeed)
     .linkDirectionalParticleWidth(hoverAwareParticleWidth)
     .linkDirectionalParticleColor(particleColor)
+    .linkDirectionalParticleThreeObject(directionalParticleObject)
     .linkDirectionalParticleResolution(3)
     .warmupTicks(constrained ? 45 : 90)
     .cooldownTime(constrained ? 8000 : 15000)
@@ -478,6 +479,8 @@ function createGraphInstance() {
 
   const renderer = graph.renderer();
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, constrained ? 1.25 : 1.75));
+  renderer.setClearColor(COLORS.bg, 1);
+  graph.scene().background = new window.THREE.Color(COLORS.bg);
   graph.scene().fog = new window.THREE.FogExp2(COLORS.bg, constrained ? 0.00055 : 0.00038);
   scheduleBloomInstall();
 
