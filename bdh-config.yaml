@@ -110,6 +110,7 @@ hebbian_min_score: 0.15  # min activation score to create a synapse (prevents sp
 # Neurogenesis
 neurogenesis_dir: concepts
 neurogenesis_enabled: true
+neurogenesis_source_edges_enabled: true # validated generated provenance edges
 
 # API server
 api_host: 0.0.0.0  # bind su tutte le interfacce (localhost + tailscale)
@@ -146,6 +147,9 @@ quality_prune_interval: 50        # re-evaluate every N queries
 # Mirrors biological sleep consolidation: downscaling + pruning + re-evaluation.
 consolidation_downscale_factor: 0.90    # global weight multiplier per cycle
 consolidation_prune_weight_floor: 0.02  # delete synapses below this weight after downscaling
+consolidation_weak_weight_threshold: 0.15 # weak-tail threshold; not online creation threshold
+consolidation_weak_max_frequency: 1.0     # stale weak traces above this frequency survive
+consolidation_weak_min_age_hours: 48      # fresh weak traces get a grace period
 consolidation_dormant_persist_cycles: 3 # remove nodes dormant for N+ consolidation cycles
 consolidation_prune_dormant_nodes: true # actually delete stale dormant nodes (not just hide)
 

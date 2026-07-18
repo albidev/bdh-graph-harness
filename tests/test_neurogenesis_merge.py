@@ -18,6 +18,7 @@ def test_assimilate_evidence_is_append_only(tmp_path):
         {"absolute_path": str(note), "title": "Canonical Concept"},
         "A second evidence statement.",
         source_notes=["Session A"],
+        source_node_ids=["vault:source-a.md", "external:projects/demo.md"],
         query="recovery query",
     )
     content = note.read_text(encoding="utf-8")
@@ -25,6 +26,7 @@ def test_assimilate_evidence_is_append_only(tmp_path):
     assert "Original definition." in content
     assert "A second evidence statement." in content
     assert "source: Session A" in content
+    assert 'activated_from_ids: ["vault:source-a.md", "external:projects/demo.md"]' in content
     assert "updated: 2026-01-01" not in content
 
     again = assimilate_evidence(

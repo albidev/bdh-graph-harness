@@ -20,7 +20,11 @@ from bdh_graph_harness.visualization import render_viz_html, get_template_path
 from bdh_graph_harness.retrieval.attention import attention
 from bdh_graph_harness.memory import hebbian_update, save_state
 from bdh_graph_harness.memory.state_store import reconcile_state_to_nodes
-from bdh_graph_harness.memory.consolidation import consolidate, consolidation_stats
+from bdh_graph_harness.memory.consolidation import (
+    consolidate,
+    consolidation_stats,
+    hebbian_tail_stats,
+)
 from bdh_graph_harness.memory.semantic_consolidation import (
     load_checkpoint,
     mark_processed,
@@ -147,6 +151,7 @@ async def api_stats(request, app_state: dict) -> web.Response:
         'active_neurons': len(n) - len(dormant),
         'top_hebbian': [],
     }
+    stats.update(hebbian_tail_stats(s, config=ctx.config.settings))
     if s['synapses']:
         sorted_syn = sorted(s['synapses'].items(), key=lambda x: -x[1]['weight'])[:10]
         stats['top_hebbian'] = [
@@ -213,6 +218,7 @@ async def api_graph(request, app_state: dict) -> web.Response:
             'note_b': b,
             'weight': syn['weight'],
             'frequency': syn.get('frequency', 0),
+            'last_coactivated': syn.get('last_coactivated'),
             'type': 'hebbian',
         })
 
@@ -370,6 +376,7 @@ def run_neurogenesis(
     if config.get('neurogenesis_enabled', True):
         n = ctx.nodes
         active_titles = [n[nid]['title'] for nid in active if nid in n]
+        active_source_ids = [nid for nid in active if nid in n]
         try:
             new_concepts = extract_new_concepts(
                 response_text, query, active, n, allow_existing=True
@@ -414,6 +421,7 @@ def run_neurogenesis(
                     n[canonical_id],
                     definition,
                     source_notes=active_titles,
+                    source_node_ids=active_source_ids,
                     query=query,
                 )
                 if merged['status'] in {'merged', 'already_present'}:
@@ -434,6 +442,7 @@ def run_neurogenesis(
             new_note_id = create_note(
                 vault_root, title, definition, active_titles, query,
                 neurogenesis_dir=ctx.config.settings.get('neurogenesis_dir'),
+                source_node_ids=active_source_ids,
             )
             if new_note_id:
                 reported_id = new_note_id
