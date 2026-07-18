@@ -947,27 +947,27 @@ function updateVisibleLabels() {
   });
 }
 
+const perLinkMaterials = new Map();
+
 function linkMaterial(link) {
-  const resources = ensureThreeResources();
-  const width = linkDisplayWidth(link);
-  const opacity = Math.round(linkDisplayOpacity(link) * 20) / 20;
-  const color = linkDisplayColor(link);
-  const kind = width > 0 ? 'mesh' : 'line';
-  const key = `${kind}|${color}|${opacity}`;
-  if (!resources.linkMaterials.has(key)) {
-    const options = {
-      color,
-      transparent: opacity < 1,
-      opacity,
-      depthWrite: false,
-      blending: window.THREE.NormalBlending,
-    };
+  const id = link._id || linkKey(link);
+  if (!perLinkMaterials.has(id)) {
+    const width = linkDisplayWidth(link);
+    const kind = width > 0 ? 'mesh' : 'line';
     const material = kind === 'mesh'
-      ? new window.THREE.MeshBasicMaterial(options)
-      : new window.THREE.LineBasicMaterial(options);
-    resources.linkMaterials.set(key, material);
+      ? new window.THREE.MeshBasicMaterial({
+          transparent: true,
+          depthWrite: false,
+          blending: window.THREE.NormalBlending,
+        })
+      : new window.THREE.LineBasicMaterial({
+          transparent: true,
+          depthWrite: false,
+          blending: window.THREE.NormalBlending,
+        });
+    perLinkMaterials.set(id, material);
   }
-  return resources.linkMaterials.get(key);
+  return perLinkMaterials.get(id);
 }
 
 function createDashedLinkObject(link) {
@@ -1025,6 +1025,13 @@ function syncRegularLinkVisual(link) {
   object.material.color.set(linkDisplayColor(link));
   object.material.opacity = linkDisplayOpacity(link);
   object.material.needsUpdate = true;
+  if (object.geometry && typeof object.geometry.dispose === 'function') {
+    const currentWidth = linkDisplayWidth(link);
+    if (object.geometry.parameters && object.geometry.parameters.radius !== currentWidth) {
+      object.geometry.dispose();
+      object.geometry = new window.THREE.CylinderGeometry(currentWidth, currentWidth, 1, 12, 1, false);
+    }
+  }
 }
 
 function syncThreeVisualState() {

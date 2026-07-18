@@ -182,6 +182,8 @@ def test_neural_cosmetics_keep_particles_and_install_bloom_on_native_composer():
     assert "function syncRegularLinkVisual(link)" in core
     assert "link.__lineObj" in core
     assert "data.links.forEach(syncRegularLinkVisual);" in core
+    assert "const perLinkMaterials = new Map();" in core
+    assert "perLinkMaterials.set(id, material);" in core
     assert "bloomPass.threshold = 0.62" in core
     assert "bloomPass.strength = 1.15" in core
     assert "bloomPass.radius = 0.82" in core
@@ -202,7 +204,7 @@ def test_neural_cosmetics_keep_particles_and_install_bloom_on_native_composer():
     assert "new T.PointsMaterial" in core
     assert "organicLinkCurvature" in core
     assert ".linkCurveRotation(organicLinkRotation)" in graph_init
-    assert "new window.THREE.MeshBasicMaterial(options)" in core
+    assert "new window.THREE.MeshBasicMaterial({" in core
     assert "function isCoreNodeVisible(node)" in core
     assert ".nodeVisibility(isCoreNodeVisible)" in graph_init
     assert "graph.zoomToFit(220, 108)" in graph_init
