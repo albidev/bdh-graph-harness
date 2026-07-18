@@ -42,7 +42,7 @@ const MAX_DYNAMIC_LABELS = 22;
 // Configurable atmospheric parameters (7/8/9/10)
 let edgeFadeStrength = 0.05;   // (7) min opacity for weak edges
 let edgeCurvatureBase = 0.25;  // (8) base organic curvature
-let fogDensity = 0.00038;      // (9) scene fog density (desktop default)
+let fogDensity = 0.00025;     // (9) scene fog density — lighter so periphery stays visible
 let particleFlowIntensity = 0.5; // (10) scales particle count per link
 
 function nodeRadius(val) {
@@ -760,7 +760,7 @@ function installBloomPass() {
     0.68,
     0.52,
   );
-  bloomPass.threshold = 0.62;
+  bloomPass.threshold = 0.78;
   bloomPass.strength = 1.15;
   bloomPass.radius = 0.82;
   composer.addPass(bloomPass);
@@ -965,7 +965,7 @@ function updateNodeThreeObject(node) {
     } else {
       // Uniform ambient glow creates visual density in clusters; emphasis adds focus.
       // glowMultiplier scales the whole thing from console (BDHGlow.set(2)).
-      const ambientGlow = 0.06; // light, uniform — forms "nebula" density in clusters
+      const ambientGlow = 0.09; // light, uniform — forms "nebula" density in clusters and periphery
       const focusGlow = Math.min(0.16, emphasis * 0.16);
       const baseGlow = (ambientGlow + focusGlow) * opacity;
       const glowOpacity = Math.min(1, baseGlow * glowMultiplier);

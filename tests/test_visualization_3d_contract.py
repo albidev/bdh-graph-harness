@@ -219,7 +219,7 @@ def test_neural_cosmetics_keep_particles_and_install_bloom_on_native_composer():
     assert "edgeCurvature: 'bdh-graph-edge-curvature-v1'" in core
     assert "const perLinkMaterials = new Map();" in core
     assert "perLinkMaterials.set(id, material);" in core
-    assert "bloomPass.threshold = 0.62" in core
+    assert "bloomPass.threshold = 0.78" in core
     assert "bloomPass.strength = 1.15" in core
     assert "bloomPass.radius = 0.82" in core
     assert "isAmbientFlowLink(link)) return Math.round(particleConfig.ambientParticles" in core
