@@ -39,6 +39,8 @@ Modules at 100% branch coverage:
 - `retrieval/bm25.py` — empty queries, normalization, no-results behavior
 - `tests/test_mobile_visualization.py` — compact layout and touch-first interaction contracts
 - `tests/test_neurogenesis.py` — provenance placement and sanitized frontmatter fields
+- `tests/test_graph_quality_audit.py` — structural/Hebbian invariant audit
+- `tests/test_visualization_3d_contract.py` — 3D renderer contracts
 
 The remaining work is concentrated in infrastructure boundaries: REST/WebSocket routes, CLI/MCP dispatch, graph/cache rebuilds, ChromaDB/embedding failure modes, and provider clients.
 

@@ -1,24 +1,31 @@
 # Visualization — BDH Graph Harness
 
 The real-time web visualization at `:8643` renders the knowledge graph using
-[force-graph](https://github.com/vasturiano/force-graph) (WebGL) with live
+[3d-force-graph](https://github.com/vasturiano/3d-force-graph) (WebGL/Three.js) with live
 activation feedback during queries.
 
 ## Features
 
 ### Node rendering
 
-- **Nodes** are colored by activation state: inactive (gray), seed (blue), activated (orange)
+The renderer uses [3d-force-graph](https://github.com/vasturiano/3d-force-graph) 1.80.0 with a pinned Three.js 0.180.x ES module for custom geometries. Nodes are Three.js objects with label sprites, selection rings, and per-node materials.
+
+- **Nodes** are colored by activation state: inactive (gray), seed (blue), activated (orange); neurogenesis nodes use aqua (`#00E5FF`)
 - **Tag-based coloring** — toggle the "Tags" button to color nodes by their Obsidian frontmatter tags. Each tag gets a unique color from a consistent palette
 - **Source filtering** — the Source selector shows all nodes, only primary vault nodes, or only external source nodes. With tag coloring disabled, vault nodes use blue and external nodes use orange.
 - **Orphan nodes hidden by default** — nodes with zero connections are hidden to reduce clutter. Toggle "Orphans" to show them. The node counter updates to reflect visible vs total
-- **Shape-aware hit area** — node pointer area includes +6px padding for easier selection in dense regions
+- **Shape-aware hit area** — 3D raycasting handles node picking; diamond shape for neurogenesis nodes
 
 ### Edge rendering
+
+Edge families are rendered as 3D Three.js line objects with per-link materials:
 
 - **Wikilink edges** — dark gray, thin lines representing `[[wikilinks]]` from the vault
 - **Hebbian synapses** — green edges whose width is proportional to synaptic weight
 - **Phantom links** — blue dashed edges for semantic similarity connections
+- **Counterpart edges** — reciprocal vault ↔ external project-anchor edges
+- **Project-context edges** — generated star edges connecting external project notes to their root README
+- **Neurogenesis source edges** — generated edges from `activated_from_ids` frontmatter connecting newborn notes to their validated source nodes (weight 0.35, type `neurogenesis_source`)
 - **Z-order by importance** — wikilinks (bottom) → phantom (middle) → hebbian (top)
 - **Edge tooltips** — hover over any synapse to see: weight, type (hebbian/wikilink/phantom), and the connected note titles
 - **Edge visibility filtering** — Hebbian threshold slider hides edges below weight; phantom and direct-only toggles
@@ -35,7 +42,7 @@ During a query, strengthened synapses get animated particles:
 
 - **Node hover** — highlights the 1-hop subgraph: connected nodes and edges glow, everything else dims (opacity 0.38)
 - **Edge hover** — highlights only the hovered edge (color #d2a8ff, width 2.8, 2 particles), does NOT dim the graph
-- Rendering uses `autoPauseRedraw(false)` to stay active even after simulation cools
+- Rendering uses idle pause: the canvas pauses when the force engine and meaningful animation settle, and resumes on interaction
 
 ### Activation explainability
 
@@ -51,11 +58,11 @@ The side panel labels seeds and graph neighbors separately. This avoids presenti
 
 ### Viewport management
 
-- **zoomToFit** — graph is centered on first load
-- **Viewport-preserving updates** — `setGraphDataPreservingView` saves and restores camera position (center + zoom) across graph rebuilds
+- **Camera fit** — graph camera fits on first load after `getGraphBbox()` exposes real rendered bounds; fog density and node world scale adapt to the fitted camera distance
+- **Camera-preserving updates** — `setGraphDataPreservingView` saves and restores camera position, target, orientation, and all three spatial dimensions across graph rebuilds
 - **Safe structural updates** — empty or malformed node datasets are ignored instead of clearing the live graph; activation events received before graph initialization are ignored safely
-- **Node drag** — nodes can be repositioned by dragging
-- **Manual collision force** — a lightweight loop (every 50ms) pushes overlapping nodes apart by 15% when border distance < 8px
+- **Node drag** — nodes can be repositioned by dragging in 3D space
+- **LOD** — camera-distance level of detail applies to weak Hebbian edges, opacity, width, and label visibility
 
 ## Controls
 
@@ -68,6 +75,7 @@ The side panel labels seeds and graph neighbors separately. This avoids presenti
 | **Counterpart** toggle | Show/hide reciprocal vault ↔ external project-anchor edges |
 | **Phantom** toggle | Show/hide semantic similarity edges |
 | **Hebbian threshold** slider | Minimum weight for Hebbian edges to show (0–1, default 0.3) |
+| **Neurogenesis source** toggle | Show/hide generated `neurogenesis_source` edges |
 | **Spacing** slider | Network spacing — distance between nodes |
 | **Edge length** slider | Edge length multiplier |
 | **Query bar** | Type a query and press Enter to run retrieval + Hebbian update + LLM response |
@@ -110,16 +118,19 @@ Generated concept notes store provenance in YAML frontmatter rather than in a vi
 
 - `created_by` identifies the generator;
 - `generation_query` stores the sanitized triggering query;
-- `activated_from` stores the source notes used for generation.
+- `activated_from` stores the human-readable source note titles;
+- `activated_from_ids` stores the canonical node IDs (JSON list) used for generated edge materialization.
 
 The parser excludes frontmatter from note embeddings, so generation metadata remains available for auditing without becoming a retrieval attractor shared by every generated note.
+
+When `neurogenesis_source_edges_enabled` is `true` (default), the graph builder materializes reciprocal generated edges of type `neurogenesis_source` for each valid ID in `activated_from_ids`. Missing IDs are reported as unresolved provenance and never trigger basename fallback.
 
 ## WebSocket
 
 The visualization connects to the server via WebSocket for real-time updates:
 - **Initial payload** — on connect, sends full graph (nodes with id/title/tags/path/text, edges, hebbian synapses, stats) to populate the visualization
 - Auto-reconnect with status indicator
-- Receives activation cascades, Hebbian updates, and neurogenesis events as they happen
+- Receives activation cascades, Hebbian updates, neurogenesis events, and `query_response` events as they happen
 - Structural events (`graph_refresh`, `node_update`) rebuild the dataset through `setGraphDataPreservingView` so the viewport is preserved
 - Empty structural updates are ignored defensively; this prevents a transient empty payload during a refresh/reconnect from clearing the force-graph
 - Activation events are ignored safely until the initial graph payload has created the force-graph instance
@@ -148,10 +159,13 @@ Server (aiohttp)
   ├── REST endpoints (query, stats, graph, hebbian, refresh)
   └── WebSocket (/ws) — real-time events
         ↓
-Browser (force-graph / WebGL)
-  ├── force-graph instance for nodes/edges
+Browser (3d-force-graph / WebGL / Three.js)
+  ├── 3d-force-graph instance for nodes/edges
+  ├── Three.js custom objects (geometries, sprites, materials)
   ├── External Maps for activation/filter state
   ├── WebSocket listener → live updates
   ├── Tooltip system (custom HTML overlays)
   └── Tag coloring engine (frontmatter → color map)
 ```
+
+See [`docs/visualization-3d-migration.md`](visualization-3d-migration.md) for the full 3D migration architecture, lifecycle, risks, and validation.

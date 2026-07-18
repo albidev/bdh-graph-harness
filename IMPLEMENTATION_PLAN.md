@@ -34,9 +34,21 @@
 ## Future
 
 ### Multi-vault
-- [ ] Multiple ChromaDB collections (one per vault)
-- [ ] Bridge links across vaults
-- [ ] Config: `vaults: [path1, path2, ...]`
+### Data Quality Hardening
+- [x] Structural self-loop filtering (federated + legacy builders)
+- [x] External source derived-artifact exclusions (test-results, coverage, .next, cache, reports)
+- [x] Stale-weak Hebbian retention policy (age + frequency gated pruning)
+- [x] Neurogenesis source provenance (`activated_from_ids` frontmatter + `neurogenesis_source` generated edges)
+- [x] Hebbian tail observability metrics (`hebbian_strong/weak/stale_weak_synapses`)
+- [x] Read-only graph quality audit script (`scripts/audit_graph_quality.py`)
+
+### 3D Visualization
+- [x] Migration from 2D force-graph to 3D force-graph (3d-force-graph + Three.js 0.180.x)
+- [x] Camera-preserving structural updates in 3D space
+- [x] Per-link materials for highlight glow on every edge type
+- [x] LOD for weak Hebbian edges, opacity, width, and label visibility
+- [x] `query_response` WebSocket event for plugin-launched query visibility
+- [x] Mobile tab-based layout (Graph / Controls / Inspector)
 
 ### Progressive context
 - [ ] LLM receives progressive context that updates during generation
@@ -44,4 +56,7 @@
 ### Scale
 - [ ] Benchmark: incremental vs full rebuild on 1000+ notes
 - [ ] Embedding cache warming on startup
-- [ ] Graceful handling of vault files removed/renamed
+### Multi-vault
+- [x] Multiple ChromaDB collections (one per vault)
+- [x] Config: `vaults: [path1, path2, ...]`
+- [ ] Bridge links across vaults

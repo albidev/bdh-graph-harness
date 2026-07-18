@@ -52,7 +52,7 @@ Hebbian Update (co-activation strengthening) → LLM Response (OpenAI-compatible
 WebSocket → force-graph (WebGL) (nodes light up, synapses pulse)
 
 Sleep Cycle (periodic):
-  Synaptic Downscaling (×0.9) → Prune (< floor) → Quality Re-eval → Stale Removal
+  Synaptic Downscaling (×0.9) → Stale-Weak Pruning → Prune (< floor) → Quality Re-eval → Stale Removal
 ```
 
 ## Package structure
@@ -86,7 +86,7 @@ bdh_graph_harness/
 │   ├── openrouter.py        # OpenRouter backend (OpenAI-compatible)
 │   └── prompt.py            # System prompt + context formatting
 ├── neurogenesis/
-│   ├── creator.py           # Concept extraction + note creation + noise filtering
+│   ├── creator.py           # Concept extraction + note creation + noise filtering + source provenance IDs
 │   └── dedupe.py            # Exact + semantic duplicate detection (ChromaDB cosine similarity)
 ├── api/
 │   ├── server.py            # aiohttp app setup + WebSocket
@@ -94,7 +94,7 @@ bdh_graph_harness/
 │   ├── ws.py                # WebSocket handlers
 │   └── watcher.py           # Source-aware polling watcher with debounce
 └── visualization/
-    └── templates/index.html # force-graph (WebGL) real-time graph UI
+    └── templates/           # 3D force-graph (WebGL) real-time graph UI + controls + WebSocket
 ```
 
 `harness.py` is a compatibility shim that re-exports from the package — tests use `import harness`.
@@ -197,6 +197,10 @@ See `bdh-config.yaml` for all parameters. Key ones:
 | `external_sources` | `[]` | Read-only Markdown sources with per-source `include`/`exclude` glob lists; optional explicit `counterparts` link vault/external anchor notes |
 | `consolidation_downscale_factor` | 0.90 | Global weight multiplier per sleep cycle |
 | `consolidation_prune_weight_floor` | 0.02 | Delete synapses below this weight after downscaling |
+| `consolidation_weak_weight_threshold` | 0.15 | Weak-tail threshold for stale-weak retention (not an online creation threshold) |
+| `consolidation_weak_max_frequency` | 1.0 | Stale weak traces above this frequency survive |
+| `consolidation_weak_min_age_hours` | 48 | Fresh weak traces get a grace period before pruning |
+| `neurogenesis_source_edges_enabled` | `true` | Materialize validated `neurogenesis_source` generated edges from `activated_from_ids` frontmatter |
 | `consolidation_dormant_persist_cycles` | 3 | Remove nodes dormant for N+ consolidation cycles |
 | `consolidation_prune_dormant_nodes` | `true` | Delete stale dormant nodes (not just hide) |
 
@@ -220,17 +224,22 @@ See [`docs/testing.md`](docs/testing.md) for the coverage policy, exact commands
 ## Visualization
 
 The web UI at `:8643` shows a real-time force-graph (WebGL) with:
-- **Nodes** colored by activation state or by Obsidian tags (toggle)
-- **Wikilink edges** + **Hebbian synapses** + **Phantom links** with hover tooltips (weight, type, connected notes)
-- **Live neurogenesis** — new edges appear in real-time as concepts are created
+The web UI at `:8643` shows a real-time **3D force-graph** (WebGL via [3d-force-graph](https://github.com/vasturiano/3d-force-graph)) with:
+- **3D node rendering** — Three.js objects with custom geometries, label sprites, rings, and dashed semantic links
+- **Nodes** colored by activation state or by Obsidian tags (toggle); neurogenesis nodes use aqua (`#00E5FF`)
+- **Wikilink edges** + **Hebbian synapses** + **Phantom links** + **Counterpart/project-context edges** + **Neurogenesis source edges** with hover tooltips (weight, type, connected notes)
+- **Live neurogenesis** — new edges appear in real-time as concepts are created; provenance edges connect newborn notes to their source nodes
 - **Hover highlighting** — node hover shows 1-hop subgraph, edge hover highlights the edge
-- **Node drag**, **viewport-preserving updates**, **manual collision force**, and touch-first mobile graph interactions
+- **Node drag**, **viewport-preserving updates**, **camera-preserving structural updates**, and touch-first mobile graph interactions
 - **Z-order** — wikilinks (bottom) → phantom (middle) → hebbian (top)
-- **Orphan nodes toggle**, **tag legend overlay**, **dark theme**, **mobile responsive** (iPhone safe area, touch dismiss)
-- **Node quality** — dormant nodes dimmed (gray, 30% opacity) with 💤 tooltip; stats bar shows dormant count
+- **Orphan nodes toggle**, **tag legend overlay**, **dark theme**, **mobile responsive** (iPhone safe area, touch dismiss, tab-based layout)
+- **Node quality** — dormant nodes dimmed (gray, 30% opacity) with 💤 tooltip; stats bar shows dormant count and Hebbian tail metrics
 - **Persisted controls** — slider values saved in localStorage, restored on refresh
+- **Hebbian tail metrics** — `hebbian_strong_synapses`, `hebbian_weak_synapses`, `hebbian_stale_weak_synapses` exposed via `/api/stats`
+- **Query-response WebSocket event** — final ordered event after LLM response so plugin-launched queries are visible in the graph UI
 
 See [`docs/visualization.md`](docs/visualization.md) for full details on controls, tooltips, and mobile support.
+See [`docs/visualization-3d-migration.md`](docs/visualization-3d-migration.md) for the 3D migration architecture, lifecycle, and validation details.
 
 ## MCP Server
 
@@ -320,11 +329,22 @@ curl http://localhost:8643/api/consolidation-stats
 
 **Cycle steps:**
 1. **Synaptic downscaling** — multiply all Hebbian weights by `consolidation_downscale_factor` (default 0.90). Prevents runaway strengthening.
-2. **Structural pruning** — delete synapses with weight below `consolidation_prune_weight_floor` (default 0.02) after downscaling.
-3. **Quality re-evaluation** — recalculate node quality scores and update dormant state.
-4. **Stale removal** — delete nodes dormant for more than `consolidation_dormant_persist_cycles` (default 3) consecutive cycles, if `consolidation_prune_dormant_nodes` is true.
+2. **Stale-weak pruning** — delete synapses that are below `consolidation_weak_weight_threshold` (default 0.15), have frequency ≤ `consolidation_weak_max_frequency` (default 1.0), and were last co-activated more than `consolidation_weak_min_age_hours` (default 48) ago. Fresh and frequently reinforced weak synapses survive.
+3. **Structural pruning** — delete synapses with weight below `consolidation_prune_weight_floor` (default 0.02) after downscaling.
+4. **Quality re-evaluation** — recalculate node quality scores and update dormant state.
+5. **Stale removal** — delete nodes dormant for more than `consolidation_dormant_persist_cycles` (default 3) consecutive cycles, if `consolidation_prune_dormant_nodes` is true.
 
 No tokens consumed — pure algorithmic operation on the local graph state. Safe to run while the server is serving queries (file-locked state access).
+
+## Graph Quality Audit
+
+A read-only audit script is available to check structural and Hebbian invariants without mutating state:
+
+```bash
+python scripts/audit_graph_quality.py --url http://localhost:8643
+```
+
+Reports: node count, structural edges, invalid endpoints, self-loops, duplicate edges, Hebbian tail classification (strong/weak/stale-weak), generated edge types, and source distribution.
 
 ## License
 
