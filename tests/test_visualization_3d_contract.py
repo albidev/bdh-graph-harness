@@ -154,7 +154,7 @@ def test_page_bootstraps_the_pinned_3d_renderer_and_real_three_dimensional_layou
     assert "ForceGraph3D" in graph_init
     assert ".numDimensions(3)" in graph_init
     assert ".nodeThreeObject(createNodeThreeObject)" in graph_init
-    assert "BDH3DUtils.fogDensityForFitDistance" in graph_init
+    assert "Math.min(fogDensity, maxDensity)" in graph_init
     assert "BDH3DUtils.nodeScaleForFitDistance" in graph_init
     assert "nodeWorldScale" in (ROOT / "bdh_graph_harness/visualization/templates/graph-core.js").read_text()
     assert ".enableNavigationControls(true)" in graph_init
