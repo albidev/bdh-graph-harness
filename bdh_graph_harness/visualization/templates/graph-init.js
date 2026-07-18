@@ -476,6 +476,7 @@ function createGraphInstance() {
     })
     .onEngineStop(() => {
       graphLayoutActive = false;
+      hideGraphLoader();
       scheduleGraphIdlePause(1000);
     });
 
@@ -818,6 +819,14 @@ function showWebGLFallback(message) {
 function hideWebGLFallback() {
   const fallback = document.getElementById('webgl-fallback');
   if (fallback) fallback.hidden = true;
+}
+
+function hideGraphLoader() {
+  const loader = document.getElementById('graph-loader');
+  if (loader) {
+    loader.classList.add('loader-fade');
+    setTimeout(() => { loader.hidden = true; }, 400);
+  }
 }
 
 function retryVisualization() {

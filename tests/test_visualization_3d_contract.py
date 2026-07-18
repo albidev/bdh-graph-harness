@@ -177,8 +177,14 @@ def test_neural_cosmetics_keep_particles_and_install_bloom_on_native_composer():
     assert "new window.THREE.MeshBasicMaterial({" in core
     assert "new window.THREE.LineDashedMaterial" not in core
     assert "const EDGE_WIDTH_SCALE = 2;" in core
-    assert "return width * EDGE_WIDTH_SCALE;" in core
-    assert "highlighted ? 2.7" in core
+    assert "return width * scale;" in core
+    assert "const HIGHLIGHT_WIDTH_SCALE = 4;" in core
+    assert "width = Math.max(1.6, Math.min(4.4, (link.width || 1) * 1.1));" in core
+    assert "highlighted ? 5.4" in core
+    assert "function hideGraphLoader()" in graph_init
+    assert "hideGraphLoader();" in graph_init
+    assert "graph-loader" in html
+    assert "loader-spinner" in html
     assert "function syncRegularLinkVisual(link)" in core
     assert "link.__lineObj" in core
     assert "data.links.forEach(syncRegularLinkVisual);" in core
