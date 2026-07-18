@@ -489,7 +489,7 @@ function setHoverEdge(linkId) {
   if (hoverEdgeId === linkId) return;
   const prevId = hoverEdgeId;
   hoverEdgeId = linkId;
-  // Fast path: update only the two affected edges directly, no full graph.refresh().
+  // Fast path: instantly update color/opacity on the two affected edges for immediate tooltip feedback.
   const data = graph.graphData();
   const linkById = linkByIdMap(data.links);
   if (prevId) {
@@ -500,6 +500,10 @@ function setHoverEdge(linkId) {
   const currLink = linkById.get(linkId);
   if (currLink && currLink.__lineObj) syncRegularLinkVisual(currLink);
   if (currLink && currLink._threeLinkObject) syncDashedLinkVisual(currLink);
+  // Deferred refresh for width/thickness change (highlight scaling) on next frame.
+  dirtyLinks.add(linkId);
+  if (prevId) dirtyLinks.add(prevId);
+  requestGraphRedraw();
 }
 
 function clearHoverEdge(redraw = true) {
