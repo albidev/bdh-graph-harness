@@ -127,11 +127,8 @@ function restoreGraphControlState() {
 
   // Neural atmosphere controls (7/8/9/10)
   edgeFadeStrength = clampNumber(loadControlValue(STORAGE_KEYS.edgeFade, edgeFadeStrength), 0, 0.5, 0.05);
-  const storedFogDensity = Number(loadControlValue(STORAGE_KEYS.fogDensity, fogDensity * 1000));
-  const fogPercent = Number.isFinite(storedFogDensity) && storedFogDensity > 0 && storedFogDensity < 1
-    ? storedFogDensity * 1000
-    : storedFogDensity;
-  fogDensity = clampNumber(fogPercent, 0, 100, 38) / 1000;
+  const storedFogDensity = Number(loadControlValue(STORAGE_KEYS.fogDensity, 38));
+  fogDensity = clampNumber(storedFogDensity, 0, 100, 38) / 100000;
   particleFlowIntensity = clampNumber(loadControlValue(STORAGE_KEYS.particleFlow, particleFlowIntensity), 0, 1, 0.5);
   edgeCurvatureBase = clampNumber(loadControlValue(STORAGE_KEYS.edgeCurvature, edgeCurvatureBase), 0, 1, 0.25);
 
@@ -152,9 +149,9 @@ function restoreGraphControlState() {
   const fadeSlider = document.getElementById('edge-fade-slider');
   if (fadeSlider) fadeSlider.value = edgeFadeStrength;
   const fogSlider = document.getElementById('fog-slider');
-  if (fogSlider) fogSlider.value = Math.round(fogDensity * 1000);
+  if (fogSlider) fogSlider.value = Math.round(fogDensity * 100000);
   const fogOutput = document.getElementById('fog-val');
-  if (fogOutput) fogOutput.textContent = Math.round(fogDensity * 1000);
+  if (fogOutput) fogOutput.textContent = Math.round(fogDensity * 100000);
   const flowSlider = document.getElementById('particle-flow-slider');
   if (flowSlider) flowSlider.value = Math.round(particleFlowIntensity * 100);
   const curvSlider = document.getElementById('curvature-slider');
@@ -318,7 +315,7 @@ function applyVisualizationPreset(name) {
   saveControlValue(STORAGE_KEYS.phantomVisibility, showPhantom);
   updateHebbianThreshold(preset.threshold);
   updateEdgeFade(preset.fade);
-  updateFogDensity(preset.fog);
+  updateFogDensity(preset.fog, false);
   updateParticleFlow(preset.particles);
   toggleAmbientMotion(preset.ambient);
   const orphanToggle = document.getElementById('orphan-toggle');
@@ -329,6 +326,8 @@ function applyVisualizationPreset(name) {
   if (directToggle) directToggle.checked = false;
   if (sourceGraphData) initNetwork(sourceGraphData, { preserveView: true, reheat: true });
   applyEdgeFilters();
+  // Re-apply fog density AFTER initNetwork, since initNetwork's camera fit recalculates fog.
+  updateFogDensity(preset.fog);
   if (name === 'evidence' && typeof lastRetrievalNotes !== 'undefined' && lastRetrievalNotes.length) {
     applyRetrievalLens(lastRetrievalNotes, lastRetrievalQuery);
   } else if (name !== 'evidence' && queryLensActive) {

@@ -42,7 +42,7 @@ const MAX_DYNAMIC_LABELS = 22;
 // Configurable atmospheric parameters (7/8/9/10)
 let edgeFadeStrength = 0.05;   // (7) min opacity for weak edges
 let edgeCurvatureBase = 0.25;  // (8) base organic curvature
-let fogDensity = 0.00025;     // (9) scene fog density — lighter so periphery stays visible
+let fogDensity = 0.00038;     // (9) scene fog density — 38 on the slider
 let particleFlowIntensity = 0.5; // (10) scales particle count per link
 
 function nodeRadius(val) {
@@ -239,11 +239,14 @@ function updateEdgeFade(value, persist = true) {
 }
 
 function updateFogDensity(value, persist = true) {
-  fogDensity = clampNumber(value, 0, 100, 38) / 1000;
+  // Slider range 0-100 maps to fog density 0-0.001 (0.00038 = 38 on the slider).
+  fogDensity = clampNumber(value, 0, 100, 38) / 100000;
   const slider = document.getElementById('fog-slider');
-  if (slider) slider.value = Math.round(fogDensity * 1000);
+  if (slider) slider.value = Math.round(fogDensity * 100000);
+  const fogOutput = document.getElementById('fog-val');
+  if (fogOutput) fogOutput.textContent = Math.round(fogDensity * 100000);
   if (graph && graph.scene() && graph.scene().fog) graph.scene().fog.density = fogDensity;
-  if (persist) saveControlValue(STORAGE_KEYS.fogDensity, Math.round(fogDensity * 1000));
+  if (persist) saveControlValue(STORAGE_KEYS.fogDensity, Math.round(fogDensity * 100000));
 }
 
 function updateParticleFlow(value, persist = true) {

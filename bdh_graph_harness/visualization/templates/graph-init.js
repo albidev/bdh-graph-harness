@@ -776,10 +776,10 @@ function scheduleInitialCameraFit(attempt = 0) {
 
 function updateSceneFog(distance) {
   if (!graph || !graph.scene().fog) return;
-  graph.scene().fog.density = BDH3DUtils.fogDensityForFitDistance(
-    distance,
-    isConstrainedDevice(),
-  );
+  // Respect user-configured fogDensity; only scale down for large graphs to keep visibility.
+  const safeDistance = Number.isFinite(distance) && distance > 0 ? distance : 1000;
+  const maxDensity = 0.45 / safeDistance;
+  graph.scene().fog.density = Math.min(fogDensity, maxDensity);
 }
 
 function updateNodeWorldScale(distance, render = true) {
