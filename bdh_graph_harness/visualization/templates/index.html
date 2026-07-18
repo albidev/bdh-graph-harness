@@ -3,150 +3,244 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>🐉 BDH Graph Harness</title>
-<link rel="stylesheet" href="/static/styles.css?v=display-label-v1">
+<meta name="theme-color" content="#0d1117">
+<title>BDH Graph Harness — 3D Knowledge Space</title>
+<link rel="stylesheet" href="/static/styles.css?v=3d-v7">
+<script>
+  window.__BDH_RUNTIME_ERRORS__ = [];
+  window.addEventListener('error', event => {
+    window.__BDH_RUNTIME_ERRORS__.push({
+      message: event.message,
+      source: event.filename,
+      line: event.lineno,
+      column: event.colno,
+      stack: event.error && event.error.stack,
+    });
+  });
+  window.addEventListener('unhandledrejection', event => {
+    const reason = event.reason;
+    window.__BDH_RUNTIME_ERRORS__.push({
+      message: reason && reason.message ? reason.message : String(reason),
+      stack: reason && reason.stack,
+      unhandledRejection: true,
+    });
+  });
+</script>
 </head>
 <body class="graph-tab">
-<div id="titlebar">
-  <h1>🐉 BDH Graph Harness</h1>
-  <div class="controls">
+<header id="titlebar">
+  <div class="brand" aria-label="BDH Graph Harness">
+    <span class="brand-mark" aria-hidden="true">BDH</span>
+    <span class="brand-copy"><strong>Graph Harness</strong><small>Neural knowledge space</small></span>
+  </div>
+
+  <div class="topbar-primary">
     <div id="vault-control" class="vault-control" hidden>
       <label for="vault-selector">Vault</label>
       <select id="vault-selector" onchange="switchVault(this.value)" aria-label="Select vault"></select>
       <span id="vault-selector-status" class="vault-selector-status" aria-live="polite"></span>
     </div>
-    <div id="source-filter-control" class="source-filter-control">
-      <label for="source-filter">Source</label>
-      <select id="source-filter" onchange="setSourceFilter(this.value)">
-        <option value="all">All</option>
-        <option value="vault">Vault</option>
-        <option value="external">External</option>
-      </select>
-    </div>
-    <label class="toggle-label" title="Show orphan nodes (no connections)">
-      <input type="checkbox" id="orphan-toggle" checked onchange="toggleOrphans(this.checked)">
-      <span class="toggle-text">Orphans</span>
-    </label>
-    <label class="toggle-label" title="Show only direct wikilink connections (hide Hebbian & phantom edges)">
-      <input type="checkbox" id="direct-toggle" onchange="toggleDirectOnly(this.checked)">
-      <span class="toggle-text">Direct</span>
-    </label>
-    <div class="threshold-control" id="threshold-control">
-      <label class="toggle-label" title="Hide Hebbian edges below this weight">
-        <span class="toggle-text">≥</span>
-        <input type="range" id="hebbian-threshold" min="0" max="1" step="0.05" value="0.15"
-               oninput="updateHebbianThreshold(this.value)">
-      </label>
-      <span class="threshold-val" id="threshold-val">0.15</span>
-    </div>
-    <div class="threshold-control" id="spacing-control">
-      <label class="toggle-label" title="Network spacing — distance between nodes">
-        <span class="toggle-text">↔</span>
-        <input type="range" id="spacing-slider" min="0" max="100" step="5" value="50"
-               oninput="updateSpacing(this.value)">
-      </label>
-    </div>
-    <label class="toggle-label" title="Color nodes by Obsidian tag">
-      <input type="checkbox" id="tag-toggle" checked onchange="toggleTagColors(this.checked)">
-      <span class="toggle-text">Tags</span>
-    </label>
-    <label class="toggle-label" title="Show phantom (semantic similarity) edges">
-      <input type="checkbox" id="phantom-toggle" checked onchange="togglePhantom(this.checked)">
-      <span class="toggle-text">👻</span>
-    </label>
-    <div class="edge-filter-group" id="edge-filter-group">
-      <button class="edge-filter-btn active" data-type="wikilink" onclick="toggleEdgeType('wikilink', this)" title="Toggle wikilink edges">🔗</button>
-      <button class="edge-filter-btn active" data-type="counterpart" onclick="toggleEdgeType('counterpart', this)" title="Toggle project counterpart edges">⇄</button>
-      <button class="edge-filter-btn active" data-type="project_context" onclick="toggleEdgeType('project_context', this)" title="Toggle same-project context edges">⌁</button>
-      <button class="edge-filter-btn active" data-type="project_reference" onclick="toggleEdgeType('project_reference', this)" title="Toggle cross-project reference edges">↗</button>
-      <button class="edge-filter-btn active" data-type="hebbian" onclick="toggleEdgeType('hebbian', this)" title="Toggle Hebbian edges">⚡</button>
-      <button class="edge-filter-btn active" data-type="phantom" onclick="toggleEdgeType('phantom', this)" title="Toggle phantom edges">👻</button>
-    </div>
     <div class="search-control">
-      <input type="text" id="search-input" placeholder="🔍 Find node…" autocomplete="off"
+      <label class="sr-only" for="search-input">Find and focus a node</label>
+      <input type="search" id="search-input" placeholder="Find a node…" autocomplete="off"
              onkeydown="if(event.key==='Enter') searchNode(this.value)">
+      <button type="button" class="search-action" onclick="searchNode(document.getElementById('search-input').value)" aria-label="Find node">⌕</button>
     </div>
-    <div class="stats">
-      Neurons: <span id="stat-neurons">{neuron_count}</span>
-      · Edges: <span id="stat-synapses">{synapse_count}</span>
-      · Wikilinks: <span id="stat-wikilinks">—</span>
-      · Hebbian: <span id="stat-hebbian">{hebbian_count}</span>
-      <span id="stat-dormant" style="display:none"> · 💤 <span id="stat-dormant-count">0</span></span>
-      <span id="stat-phantom" style="display:none"> · 👻 <span id="stat-phantom-count">0</span></span>
-      <span id="status-indicator"></span>
-    </div>
-    <button class="collapse-btn" onclick="togglePanel()" title="Toggle side panel" id="collapse-btn">▸</button>
   </div>
-</div>
-<div id="mobile-tabs">
-  <div class="tab active" onclick="switchTab('graph-tab')">🗺️ Graph</div>
-  <div class="tab" onclick="switchTab('panel-tab')">📋 Panel</div>
-</div>
-<div id="main">
-  <div id="graph-area">
+
+  <div class="topbar-meta">
+    <div class="connection-state" title="Real-time connection status">
+      <span id="status-indicator" aria-hidden="true"></span>
+      <span id="status-text" aria-live="polite">Connecting</span>
+    </div>
+    <div class="stats" aria-label="Graph statistics">
+      <span class="stat-chip"><b id="stat-neurons">{neuron_count}</b><small>nodes</small></span>
+      <span class="stat-chip"><b id="stat-synapses">{synapse_count}</b><small>edges</small></span>
+      <span class="stat-chip optional-stat"><b id="stat-wikilinks">—</b><small>wiki</small></span>
+      <span class="stat-chip"><b id="stat-hebbian">{hebbian_count}</b><small>Hebbian</small></span>
+      <span id="stat-dormant" class="stat-chip optional-stat" hidden><b id="stat-dormant-count">0</b><small>dormant</small></span>
+      <span id="stat-phantom" class="stat-chip optional-stat" hidden><b id="stat-phantom-count">0</b><small>phantom</small></span>
+    </div>
+    <button class="icon-btn collapse-btn" onclick="togglePanel()" title="Toggle inspector" aria-label="Toggle inspector" id="collapse-btn">▸</button>
+  </div>
+</header>
+
+<nav id="mobile-tabs" aria-label="Visualization panels">
+  <button class="tab active" data-tab="graph-tab" onclick="switchTab('graph-tab')">Graph</button>
+  <button class="tab" data-tab="controls-tab" onclick="switchTab('controls-tab')">Controls</button>
+  <button class="tab" data-tab="panel-tab" onclick="switchTab('panel-tab')">Inspector</button>
+</nav>
+
+<main id="main">
+  <section id="graph-area" aria-label="Interactive 3D knowledge graph">
     <div id="graph-container"></div>
-    <div id="edge-length-controls">
-      <span class="el-label">↔</span>
-      <input type="range" id="edge-length-slider" min="0" max="100" step="10" value="10"
-             orient="vertical" oninput="setEdgeLengthMultiplier(parseInt(this.value)); document.getElementById('el-val').textContent=this.value">
-      <span class="el-val" id="el-val">10</span>
+
+    <div id="webgl-fallback" hidden role="status">
+      <strong>3D rendering unavailable</strong>
+      <p>The graph data and query tools are still live. Enable WebGL or try a less constrained browser to restore the scene.</p>
+      <button type="button" onclick="retryVisualization()">Retry renderer</button>
     </div>
-    <div id="zoom-controls">
-    <div class="zoom-row">
-      <button class="zoom-btn" onclick="zoomStep(-0.15)" title="Zoom out">−</button>
-      <input type="range" id="zoom-slider" min="0.1" max="4" step="0.05" value="1" oninput="zoomTo(this.value)">
-      <button class="zoom-btn" onclick="zoomStep(0.15)" title="Zoom in">+</button>
-      <span class="zoom-label" id="zoom-value">100%</span>
-      <button class="fit-btn" onclick="fitToScreen()" title="Fit graph to screen">⊞ Fit</button>
-    </div>
-  </div>
-  </div>
-  <div id="tag-legend" class="tag-legend hidden">
-    <button class="legend-collapse" onclick="toggleLegendCollapse()" title="Collapse legend">◀</button>
-  </div>
-  <div id="stats-dashboard">
-    <div class="stat-cell"><span class="stat-icon">🧠</span><span class="stat-num" id="dash-neurons">—</span><span class="stat-label">Neurons</span></div>
-    <div class="stat-cell"><span class="stat-icon">↗</span><span class="stat-num" id="dash-synapses">—</span><span class="stat-label">Edges</span></div>
-    <div class="stat-cell"><span class="stat-icon">🔗</span><span class="stat-num" id="dash-wikilinks">—</span><span class="stat-label">Wikilinks</span></div>
-    <div class="stat-cell"><span class="stat-icon">⚡</span><span class="stat-num" id="dash-hebbian">—</span><span class="stat-label">Hebbian</span></div>
-    <div class="stat-cell"><span class="stat-icon">🔍</span><span class="stat-num" id="dash-queries">—</span><span class="stat-label">Queries</span></div>
-  </div>
-  <div id="panel-resize"></div>
-  <div id="side-panel">
-    <div id="query-section">
-      <div class="query-wrap">
-        <input type="text" id="query-input" placeholder="Enter a query..." autocomplete="off">
-        <button class="query-clear" id="query-clear" onclick="clearQuery()" title="Clear">&times;</button>
+
+    <aside id="control-dock" aria-label="Graph controls">
+      <div class="dock-heading">
+        <div><span class="eyebrow">Instrument controls</span><strong>Graph view</strong></div>
+        <button id="controls-collapse" class="icon-btn" type="button" onclick="toggleControlsDock()" title="Collapse controls" aria-label="Collapse controls">‹</button>
       </div>
-      <button id="query-btn" onclick="sendQuery()">Query</button>
-      <button id="reset-btn" onclick="resetQuery()">↺ Reset</button>
+
+      <div class="dock-content">
+        <section class="control-group" aria-labelledby="view-controls-label">
+          <h2 id="view-controls-label">View</h2>
+          <div class="toggle-grid">
+            <label class="toggle-row" title="Show nodes with no graph connections">
+              <span><b>Orphans</b><small>Unconnected notes</small></span>
+              <input type="checkbox" id="orphan-toggle" checked onchange="toggleOrphans(this.checked)">
+            </label>
+            <label class="toggle-row" title="Show direct structural relationships only">
+              <span><b>Direct only</b><small>Hide learned links</small></span>
+              <input type="checkbox" id="direct-toggle" onchange="toggleDirectOnly(this.checked)">
+            </label>
+          </div>
+        </section>
+
+        <section class="control-group" aria-labelledby="source-controls-label">
+          <h2 id="source-controls-label">Sources</h2>
+          <div id="source-filter" class="segmented" role="radiogroup" aria-label="Source filter">
+            <button type="button" class="active" data-value="all" onclick="setSourceFilter('all')" aria-pressed="true">All</button>
+            <button type="button" data-value="vault" onclick="setSourceFilter('vault')" aria-pressed="false">Vault</button>
+            <button type="button" data-value="external" onclick="setSourceFilter('external')" aria-pressed="false">External</button>
+          </div>
+        </section>
+
+        <section class="control-group" aria-labelledby="edge-controls-label">
+          <h2 id="edge-controls-label">Edges</h2>
+          <div class="edge-filter-group" id="edge-filter-group">
+            <button class="edge-filter-btn active" data-type="wikilink" onclick="toggleEdgeType('wikilink', this)" title="Toggle wikilink edges" aria-pressed="true">Wiki</button>
+            <button class="edge-filter-btn active" data-type="counterpart" onclick="toggleEdgeType('counterpart', this)" title="Toggle project counterpart edges" aria-pressed="true">Counter</button>
+            <button class="edge-filter-btn active" data-type="project_context" onclick="toggleEdgeType('project_context', this)" title="Toggle same-project context edges" aria-pressed="true">Context</button>
+            <button class="edge-filter-btn active" data-type="project_reference" onclick="toggleEdgeType('project_reference', this)" title="Toggle cross-project reference edges" aria-pressed="true">Reference</button>
+            <button class="edge-filter-btn active" data-type="hebbian" onclick="toggleEdgeType('hebbian', this)" title="Toggle Hebbian edges" aria-pressed="true">Hebbian</button>
+            <button class="edge-filter-btn active" data-type="phantom" onclick="toggleEdgeType('phantom', this)" title="Toggle phantom edges" aria-pressed="true">Phantom</button>
+          </div>
+          <label class="slider-control" for="hebbian-threshold">
+            <span><b>Hebbian threshold</b><output id="threshold-val">0.15</output></span>
+            <input type="range" id="hebbian-threshold" min="0" max="1" step="0.05" value="0.15" oninput="updateHebbianThreshold(this.value)">
+          </label>
+          <label class="toggle-row compact" title="Show semantic similarity links">
+            <span><b>Phantom links</b><small>Semantic similarity</small></span>
+            <input type="checkbox" id="phantom-toggle" checked onchange="togglePhantom(this.checked)">
+          </label>
+        </section>
+
+        <section class="control-group" aria-labelledby="layout-controls-label">
+          <h2 id="layout-controls-label">Layout</h2>
+          <label class="slider-control" for="spacing-slider">
+            <span><b>Spacing</b><output id="spacing-val">50</output></span>
+            <input type="range" id="spacing-slider" min="0" max="100" step="5" value="50" oninput="updateSpacing(this.value)">
+          </label>
+          <label class="slider-control" for="edge-length-slider">
+            <span><b>Edge length</b><output id="el-val">10</output></span>
+            <input type="range" id="edge-length-slider" min="0" max="100" step="10" value="10" oninput="setEdgeLengthMultiplier(parseInt(this.value))">
+          </label>
+        </section>
+
+        <section class="control-group" aria-labelledby="appearance-controls-label">
+          <h2 id="appearance-controls-label">Appearance</h2>
+          <label class="toggle-row" title="Color nodes by their primary Obsidian tag">
+            <span><b>Tag colors</b><small>Separate color mode</small></span>
+            <input type="checkbox" id="tag-toggle" checked onchange="toggleTagColors(this.checked)">
+          </label>
+          <label class="toggle-row" title="Animate strong learned links at rest">
+            <span><b>Ambient flow</b><small>Strong Hebbian links only</small></span>
+            <input type="checkbox" id="motion-toggle" checked onchange="toggleAmbientMotion(this.checked)">
+          </label>
+        </section>
+      </div>
+    </aside>
+
+    <div id="scene-hud" aria-live="polite">
+      <span id="camera-mode" class="mode-pill">Free exploration</span>
+      <span id="lod-state">Overview LOD</span>
+      <span class="scene-hint">Drag to orbit · right-drag to pan · wheel to dolly</span>
     </div>
-    <div id="response-section">
-      <h3>Response</h3>
+
+    <div id="focus-hud" hidden>
+      <span><small>Focus</small><strong id="focus-title">—</strong></span>
+      <button type="button" onclick="exitFocusMode()">Back to free view</button>
+    </div>
+
+    <div id="tag-legend" class="tag-legend hidden">
+      <button class="legend-collapse" onclick="toggleLegendCollapse()" title="Collapse legend" aria-label="Collapse tag legend">◀</button>
+    </div>
+
+    <div id="zoom-controls" aria-label="Camera controls">
+      <button class="zoom-btn" onclick="zoomStep(-0.2)" title="Dolly out" aria-label="Dolly out">−</button>
+      <input type="range" id="zoom-slider" min="0.2" max="4" step="0.05" value="1" oninput="zoomTo(this.value)" aria-label="Camera dolly">
+      <button class="zoom-btn" onclick="zoomStep(0.2)" title="Dolly in" aria-label="Dolly in">+</button>
+      <span class="zoom-label" id="zoom-value">100%</span>
+      <button class="camera-btn" onclick="fitToScreen()" title="Fit graph to view">Fit</button>
+      <button class="camera-btn" onclick="resetCameraOrientation()" title="Reset camera orientation">Reset</button>
+      <button class="camera-btn focus-back-btn" id="focus-back-btn" onclick="exitFocusMode()" title="Return to previous camera" hidden>Back</button>
+    </div>
+  </section>
+
+  <div id="panel-resize" role="separator" aria-orientation="vertical" aria-label="Resize inspector"></div>
+
+  <aside id="side-panel" aria-label="Query and graph inspector">
+    <section id="query-section">
+      <div class="section-heading"><span class="eyebrow">Retrieval</span><h2>Query the graph</h2></div>
+      <div class="query-wrap">
+        <input type="text" id="query-input" placeholder="Ask the knowledge space…" autocomplete="off">
+        <button class="query-clear" id="query-clear" onclick="clearQuery()" title="Clear query" aria-label="Clear query">×</button>
+      </div>
+      <div class="query-actions">
+        <button id="query-btn" onclick="sendQuery()">Query</button>
+        <button id="reset-btn" onclick="resetQuery()">Reset</button>
+      </div>
+    </section>
+
+    <section id="response-section">
+      <div class="section-heading inline"><h2>Response</h2><span id="response-state">Ready</span></div>
       <div id="response-text">—</div>
-    </div>
-    <div id="activated-section">
-      <h3>Activated Notes</h3>
-      <ul id="activated-list"><div class="empty">No activations yet</div></ul>
-    </div>
-    <div id="new-concepts-section" hidden>
-      <h3>New Concepts</h3>
+    </section>
+
+    <section id="selection-section">
+      <div class="section-heading inline"><h2>Selection</h2><button id="clear-selection-btn" type="button" onclick="clearSelection()" hidden>Clear</button></div>
+      <div id="selection-content" class="empty-state">Select a node or edge to inspect it.</div>
+    </section>
+
+    <section id="activated-section">
+      <div class="section-heading inline"><h2>Activated notes</h2><span id="activation-count">0</span></div>
+      <ul id="activated-list"><li class="empty-state">No activations yet.</li></ul>
+    </section>
+
+    <section id="new-concepts-section" hidden>
+      <div class="section-heading inline"><h2>New concepts</h2><span class="neurogenesis-badge">Neurogenesis</span></div>
       <ul id="new-concepts-list"></ul>
-    </div>
-    <div id="stats-section">
-      <h3>Stats</h3>
+    </section>
+
+    <section id="stats-section">
+      <div class="section-heading"><h2>Session</h2></div>
       <div class="stat-row"><span>Queries processed</span><span class="val" id="stat-queries">0</span></div>
-      <div class="stat-row"><span>Last query</span><span class="val" id="stat-last">—</span></div>
+      <div class="stat-row"><span>Last query</span><span class="val truncate" id="stat-last">—</span></div>
       <div class="stat-row"><span>New concepts</span><span class="val" id="stat-concepts">0</span></div>
-    </div>
-  </div>
-</div>
-<script src="https://unpkg.com/force-graph/dist/force-graph.min.js"></script>
-<script src="/static/graph-core.js?v=edge-metrics-v1"></script>
-<script src="/static/graph-init.js?v=edge-metrics-v1"></script>
-<script src="/static/activation.js?v=graph-stability-v3"></script>
-<script src="/static/vault-selector.js?v=multi-vault"></script>
-<script src="/static/websocket.js?v=graph-stability-v3"></script>
-<script src="/static/ui-controls.js?v=edge-metrics-v1"></script>
+    </section>
+  </aside>
+</main>
+
+<script src="https://unpkg.com/3d-force-graph@1.80.0/dist/3d-force-graph.min.js" crossorigin="anonymous"></script>
+<script>
+  window.BDH3DReady = import('https://unpkg.com/three@0.180.0/build/three.module.min.js')
+    .then(module => {
+      window.THREE = module;
+      return module;
+    });
+</script>
+<script src="/static/graph-3d-utils.js?v=3d-v7"></script>
+<script src="/static/graph-core.js?v=3d-v7"></script>
+<script src="/static/graph-init.js?v=3d-v7"></script>
+<script src="/static/activation.js?v=3d-v7"></script>
+<script src="/static/vault-selector.js?v=3d-v7"></script>
+<script src="/static/websocket.js?v=3d-v7"></script>
+<script src="/static/ui-controls.js?v=3d-v7"></script>
 </body>
 </html>

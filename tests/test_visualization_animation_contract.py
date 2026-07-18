@@ -22,18 +22,38 @@ def test_query_has_one_activation_owner():
 def test_query_cannot_overlap_while_button_is_disabled():
     websocket = read_template("websocket.js")
 
-    assert "if (!query || btn.disabled) return" in websocket
+    assert "if (!query || button.disabled) return" in websocket
 
 
 def test_renderer_keeps_idle_pause_and_has_no_second_collision_loop():
     graph_init = read_template("graph-init.js")
-    graph_setup = graph_init.split("function requestGraphRedraw", 1)[0]
+    graph_core = read_template("graph-core.js")
 
-    assert ".autoPauseRedraw(false)" not in graph_setup
-    assert "let redrawRestoreTimer = null" in graph_init
-    assert "graph.autoPauseRedraw(true)" in graph_init
-    assert "const hoverActive" in graph_init
+    assert "let graphRenderPaused = false" in graph_core
+    assert "graph.pauseAnimation()" in graph_init
+    assert "graph.resumeAnimation()" in graph_init
+    assert ".onEngineStop(() => {" in graph_init
+    assert "graphLayoutActive = false" in graph_init
+    assert "setInterval(" not in graph_init
     assert "window.__collisionForceInstalled" not in graph_init
+
+
+def test_renderer_clears_paused_state_before_synchronous_resume():
+    """resumeAnimation may emit a camera change synchronously; the guard must already be open."""
+    graph_init = read_template("graph-init.js")
+    resume_body = graph_init.split("function resumeGraphRendering() {", 1)[1].split("\n}", 1)[0]
+
+    assert resume_body.index("graphRenderPaused = false") < resume_body.index("graph.resumeAnimation()")
+
+
+def test_initial_tag_legend_waits_for_force_layout_instead_of_starting_a_broken_tick():
+    graph_init = read_template("graph-init.js")
+    initial_mount = graph_init.split("if (firstGraph) {", 1)[1].split("} else if (preserveView)", 1)[0]
+
+    assert "graphLayoutActive = true" in initial_mount
+    assert "initialFitPending = true" in initial_mount
+    assert "reheatGraphLayout();" not in initial_mount
+    assert "toggleTagColors(true, false)" in graph_init
 
 
 def test_activation_invalidates_stale_animation_callbacks():
@@ -47,10 +67,13 @@ def test_activation_invalidates_stale_animation_callbacks():
 
 def test_lod_preserves_semantic_node_shapes():
     core = read_template("graph-core.js")
-    lod_block = core.split("const lod = globalScale < 0.5", 1)[1].split("ctx.fillStyle", 1)[0]
 
-    assert "semanticShape" in lod_block
-    assert "['diamond', 'hexagon', 'triangleDown']" in lod_block
+    assert "function geometryForNode(node)" in core
+    assert "node._shape === 'diamond'" in core
+    assert "node._shape === 'hexagon'" in core
+    assert "node._shape === 'triangleDown'" in core
+    assert "currentLodLevel === 'overview'" in core
+    assert "HEBBIAN_OVERVIEW_WEIGHT" in core
 
 
 def test_neurogenesis_does_not_rebuild_graph_for_each_birth_pulse():
