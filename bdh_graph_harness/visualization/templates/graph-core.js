@@ -608,7 +608,12 @@ function isCoreNodeVisible(node) {
   if (currentLodLevel !== 'overview') return true;
   if (selectedNodeId === node.id || focusedNodeId === node.id || activatedNotesById.has(node.id)) return true;
   if (isNeurogenesisNode(node)) return true;
-  return (degreeMap[node.id] || 0) >= 2;
+  // If the graph has very few edges, show all nodes — hiding by degree would erase everything.
+  const totalEdges = (fgLinks || []).length;
+  if (totalEdges === 0) return true;
+  const deg = degreeMap[node.id] || 0;
+  if (showOrphans && deg === 0) return true;
+  return deg >= 2;
 }
 
 function effectiveLinkVisibility(link, options = {}) {

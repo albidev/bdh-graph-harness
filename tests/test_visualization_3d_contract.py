@@ -326,7 +326,7 @@ def test_websocket_bootstrap_uses_rich_rest_snapshot_and_polling_fallback():
     assert "graphPollTimer = setInterval" in websocket
     assert "stopPollingFallback();" in websocket
     assert "startPollingFallback();" in websocket
-    assert "fetchGraphSnapshot({ reason: 'websocket-bootstrap'" in websocket
+    assert "fetchGraphSnapshot({ reason: 'websocket-connect'" in websocket
 
 
 def test_remote_query_response_populates_query_and_response_panel():
