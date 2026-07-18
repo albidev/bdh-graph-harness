@@ -136,7 +136,7 @@ async def test_neurogenesis_is_scoped_to_context_path(monkeypatch):
 
     assert captured == [(
         "/tmp/research", "New concept", "A definition", ["Scoped note"],
-        "query", {"neurogenesis_dir": "research-concepts"},
+        "query", {"neurogenesis_dir": "research-concepts", "source_node_ids": ["note"]},
     )]
     assert result == [{
         "id": "wiki/concepts/new-concept",
