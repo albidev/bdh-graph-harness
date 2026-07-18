@@ -77,6 +77,21 @@ def test_create_note_creates_file(temp_vault):
     assert '## Origin' not in content
 
 
+def test_create_note_persists_canonical_source_ids_without_body_links(temp_vault):
+    note_id = harness.create_note(
+        temp_vault,
+        'Source-Aware Concept',
+        'A durable concept.',
+        ['Source A'],
+        'source query',
+        source_node_ids=['vault:wiki/source-a.md', 'external:projects/demo.md'],
+    )
+    content = open(os.path.join(temp_vault, note_id + '.md'), encoding='utf-8').read()
+    assert 'activated_from_ids: ["vault:wiki/source-a.md", "external:projects/demo.md"]' in content
+    assert '[[vault:wiki/source-a.md]]' not in content
+    assert '[[external:projects/demo.md]]' not in content
+
+
 def test_create_note_does_not_overwrite(temp_vault):
     """Test that create_note does NOT overwrite existing files."""
     harness.create_note(temp_vault, 'Existing', 'First def.', [], 'q1')

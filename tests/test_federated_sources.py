@@ -122,6 +122,37 @@ def test_external_source_excludes_derived_artifacts_but_keeps_real_audits(tmp_pa
     ]
 
 
+def test_federated_builder_materializes_validated_neurogenesis_source_edges(tmp_path):
+    vault = tmp_path / "vault"
+    _write(vault / "wiki/source.md", "# Source")
+    _write(
+        vault / "wiki/newborn.md",
+        '---\nactivated_from_ids: ["vault:wiki/source.md", "vault:missing.md"]\n---\n# Newborn',
+    )
+
+    nodes, edges, unresolved = build_federated_graph(
+        [VaultMarkdownSource(str(vault))],
+        neurogenesis_source_edges_enabled=True,
+    )
+
+    source_id = "vault:wiki/source.md"
+    newborn_id = "vault:wiki/newborn.md"
+    newborn_edges = edges[newborn_id]
+    source_edges = edges[source_id]
+    assert any(
+        edge["target"] == source_id
+        and edge["type"] == "neurogenesis_source"
+        and edge["generated"] is True
+        for edge in newborn_edges
+    )
+    assert any(
+        edge["target"] == newborn_id
+        and edge["type"] == "neurogenesis_source"
+        for edge in source_edges
+    )
+    assert any(item.get("kind") == "neurogenesis_source" for item in unresolved)
+
+
 def test_counterpart_edges_are_reciprocal_without_parent_node(tmp_path):
     vault = tmp_path / "vault"
     projects = tmp_path / "projects"

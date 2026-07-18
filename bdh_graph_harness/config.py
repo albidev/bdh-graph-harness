@@ -98,6 +98,7 @@ CONFIG = {
     'consolidation_prune_dormant_nodes': True,  # actually delete stale dormant nodes
     # Interactive neurogenesis is conservative but can retain several independent durable concepts.
     'neurogenesis_max_concepts': 3,
+    'neurogenesis_source_edges_enabled': False,
     # Semantic sleep — disabled until explicitly enabled in the vault config.
     'semantic_consolidation_enabled': False,
     'semantic_consolidation_checkpoint': '.bdh-semantic-consolidation.json',

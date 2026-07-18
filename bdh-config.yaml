@@ -110,6 +110,7 @@ hebbian_min_score: 0.15  # min activation score to create a synapse (prevents sp
 # Neurogenesis
 neurogenesis_dir: concepts
 neurogenesis_enabled: true
+neurogenesis_source_edges_enabled: false # opt in after backend/UI contract verification
 
 # API server
 api_host: 0.0.0.0  # bind su tutte le interfacce (localhost + tailscale)

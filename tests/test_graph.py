@@ -48,6 +48,17 @@ def test_parse_frontmatter_empty_value():
     assert 'title' in fm
 
 
+def test_parse_json_frontmatter_list_sanitizes_source_ids():
+    fm = {'activated_from_ids': '["vault:source.md", "external:projects/demo.md", 42]'}
+    assert harness.parse_json_frontmatter_list(fm, 'activated_from_ids') == [
+        'vault:source.md',
+        'external:projects/demo.md',
+    ]
+    assert harness.parse_json_frontmatter_list(
+        {'activated_from_ids': 'not-json'}, 'activated_from_ids'
+    ) == []
+
+
 # ---------------------------------------------------------------------------
 # extract_wikilinks
 # ---------------------------------------------------------------------------
