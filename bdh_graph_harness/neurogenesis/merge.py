@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import os
 import re
+import json
 import tempfile
 from datetime import date
 from pathlib import Path
 from typing import Any
+
+from bdh_graph_harness.graph.parser import parse_frontmatter, parse_json_frontmatter_list
 
 MERGE_SIMILARITY_THRESHOLD = 0.82
 
@@ -38,6 +41,40 @@ def _update_frontmatter(content: str) -> str:
     return content
 
 
+def _merge_source_node_ids(content: str, source_node_ids: list[str] | None) -> str:
+    """Append canonical provenance IDs to frontmatter without duplicates."""
+    incoming = []
+    for source_id in source_node_ids or []:
+        if isinstance(source_id, str):
+            source_id = source_id.strip()
+            if source_id and '\n' not in source_id and '\r' not in source_id:
+                incoming.append(source_id)
+    if not incoming:
+        return content
+    existing = parse_json_frontmatter_list(
+        parse_frontmatter(content), 'activated_from_ids'
+    )
+    merged = list(existing)
+    for source_id in incoming:
+        if source_id not in merged:
+            merged.append(source_id)
+    serialized = json.dumps(merged, ensure_ascii=False)
+    replacement = f"activated_from_ids: {serialized}"
+    if re.search(r"^activated_from_ids:\s*.*$", content, flags=re.MULTILINE):
+        return re.sub(
+            r"^activated_from_ids:\s*.*$",
+            replacement,
+            content,
+            count=1,
+            flags=re.MULTILINE,
+        )
+    if content.startswith("---\n"):
+        marker = content.find("\n---", 4)
+        if marker >= 0:
+            return content[:marker] + f"\n{replacement}" + content[marker:]
+    return content
+
+
 def assimilate_evidence(
     vault_root: str | os.PathLike[str],
     node_id: str,
@@ -45,6 +82,7 @@ def assimilate_evidence(
     definition: str,
     *,
     source_notes: list[str] | None = None,
+    source_node_ids: list[str] | None = None,
     query: str = "",
 ) -> dict[str, Any]:
     """Append new evidence to an existing canonical neurogenesis note.
@@ -78,7 +116,8 @@ def assimilate_evidence(
         f"  - source: {sources}\n"
         f"  - query: {query_line}\n"
     )
-    updated = _update_frontmatter(existing.rstrip() + section + "\n")
+    updated = _merge_source_node_ids(existing.rstrip() + section + "\n", source_node_ids)
+    updated = _update_frontmatter(updated)
     if updated == existing:
         return {"status": "already_present", "node_id": node_id, "path": str(note_path)}
 

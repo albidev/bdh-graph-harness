@@ -13,6 +13,7 @@ from bdh_graph_harness.config import CONFIG, logger
 from bdh_graph_harness.graph.parser import (
     extract_note_id,
     parse_frontmatter,
+    parse_json_frontmatter_list,
     extract_text,
     extract_wikilinks,
 )
@@ -107,6 +108,7 @@ def _full_graph_build(vault_root, ignore_list=None):
                 'text': text,
                 'path': filepath,
                 'mtime': mtime,
+                'activated_from_ids': parse_json_frontmatter_list(fm, 'activated_from_ids'),
             }
 
             for target, display in links:
@@ -123,6 +125,8 @@ def _full_graph_build(vault_root, ignore_list=None):
         logger.info(f"Graph ignore: excluded {len(ignored)} nodes")
 
     _filter_self_links(nodes, edges)
+    if CONFIG.get('neurogenesis_source_edges_enabled', False):
+        _add_neurogenesis_source_edges(nodes, edges)
 
     return nodes, dict(edges)
 
@@ -140,6 +144,30 @@ def _filter_self_links(nodes, edges):
         edges[source_id] = kept
     if filtered:
         logger.info(f"Graph self-loop filter: excluded {filtered} structural self-links")
+
+
+def _add_neurogenesis_source_edges(nodes, edges):
+    """Materialize exact neurogenesis source IDs in the legacy graph path."""
+    for newborn_id, node in nodes.items():
+        for source_id in node.get('activated_from_ids', []):
+            if source_id not in nodes or source_id == newborn_id:
+                continue
+            for source, target in ((newborn_id, source_id), (source_id, newborn_id)):
+                if any(
+                    edge.get('target') == target
+                    and edge.get('type') == 'neurogenesis_source'
+                    for edge in edges[source]
+                ):
+                    continue
+                edges[source].append({
+                    'target': target,
+                    'type': 'neurogenesis_source',
+                    'relation': 'activated_from',
+                    'weight': 0.35,
+                    'explicit': False,
+                    'generated': True,
+                    'traversable': True,
+                })
 
 
 def _incremental_graph_update(vault_root, cached, cache_path, ignore_list=None):
@@ -228,11 +256,14 @@ def _incremental_graph_update(vault_root, cached, cache_path, ignore_list=None):
             'text': text,
             'path': filepath,
             'mtime': mtime,
+            'activated_from_ids': parse_json_frontmatter_list(fm, 'activated_from_ids'),
         }
 
         edges[nid] = [{'target': t, 'display': d} for t, d in links]
 
     _filter_self_links(nodes, edges)
+    if CONFIG.get('neurogenesis_source_edges_enabled', False):
+        _add_neurogenesis_source_edges(nodes, edges)
 
     print(f"   🔄 Incremental update: {len(new_notes)} new, {len(changed_notes)} changed, {len(deleted_notes)} deleted")
     logger.info(f"Graph incremental: +{len(new_notes)} ~{len(changed_notes)} -{len(deleted_notes)}")

@@ -6,6 +6,7 @@ Wikilink / frontmatter extraction utilities for Obsidian markdown notes.
 
 import os
 import re
+import json
 
 # ---------------------------------------------------------------------------
 # Regex patterns
@@ -65,6 +66,26 @@ def parse_frontmatter(content):
             key, _, val = line.partition(':')
             fm[key.strip()] = val.strip()
     return fm
+
+
+def parse_json_frontmatter_list(frontmatter, key):
+    """Return a sanitized JSON-list frontmatter value as string IDs."""
+    value = frontmatter.get(key)
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError:
+            return []
+    if not isinstance(value, list):
+        return []
+    result = []
+    for item in value:
+        if not isinstance(item, str):
+            continue
+        item = item.strip()
+        if item and '\n' not in item and '\r' not in item and item not in result:
+            result.append(item)
+    return result
 
 
 def extract_wikilinks(content):

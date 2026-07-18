@@ -16,7 +16,12 @@ from typing import Iterable
 
 from bdh_graph_harness.graph.builder import build_graph
 from bdh_graph_harness.graph.display import add_display_label
-from bdh_graph_harness.graph.parser import extract_text, extract_wikilinks, parse_frontmatter
+from bdh_graph_harness.graph.parser import (
+    extract_text,
+    extract_wikilinks,
+    parse_frontmatter,
+    parse_json_frontmatter_list,
+)
 from bdh_graph_harness.graph.sources import (
     CounterpartSpec,
     Document,
@@ -207,11 +212,48 @@ def _resolve_target(
     return None
 
 
+def _add_neurogenesis_source_edges(
+    frontmatter_by_id: dict[str, dict],
+    nodes: dict[str, dict],
+    edges: dict[str, list[dict]],
+    unresolved: list[dict],
+) -> None:
+    """Materialize exact, persisted neurogenesis provenance IDs as graph edges."""
+    for newborn_id, frontmatter in frontmatter_by_id.items():
+        for source_id in parse_json_frontmatter_list(frontmatter, "activated_from_ids"):
+            if source_id not in nodes:
+                unresolved.append({
+                    "kind": "neurogenesis_source",
+                    "source": newborn_id,
+                    "target": source_id,
+                })
+                continue
+            if source_id == newborn_id:
+                continue
+            for source, target in ((newborn_id, source_id), (source_id, newborn_id)):
+                if any(
+                    edge.get("target") == target
+                    and edge.get("type") == "neurogenesis_source"
+                    for edge in edges[source]
+                ):
+                    continue
+                edges[source].append({
+                    "target": target,
+                    "type": "neurogenesis_source",
+                    "relation": "activated_from",
+                    "weight": 0.35,
+                    "explicit": False,
+                    "generated": True,
+                    "traversable": True,
+                })
+
+
 def build_federated_graph(
     sources: Iterable[DocumentSource],
     *,
     graph_ignore: Iterable[str] | None = None,
     counterparts: Iterable[CounterpartSpec] | None = None,
+    neurogenesis_source_edges_enabled: bool = True,
 ) -> tuple[dict, dict, list[dict]]:
     """Build a federated graph from multiple Markdown sources.
 
@@ -232,10 +274,12 @@ def build_federated_graph(
     nodes: dict[str, dict] = {}
     by_source_path: dict[tuple[str, str, str], str] = {}
     raw_links: dict[str, list[tuple[str, str]]] = {}
+    frontmatter_by_id: dict[str, dict] = {}
 
     for document in documents:
         frontmatter = parse_frontmatter(document.content)
         node_id = document.id
+        frontmatter_by_id[node_id] = frontmatter
         nodes[node_id] = {
             "id": node_id,
             "title": frontmatter.get(
@@ -282,6 +326,14 @@ def build_federated_graph(
                 "weight": 1.0,
                 "explicit": bool(_normalise_explicit_target(target)),
             })
+
+    if neurogenesis_source_edges_enabled:
+        _add_neurogenesis_source_edges(
+            frontmatter_by_id,
+            nodes,
+            edges,
+            unresolved,
+        )
 
     _add_project_context_edges(documents, nodes, edges)
     counterpart_specs = tuple(counterparts or ())
@@ -387,6 +439,9 @@ def build_configured_graph(config: dict, *, use_cache: bool = True) -> tuple[dic
             sources_from_config(config),
             graph_ignore=config.get("graph_ignore", []),
             counterparts=counterpart_specs_from_config(config),
+            neurogenesis_source_edges_enabled=config.get(
+                "neurogenesis_source_edges_enabled", False
+            ),
         )
     nodes, edges = build_graph(
         config["vault_path"],

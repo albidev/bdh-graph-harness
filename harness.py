@@ -20,7 +20,7 @@ from bdh_graph_harness.config import (
 from bdh_graph_harness.graph.parser import (
     WIKILINK_RE, FRONTMATTER_RE,
     extract_note_id, find_note_by_id,
-    parse_frontmatter, extract_wikilinks, extract_text,
+    parse_frontmatter, parse_json_frontmatter_list, extract_wikilinks, extract_text,
 )
 from bdh_graph_harness.graph.builder import (
     build_graph, _full_graph_build, _incremental_graph_update,

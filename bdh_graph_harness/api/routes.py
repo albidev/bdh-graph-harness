@@ -376,6 +376,7 @@ def run_neurogenesis(
     if config.get('neurogenesis_enabled', True):
         n = ctx.nodes
         active_titles = [n[nid]['title'] for nid in active if nid in n]
+        active_source_ids = [nid for nid in active if nid in n]
         try:
             new_concepts = extract_new_concepts(
                 response_text, query, active, n, allow_existing=True
@@ -420,6 +421,7 @@ def run_neurogenesis(
                     n[canonical_id],
                     definition,
                     source_notes=active_titles,
+                    source_node_ids=active_source_ids,
                     query=query,
                 )
                 if merged['status'] in {'merged', 'already_present'}:
@@ -440,6 +442,7 @@ def run_neurogenesis(
             new_note_id = create_note(
                 vault_root, title, definition, active_titles, query,
                 neurogenesis_dir=ctx.config.settings.get('neurogenesis_dir'),
+                source_node_ids=active_source_ids,
             )
             if new_note_id:
                 reported_id = new_note_id
