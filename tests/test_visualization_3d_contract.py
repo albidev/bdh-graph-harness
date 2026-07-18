@@ -137,7 +137,7 @@ def test_overview_edges_keep_a_visible_dark_mode_baseline():
     graph_core = (ROOT / "bdh_graph_harness/visualization/templates/graph-core.js").read_text()
 
     assert "edgeWikilink: '#8fa8c2'" in graph_core
-    assert "wikilink: 0.72" in graph_core
+    assert "wikilink: 0.50" in graph_core
     assert "hebbian: 0.46" in graph_core
     assert "phantom: 0.46" in graph_core
     assert "link.type === 'wikilink' ? 0.78 : 0.82" in graph_core
