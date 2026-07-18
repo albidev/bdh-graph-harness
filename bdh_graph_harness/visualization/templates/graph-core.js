@@ -1013,7 +1013,7 @@ function updateNodeThreeObject(node) {
       // Hebbian ratio: when highlighting a node with many Hebbian synapses, reduce per-node glow
       // to prevent the cluster from blowing out. Few synapses = more glow per node.
       const hebbianCount = countHebbianInHighlight(node);
-      const hebbianGlowRatio = hebbianCount > 0 ? Math.min(1, 4 / (hebbianCount + 2)) : 1;
+      const hebbianGlowRatio = hebbianCount > 0 ? Math.min(1, 8 / (hebbianCount + 2)) : 1;
       const focusGlow = Math.min(0.08, emphasis * 0.08) * hebbianGlowRatio;
       const baseGlow = (ambientGlow + focusGlow) * opacity;
       const glowOpacity = Math.min(1, baseGlow * glowMultiplier);
