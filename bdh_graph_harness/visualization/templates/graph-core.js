@@ -362,6 +362,12 @@ function setHoverHighlight(seedNodeIds = [], seedLinkId = null) {
   const nodeIds = new Set(seedSet);
   const linkIds = new Set(seedLinkId ? [seedLinkId] : []);
 
+  // Mark previously highlighted links as dirty (so they get restored to normal).
+  if (hoverHighlight) {
+    hoverHighlight.linkIds.forEach(id => dirtyLinks.add(id));
+    hoverHighlight.nodeIds.forEach(id => dirtyNodes.add(id));
+  }
+
   data.links.forEach(link => {
     if (!effectiveLinkVisibility(link, { ignoreHighlight: true })) return;
     if (link.type === 'phantom') return;
@@ -371,6 +377,9 @@ function setHoverHighlight(seedNodeIds = [], seedLinkId = null) {
       linkIds.add(link._id);
       nodeIds.add(source);
       nodeIds.add(target);
+      dirtyLinks.add(link._id);
+      dirtyNodes.add(source);
+      dirtyNodes.add(target);
     }
   });
 
@@ -403,6 +412,8 @@ function scheduleClearHoverHighlight() {
 function clearHoverHighlight() {
   cancelScheduledHoverClear();
   if (!hoverHighlight) return;
+  hoverHighlight.linkIds.forEach(id => dirtyLinks.add(id));
+  hoverHighlight.nodeIds.forEach(id => dirtyNodes.add(id));
   hoverHighlight = null;
   hoverHighlightKey = null;
   scheduleLabelUpdate();
@@ -447,6 +458,11 @@ function setPathHighlight(pathIds = []) {
 
 function setNeighborhoodFocus(nodeId) {
   if (!graph || !nodeId) return;
+  // Mark previously focused links/nodes as dirty.
+  if (focusHighlight) {
+    focusHighlight.linkIds.forEach(id => dirtyLinks.add(id));
+    focusHighlight.nodeIds.forEach(id => dirtyNodes.add(id));
+  }
   const nodeIds = new Set([nodeId]);
   const linkIds = new Set();
   graph.graphData().links.forEach(link => {
@@ -457,6 +473,9 @@ function setNeighborhoodFocus(nodeId) {
       nodeIds.add(source);
       nodeIds.add(target);
       linkIds.add(link._id);
+      dirtyLinks.add(link._id);
+      dirtyNodes.add(source);
+      dirtyNodes.add(target);
     }
   });
   focusHighlight = { nodeIds, linkIds, hoverNodeId: nodeId, hoverLinkId: null };
@@ -949,6 +968,26 @@ function updateVisibleLabels() {
   });
 }
 
+// --- Performance: geometry cache (A) + dirty-set sync (C) ---
+const cylinderGeometryCache = new Map();
+function getCachedCylinderGeometry(radius, segments) {
+  const key = `${radius.toFixed(2)}|${segments}`;
+  if (!cylinderGeometryCache.has(key)) {
+    cylinderGeometryCache.set(key, new window.THREE.CylinderGeometry(radius, radius, 1, segments, 1, false));
+  }
+  return cylinderGeometryCache.get(key);
+}
+
+const dirtyLinks = new Set();
+const dirtyNodes = new Set();
+
+function markLinkDirty(link) {
+  if (link && link._id) dirtyLinks.add(link._id);
+}
+function markNodeDirty(node) {
+  if (node && node.id) dirtyNodes.add(node.id);
+}
+
 const perLinkMaterials = new Map();
 
 function linkMaterial(link) {
@@ -983,7 +1022,7 @@ function createDashedLinkObject(link) {
   if (!link._dashes) return null;
   const highlighted = hoverEdgeId === link._id || isHighlightedLink(link);
   const radius = highlighted ? 5.4 : Math.max(1.24, Math.min(2.4, linkDisplayWidth(link) * 0.38));
-  const geometry = new window.THREE.CylinderGeometry(1, 1, 1, 12, 1, false);
+  const geometry = getCachedCylinderGeometry(radius, 12);
   const material = new window.THREE.MeshBasicMaterial({
     color: linkDisplayColor(link),
     transparent: true,
@@ -992,7 +1031,7 @@ function createDashedLinkObject(link) {
     blending: window.THREE.NormalBlending,
   });
   const filament = new window.THREE.Mesh(geometry, material);
-  filament.scale.set(radius, 1, radius);
+  filament.scale.set(1, 1, 1);
   filament.frustumCulled = false;
   link._threeLinkObject = filament;
   return filament;
@@ -1006,8 +1045,12 @@ function updateDashedLinkPosition(object, coordinates, link) {
   const length = Math.max(0.001, direction.length());
   const highlighted = hoverEdgeId === link._id || isHighlightedLink(link);
   const radius = highlighted ? 5.4 : Math.max(1.24, Math.min(2.4, linkDisplayWidth(link) * 0.38));
+  const cached = getCachedCylinderGeometry(radius, 12);
+  if (object.geometry !== cached) {
+    object.geometry = cached;
+  }
   object.position.copy(start.clone().add(end).multiplyScalar(0.5));
-  object.scale.set(radius, length, radius);
+  object.scale.set(1, length, 1);
   object.quaternion.setFromUnitVectors(new window.THREE.Vector3(0, 1, 0), direction.normalize());
   return true;
 }
@@ -1020,8 +1063,8 @@ function syncDashedLinkVisual(link) {
   object.material.opacity = linkDisplayOpacity(link);
   const highlighted = hoverEdgeId === link._id || isHighlightedLink(link);
   const radius = highlighted ? 5.4 : Math.max(1.24, Math.min(2.4, linkDisplayWidth(link) * 0.38));
-  object.scale.x = radius;
-  object.scale.z = radius;
+  const cached = getCachedCylinderGeometry(radius, 12);
+  if (object.geometry !== cached) object.geometry = cached;
   object.material.needsUpdate = true;
 }
 
@@ -1034,33 +1077,42 @@ function syncRegularLinkVisual(link) {
   object.material.color.set(linkDisplayColor(link));
   object.material.opacity = linkDisplayOpacity(link);
   object.material.needsUpdate = true;
-  if (object.geometry && typeof object.geometry.dispose === 'function') {
+  // Use cached geometry for the current width — no dispose per frame.
+  if (object.geometry && object.geometry.parameters) {
     const currentWidth = linkDisplayWidth(link);
-    if (object.geometry.parameters && object.geometry.parameters.radius !== currentWidth) {
-      object.geometry.dispose();
-      object.geometry = new window.THREE.CylinderGeometry(currentWidth, currentWidth, 1, 12, 1, false);
-    }
+    const cached = getCachedCylinderGeometry(currentWidth, currentLodLevel === 'overview' ? 8 : 12);
+    if (object.geometry !== cached) object.geometry = cached;
   }
 }
 
+let redrawScheduled = false;
 function syncThreeVisualState() {
   if (!graph || !window.THREE) return;
-  const data = graph.graphData();
-  graph
-    .nodeVisibility(isCoreNodeVisible)
-    .linkVisibility(effectiveLinkVisibility)
-    .linkMaterial(linkMaterial)
-    .linkWidth(linkDisplayWidth)
-    .linkDirectionalParticles(hoverAwareParticles)
-    .linkDirectionalParticleSpeed(particleSpeed)
-    .linkDirectionalParticleWidth(hoverAwareParticleWidth)
-    .linkDirectionalParticleColor(particleColor);
-  graph.refresh();
-  // Apply per-link visual state AFTER refresh so it survives object recreation.
-  data.nodes.forEach(updateNodeThreeObject);
-  data.links.forEach(syncDashedLinkVisual);
-  data.links.forEach(syncRegularLinkVisual);
-  scheduleLabelUpdate();
+  if (redrawScheduled) return;
+  redrawScheduled = true;
+  requestAnimationFrame(() => {
+    redrawScheduled = false;
+    const data = graph.graphData();
+    graph
+      .nodeVisibility(isCoreNodeVisible)
+      .linkVisibility(effectiveLinkVisibility)
+      .linkMaterial(linkMaterial)
+      .linkWidth(linkDisplayWidth)
+      .linkDirectionalParticles(hoverAwareParticles)
+      .linkDirectionalParticleSpeed(particleSpeed)
+      .linkDirectionalParticleWidth(hoverAwareParticleWidth)
+      .linkDirectionalParticleColor(particleColor);
+    graph.refresh();
+    // Only sync dirty links (C) — most hover/highlight changes touch 1-20 links, not all 700+.
+    const linksToSync = dirtyLinks.size > 0 ? data.links.filter(l => dirtyLinks.has(l._id)) : data.links;
+    const nodesToSync = dirtyNodes.size > 0 ? data.nodes.filter(n => dirtyNodes.has(n.id)) : data.nodes;
+    nodesToSync.forEach(updateNodeThreeObject);
+    linksToSync.forEach(syncDashedLinkVisual);
+    linksToSync.forEach(syncRegularLinkVisual);
+    dirtyLinks.clear();
+    dirtyNodes.clear();
+    scheduleLabelUpdate();
+  });
 }
 
 // ============================================================================
