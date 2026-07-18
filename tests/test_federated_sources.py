@@ -104,6 +104,24 @@ def test_federated_builder_drops_resolved_self_wikilinks(tmp_path):
     assert unresolved == []
 
 
+def test_external_source_excludes_derived_artifacts_but_keeps_real_audits(tmp_path):
+    projects = tmp_path / "projects"
+    _write(projects / "demo/README.md", "# Demo")
+    _write(projects / "demo/test-results/error-context.md", "# Test output")
+    _write(projects / "demo/coverage/summary.md", "# Coverage output")
+    _write(projects / "demo/playwright-report/report.md", "# Browser report")
+    _write(projects / "demo/htmlcov/index.md", "# HTML coverage")
+    _write(projects / "demo/docs/audits/real-audit.md", "# Real audit")
+
+    source = ExternalMarkdownSource(str(projects), source_id="projects")
+    scanned = [document.relative_path for document in source.scan()]
+
+    assert scanned == [
+        "demo/README.md",
+        "demo/docs/audits/real-audit.md",
+    ]
+
+
 def test_counterpart_edges_are_reciprocal_without_parent_node(tmp_path):
     vault = tmp_path / "vault"
     projects = tmp_path / "projects"

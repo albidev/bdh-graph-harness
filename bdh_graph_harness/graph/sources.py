@@ -29,6 +29,13 @@ DEFAULT_EXTERNAL_EXCLUDES = (
     "**/target/**",
     # Graphify outputs are derived artifacts, not source knowledge.
     "**/graphify-out/**",
+    # Test/build/coverage reports are derived artifacts, not source knowledge.
+    "**/test-results/**",
+    "**/coverage/**",
+    "**/playwright-report/**",
+    "**/htmlcov/**",
+    "**/.next/**",
+    "**/.cache/**",
 )
 
 
