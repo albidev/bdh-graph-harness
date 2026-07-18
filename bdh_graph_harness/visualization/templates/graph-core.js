@@ -467,6 +467,14 @@ function setNeighborhoodFocus(nodeId) {
 // ============================================================================
 // Link LOD and visual state
 // ============================================================================
+function isCoreNodeVisible(node) {
+  if (!node || node._hidden) return false;
+  if (currentLodLevel !== 'overview') return true;
+  if (selectedNodeId === node.id || focusedNodeId === node.id || activatedNotesById.has(node.id)) return true;
+  if (isNeurogenesisNode(node)) return true;
+  return (degreeMap[node.id] || 0) >= 2;
+}
+
 function effectiveLinkVisibility(link, options = {}) {
   if (!link || link._visible === false) return false;
   if (linkActivationVisible.get(linkKey(link)) === false) return false;
@@ -474,6 +482,11 @@ function effectiveLinkVisibility(link, options = {}) {
 
   const highlighted = !options.ignoreHighlight && isHighlightedLink(link);
   if (highlighted) return true;
+  if (currentLodLevel === 'overview') {
+    const source = nodeDataMap[linkEndpointId(link.source)] || {};
+    const target = nodeDataMap[linkEndpointId(link.target)] || {};
+    if (!isCoreNodeVisible(source) || !isCoreNodeVisible(target)) return false;
+  }
   if (currentLodLevel === 'overview' && link.type === 'hebbian') {
     return (link.weight || 0) >= Math.max(hebbianThreshold, HEBBIAN_OVERVIEW_WEIGHT);
   }
@@ -997,6 +1010,7 @@ function syncThreeVisualState() {
   data.nodes.forEach(updateNodeThreeObject);
   data.links.forEach(syncDashedLinkVisual);
   graph
+    .nodeVisibility(isCoreNodeVisible)
     .linkVisibility(effectiveLinkVisibility)
     .linkMaterial(linkMaterial)
     .linkWidth(linkDisplayWidth)

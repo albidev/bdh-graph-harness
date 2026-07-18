@@ -399,7 +399,7 @@ function createGraphInstance() {
     .showNavInfo(false)
     .nodeId('id')
     .nodeLabel(() => null)
-    .nodeVisibility(node => !node._hidden)
+    .nodeVisibility(isCoreNodeVisible)
     .nodeThreeObject(createNodeThreeObject)
     .nodeThreeObjectExtend(false)
     .linkSource('source')
@@ -741,20 +741,30 @@ function initialCameraFit() {
   graph.zoomToFit(0, 72);
   setTimeout(() => {
     if (!graph) return;
+    // First fit the full topology, then refit the visible neural core. This
+    // keeps overview composition dense instead of centering on orphan tails.
+    currentLodLevel = 'overview';
+    syncThreeVisualState();
+    graph.zoomToFit(220, 108);
+    setTimeout(() => finalizeInitialCameraFit(), 240);
+  }, 80);
+}
+
+function finalizeInitialCameraFit() {
+    if (!graph) return;
     const camera = graph.cameraPosition();
     const target = graph.controls().target || { x: 0, y: 0, z: 0 };
     fitCameraDistance = Math.max(1, Math.hypot(camera.x - target.x, camera.y - target.y, camera.z - target.z));
     updateSceneFog(fitCameraDistance);
     updateNodeWorldScale(fitCameraDistance, false);
     currentViewScale = 1;
-    currentLodLevel = 'balanced';
+    currentLodLevel = 'overview';
     syncThreeVisualState();
     if (restoredZoom != null && typeof zoomTo === 'function') zoomTo(restoredZoom, false);
     else syncZoomUI(false);
     updateSceneModeUI();
     scheduleLabelUpdate();
     markGraphActive(1200);
-  }, 80);
 }
 
 function updateGraphStats(values) {

@@ -191,6 +191,9 @@ def test_neural_cosmetics_keep_particles_and_install_bloom_on_native_composer():
     assert "organicLinkCurvature" in core
     assert ".linkCurveRotation(organicLinkRotation)" in graph_init
     assert "new window.THREE.MeshBasicMaterial(options)" in core
+    assert "function isCoreNodeVisible(node)" in core
+    assert ".nodeVisibility(isCoreNodeVisible)" in graph_init
+    assert "graph.zoomToFit(220, 108)" in graph_init
 
 
 def test_pointer_exit_clears_tooltips_and_desktop_rendering_uses_antialiasing_budget():
@@ -243,12 +246,15 @@ def test_initial_graph_mount_does_not_reheat_before_force_layout_exists():
     assert "graph.getGraphBbox()" in graph_init
 
 
-def test_initial_fit_enters_balanced_lod_instead_of_staying_artificially_dim():
+def test_initial_fit_centers_the_visible_core_in_overview_lod():
     graph_init = (ROOT / "bdh_graph_harness/visualization/templates/graph-init.js").read_text()
-    initial_fit = graph_init.split("function initialCameraFit() {", 1)[1].split("\n}", 1)[0]
+    initial_fit = graph_init.split("function initialCameraFit() {", 1)[1].split("\n}\n\nfunction finalizeInitialCameraFit", 1)[0]
+    final_fit = graph_init.split("function finalizeInitialCameraFit() {", 1)[1].split("\n}\n\nfunction updateGraphStats", 1)[0]
 
-    assert "currentLodLevel = 'balanced';" in initial_fit
-    assert initial_fit.index("currentLodLevel = 'balanced';") < initial_fit.index("syncThreeVisualState();")
+    assert "currentLodLevel = 'overview';" in initial_fit
+    assert "graph.zoomToFit(220, 108);" in initial_fit
+    assert "currentLodLevel = 'overview';" in final_fit
+    assert final_fit.index("currentLodLevel = 'overview';") < final_fit.index("syncThreeVisualState();")
 
 
 def test_websocket_connects_before_renderer_promise_can_block_startup():
