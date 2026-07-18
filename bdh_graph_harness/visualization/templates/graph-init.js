@@ -891,6 +891,13 @@ function hideGraphLoader() {
   const controlsCollapsed = localStorage.getItem('bdh-controls-collapsed-v1') === 'true';
   document.body.classList.toggle('panel-collapsed', panelCollapsed);
   document.body.classList.toggle('controls-collapsed', controlsCollapsed);
+  // Restore panel width
+  const sidePanel = document.getElementById('side-panel');
+  if (sidePanel) {
+    const savedWidth = Math.max(22, Math.min(48, parseFloat(localStorage.getItem('bdh-panel-width-v2')) || 38));
+    sidePanel.style.width = savedWidth + '%';
+    requestAnimationFrame(() => { if (typeof resizeGraphToContainer === 'function') resizeGraphToContainer(); });
+  }
 }
 
 function retryVisualization() {

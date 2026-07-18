@@ -487,12 +487,16 @@ function setHoverEdge(linkId) {
   cancelScheduledHoverClear();
   clearHoverHighlight();
   if (hoverEdgeId === linkId) return;
+  // Mark previous hovered link as dirty so it gets restored to normal.
+  if (hoverEdgeId) dirtyLinks.add(hoverEdgeId);
   hoverEdgeId = linkId;
+  dirtyLinks.add(linkId);
   requestGraphRedraw();
 }
 
 function clearHoverEdge(redraw = true) {
   if (!hoverEdgeId) return;
+  dirtyLinks.add(hoverEdgeId);
   hoverEdgeId = null;
   if (redraw) requestGraphRedraw();
 }
