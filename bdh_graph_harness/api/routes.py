@@ -293,12 +293,22 @@ async def _run_attention_and_plasticity_unlocked(
         for note_id, score in sorted(active.items(), key=lambda x: -x[1]):
             node = n.get(note_id)
             detail = activation_details.get(note_id, {})
-            activated_notes.append({
+            note_payload = {
                 'id': note_id,
                 'title': node['title'] if node else note_id,
                 'score': round(score, 4),
                 **{key: value for key, value in detail.items() if key != 'id'},
-            })
+            }
+            if node and node.get('display_label'):
+                note_payload['display_label'] = node.get('display_label', node.get('title', note_id))
+            if node and node.get('path'):
+                note_payload['path'] = node.get('path', '')
+                note_payload['relative_path'] = node.get('relative_path', node.get('path', ''))
+            if node and node.get('source_type'):
+                note_payload['source_type'] = node.get('source_type', 'vault')
+            if node and node.get('source_id'):
+                note_payload['source_id'] = node.get('source_id', 'vault')
+            activated_notes.append(note_payload)
 
     # Online plasticity: Hebbian update immediately after attention
     updated_keys = set()
@@ -533,6 +543,7 @@ async def api_query(request, app_state: dict, ws_clients: set) -> web.Response:
         'vault_id': ctx.config.id,
         'query': query,
         'response': response_text,
+        'activated_notes': activated_notes,
         'new_concepts': new_concepts_list,
         'routing': routing,
         'queries_processed': ctx.state.get('queries', 0),

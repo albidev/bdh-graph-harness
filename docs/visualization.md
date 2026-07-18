@@ -56,13 +56,28 @@ Each activated note now carries both its final activation score and its role in 
 
 The side panel labels seeds and graph neighbors separately. This avoids presenting a directly retrieved note and a hop-2 contextual neighbor as if they had the same evidence.
 
+### Retrieval lens and evidence status
+
+Every query can switch the scene into a reversible **Retrieval lens** without replacing the full graph dataset:
+
+- keeps the top activated notes and one structural hop as the visible query context;
+- hides orphan and phantom noise from the query composition while preserving the full graph behind the lens;
+- fits the camera to the visible evidence subgraph;
+- reports `Direct evidence`, `Weak contextual evidence`, `Evidence below confidence threshold`, or `No direct evidence`;
+- shows the retrieved count, top retrieval score, missing evidence, note path, source, and the next available action;
+- `Full graph` restores the unrestricted topology.
+
+The evidence status is deliberately not a probability. Retrieval scores are surfaced as scores, not dressed up as confidence claims the model cannot support.
+
 ### Viewport management
 
 - **Camera fit** — graph camera fits on first load after `getGraphBbox()` exposes real rendered bounds; fog density and node world scale adapt to the fitted camera distance
+- **Fit baseline** — `Fit` resets the camera-distance baseline and invalidates stale persisted zoom, so a previous `255%` manual zoom cannot become the new fit reference after reload or resize
 - **Camera-preserving updates** — `setGraphDataPreservingView` saves and restores camera position, target, orientation, and all three spatial dimensions across graph rebuilds
 - **Safe structural updates** — empty or malformed node datasets are ignored instead of clearing the live graph; activation events received before graph initialization are ignored safely
 - **Node drag** — nodes can be repositioned by dragging in 3D space
 - **LOD** — camera-distance level of detail applies to weak Hebbian edges, opacity, width, and label visibility
+- **Minimap** — a small 2D topology overview shows the currently visible nodes and edge families without competing with the 3D scene
 
 ## Controls
 
@@ -74,12 +89,15 @@ The side panel labels seeds and graph neighbors separately. This avoids presenti
 | **Direct-only** toggle | Show only wikilink edges |
 | **Counterpart** toggle | Show/hide reciprocal vault ↔ external project-anchor edges |
 | **Phantom** toggle | Show/hide semantic similarity edges |
-| **Hebbian threshold** slider | Minimum weight for Hebbian edges to show (0–1, default 0.3) |
+| **Hebbian threshold** slider | Minimum weight for Hebbian edges to show (0–1, default 0.42) |
 | **Neurogenesis source** toggle | Show/hide generated `neurogenesis_source` edges |
 | **Spacing** slider | Network spacing — distance between nodes |
 | **Edge length** slider | Edge length multiplier |
 | **Query bar** | Type a query and press Enter to run retrieval + Hebbian update + LLM response |
 | **Stats counters** | Live neuron, synapse, and Hebbian counts — update from server truth after each query |
+| **View preset** | `Clean`, `Evidence`, `Full neural`, or `Debug` atmosphere/filter presets |
+| **Retrieval lens** | Query-focused evidence subgraph; reversible with `Full graph` |
+| **Minimap** | Compact topology overview for the current visible graph |
 
 Slider values are persisted in `localStorage` and restored on page refresh.
 

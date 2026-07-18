@@ -219,9 +219,9 @@ def test_neural_cosmetics_keep_particles_and_install_bloom_on_native_composer():
     assert "edgeCurvature: 'bdh-graph-edge-curvature-v1'" in core
     assert "const perLinkMaterials = new Map();" in core
     assert "perLinkMaterials.set(id, material);" in core
-    assert "bloomPass.threshold = 0.78" in core
-    assert "bloomPass.strength = 1.15" in core
-    assert "bloomPass.radius = 0.82" in core
+    assert "bloomPass.threshold = 0.42" in core
+    assert "bloomPass.strength = 1.35" in core
+    assert "bloomPass.radius = 0.72" in core
     assert "isAmbientFlowLink(link)) return Math.round(particleConfig.ambientParticles" in core
     assert "scheduleBloomInstall();" in graph_init
     assert "ambientThreshold: 0.28" in core
@@ -369,3 +369,63 @@ def test_ui_groups_controls_around_a_graph_first_scene_and_mobile_tabs():
     assert "--scene-bg: #070a0f" in styles
     assert "#graph-area" in styles
     assert "prefers-reduced-motion: reduce" in styles
+
+
+def test_retrieval_panel_exposes_grounding_status_and_next_actions():
+    html = (ROOT / "bdh_graph_harness/visualization/templates/index.html").read_text()
+    websocket = (ROOT / "bdh_graph_harness/visualization/templates/websocket.js").read_text()
+    styles = (ROOT / "bdh_graph_harness/visualization/templates/styles.css").read_text()
+
+    for element_id in [
+        "retrieval-status",
+        "retrieval-found",
+        "retrieval-missing",
+        "retrieval-actions",
+    ]:
+        assert f'id="{element_id}"' in html
+    assert "function renderRetrievalDiagnostics(" in websocket
+    assert "applyRetrievalLens(" in websocket
+    assert "#retrieval-status" in styles
+
+
+def test_query_lens_is_reversible_and_does_not_destroy_full_graph_state():
+    controls = (ROOT / "bdh_graph_harness/visualization/templates/ui-controls.js").read_text()
+    core = (ROOT / "bdh_graph_harness/visualization/templates/graph-core.js").read_text()
+
+    assert "const QUERY_LENS_DEFAULTS" in controls
+    assert "function applyRetrievalLens(" in controls
+    assert "function restoreFullGraphView(" in controls
+    assert "queryLensActive" in core
+    assert "retrievalVisibleNodeIds" in core
+
+
+def test_fit_resets_camera_baseline_before_restoring_persisted_zoom():
+    controls = (ROOT / "bdh_graph_harness/visualization/templates/ui-controls.js").read_text()
+    graph_init = (ROOT / "bdh_graph_harness/visualization/templates/graph-init.js").read_text()
+
+    assert "function resetCameraFitBaseline(" in controls
+    assert "fitCameraDistance = null" in controls
+    assert "resetCameraFitBaseline();" in controls
+    assert "restoredZoom = null" in graph_init
+
+
+def test_activation_payload_contains_note_provenance_for_evidence_cards():
+    routes = (ROOT / "bdh_graph_harness/api/routes.py").read_text()
+
+    assert "note_payload['path'] = node.get('path', '')" in routes
+    assert "note_payload['display_label'] = node.get('display_label', node.get('title', note_id))" in routes
+    assert "note_payload['source_type'] = node.get('source_type', 'vault')" in routes
+
+
+def test_visualization_presets_and_minimap_are_available_without_replacing_renderer():
+    html = (ROOT / "bdh_graph_harness/visualization/templates/index.html").read_text()
+    controls = (ROOT / "bdh_graph_harness/visualization/templates/ui-controls.js").read_text()
+    graph_init = (ROOT / "bdh_graph_harness/visualization/templates/graph-init.js").read_text()
+    styles = (ROOT / "bdh_graph_harness/visualization/templates/styles.css").read_text()
+
+    assert 'id="view-preset"' in html
+    assert 'id="graph-minimap"' in html
+    assert "function applyVisualizationPreset(" in controls
+    assert "function updateGraphMinimap(" in graph_init
+    assert "#graph-minimap" in styles
+    assert "setSourceFilter('all')" not in controls.split("function applyVisualizationPreset(", 1)[-1].split("\n}", 1)[0]

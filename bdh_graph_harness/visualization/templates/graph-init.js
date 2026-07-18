@@ -815,6 +815,7 @@ function finalizeInitialCameraFit() {
     const camera = graph.cameraPosition();
     const target = graph.controls().target || { x: 0, y: 0, z: 0 };
     fitCameraDistance = Math.max(1, Math.hypot(camera.x - target.x, camera.y - target.y, camera.z - target.z));
+    restoredZoom = null;
     updateSceneFog(fitCameraDistance);
     updateNodeWorldScale(fitCameraDistance, false);
     currentViewScale = 1;
@@ -838,6 +839,7 @@ function updateGraphStats(values) {
   setText('stat-hebbian', values.hebbian);
   setText('stat-dormant-count', values.dormant);
   setText('stat-phantom-count', values.phantom);
+  setText('view-stats', `${values.visibleNodes ?? values.nodes} nodes · ${values.visibleEdges ?? values.structural} edges visible`);
   const dormant = document.getElementById('stat-dormant');
   const phantom = document.getElementById('stat-phantom');
   if (dormant) dormant.hidden = !(values.dormant > 0);
@@ -847,8 +849,74 @@ function updateGraphStats(values) {
 function updateSceneModeUI() {
   const cameraMode = document.getElementById('camera-mode');
   const lodState = document.getElementById('lod-state');
-  if (cameraMode) cameraMode.textContent = focusMode ? 'Focus mode' : 'Free exploration';
-  if (lodState) lodState.textContent = `${currentLodLevel[0].toUpperCase()}${currentLodLevel.slice(1)} LOD`;
+  if (cameraMode) cameraMode.textContent = queryLensActive ? 'Retrieval lens' : focusMode ? 'Focus mode' : 'Free exploration';
+  if (lodState) lodState.textContent = queryLensActive
+    ? `${retrievalVisibleNodeIds ? retrievalVisibleNodeIds.size : 0} nodes · query context`
+    : `${currentLodLevel[0].toUpperCase()}${currentLodLevel.slice(1)} LOD`;
+  if (graph) {
+    const data = graph.graphData();
+    const visibleNodes = queryLensActive && retrievalVisibleNodeIds
+      ? retrievalVisibleNodeIds.size
+      : data.nodes.filter(isCoreNodeVisible).length;
+    const visibleEdges = data.links.filter(link => effectiveLinkVisibility(link)).length;
+    const viewStats = document.getElementById('view-stats');
+    if (viewStats) viewStats.textContent = `${visibleNodes} nodes · ${visibleEdges} edges visible`;
+    updateGraphMinimap();
+  }
+}
+
+function updateGraphMinimap() {
+  const canvas = document.getElementById('graph-minimap-canvas');
+  if (!canvas || !graph) return;
+  const context = canvas.getContext('2d');
+  if (!context) return;
+  const data = graph.graphData();
+  const width = canvas.width;
+  const height = canvas.height;
+  context.clearRect(0, 0, width, height);
+  context.fillStyle = 'rgba(7,10,15,0.82)';
+  context.fillRect(0, 0, width, height);
+
+  const nodes = data.nodes.filter(node => isCoreNodeVisible(node) && Number.isFinite(node.x) && Number.isFinite(node.z));
+  if (!nodes.length) return;
+  let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+  nodes.forEach(node => {
+    minX = Math.min(minX, node.x); maxX = Math.max(maxX, node.x);
+    minZ = Math.min(minZ, node.z); maxZ = Math.max(maxZ, node.z);
+  });
+  const spanX = Math.max(1, maxX - minX);
+  const spanZ = Math.max(1, maxZ - minZ);
+  const padding = 10;
+  const project = node => ({
+    x: padding + ((node.x - minX) / spanX) * (width - padding * 2),
+    y: padding + ((node.z - minZ) / spanZ) * (height - padding * 2),
+  });
+  const nodeById = new Map(nodes.map(node => [node.id, node]));
+  context.lineWidth = 0.55;
+  data.links.forEach(link => {
+    if (!effectiveLinkVisibility(link)) return;
+    const source = nodeById.get(linkEndpointId(link.source));
+    const target = nodeById.get(linkEndpointId(link.target));
+    if (!source || !target) return;
+    const a = project(source), b = project(target);
+    context.strokeStyle = link.type === 'hebbian' ? 'rgba(168,121,255,0.52)' : link.type === 'phantom' ? 'rgba(31,111,235,0.34)' : 'rgba(143,168,194,0.24)';
+    context.beginPath();
+    context.moveTo(a.x, a.y);
+    context.lineTo(b.x, b.y);
+    context.stroke();
+  });
+  nodes.forEach(node => {
+    const point = project(node);
+    const highlight = isHighlightedNode(node) || activatedNotesById.has(node.id);
+    context.fillStyle = highlight ? '#f0d2ff' : node.color || '#6e7681';
+    context.globalAlpha = highlight ? 1 : 0.72;
+    context.beginPath();
+    context.arc(point.x, point.y, highlight ? 2.4 : 1.45, 0, Math.PI * 2);
+    context.fill();
+  });
+  context.globalAlpha = 1;
+  const mode = document.getElementById('minimap-mode');
+  if (mode) mode.textContent = queryLensActive ? 'query' : 'full';
 }
 
 function supportsWebGL() {

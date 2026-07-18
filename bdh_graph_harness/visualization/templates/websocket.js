@@ -9,6 +9,8 @@ let graphFetchInFlight = null;
 let graphPollTimer = null;
 let reconnectTimer = null;
 let resetCameraOnNextGraph = false;
+let lastRetrievalNotes = [];
+let lastRetrievalQuery = '';
 
 const GRAPH_POLL_INTERVAL_MS = 12000;
 
@@ -56,6 +58,7 @@ function sendQuery() {
         endQueryParticles();
       } else {
         if (data.response) document.getElementById('response-text').textContent = data.response;
+        renderRetrievalDiagnostics(data);
         setResponseState('Complete');
         const wsReady = activeWebSocket && activeWebSocket.readyState === WebSocket.OPEN;
         if (data.activated_notes && !wsReady) {
@@ -102,6 +105,54 @@ function renderRemoteQueryResponse(event) {
   }
   if (lastQuery) lastQuery.textContent = event.query || '—';
   setResponseState(event.error ? 'Error' : 'Complete');
+  renderRetrievalDiagnostics(event);
+}
+
+function renderRetrievalDiagnostics(payload = {}) {
+  const hasNotesPayload = Object.prototype.hasOwnProperty.call(payload, 'activated_notes');
+  const notes = hasNotesPayload
+    ? (Array.isArray(payload.activated_notes) ? payload.activated_notes : [])
+    : lastRetrievalNotes;
+  const query = payload.query || lastRetrievalQuery || '';
+  lastRetrievalNotes = notes;
+  lastRetrievalQuery = query;
+  const diagnostics = document.getElementById('retrieval-diagnostics');
+  const status = document.getElementById('retrieval-status');
+  const found = document.getElementById('retrieval-found');
+  const confidence = document.getElementById('retrieval-confidence');
+  const missing = document.getElementById('retrieval-missing');
+  const focusButton = document.getElementById('retrieval-focus-btn');
+  if (!diagnostics || !status || !found || !confidence || !missing) return;
+
+  diagnostics.hidden = false;
+  const topScore = notes.reduce((best, note) => Math.max(best, Number(note.final_score ?? note.score ?? 0)), 0);
+  const state = !notes.length ? 'no-evidence' : topScore >= 0.65 ? 'direct-evidence' : topScore >= 0.45 ? 'weak-evidence' : 'insufficient-evidence';
+  const labels = {
+    'no-evidence': 'No direct evidence',
+    'direct-evidence': 'Direct evidence found',
+    'weak-evidence': 'Weak contextual evidence',
+    'insufficient-evidence': 'Evidence below confidence threshold',
+  };
+  status.textContent = labels[state];
+  status.dataset.state = state;
+  found.textContent = notes.length ? `${notes.length} notes · top ${topScore.toFixed(3)}` : '0 notes activated';
+  confidence.textContent = notes.length ? `${Math.round(topScore * 100)}% retrieval score` : '—';
+
+  const missingItems = [];
+  const normalizedQuery = query.toLowerCase();
+  if (!notes.length || topScore < 0.65) missingItems.push('a note with a direct supporting snippet');
+  if (normalizedQuery.includes('commit')) missingItems.push('exact commit SHA or commit status');
+  if (normalizedQuery.includes('push')) missingItems.push('remote push result or branch state');
+  if (normalizedQuery.includes('branch')) missingItems.push('branch name and checkout state');
+  missing.textContent = missingItems.length ? missingItems.join(' · ') : 'No obvious evidence gap in the retrieved context.';
+  if (focusButton) focusButton.disabled = !notes.length;
+}
+
+function focusRetrievalEvidence() {
+  if (!lastRetrievalNotes.length) return;
+  applyRetrievalLens(lastRetrievalNotes, lastRetrievalQuery);
+  const first = lastRetrievalNotes[0];
+  if (first && typeof focusActivatedNote === 'function') focusActivatedNote(first);
 }
 
 async function fetchGraphSnapshot(options = {}) {

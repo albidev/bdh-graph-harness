@@ -24,7 +24,10 @@ function setConnectionStatus(state, label) {
 
 function setResponseState(label) {
   const state = document.getElementById('response-state');
-  if (state) state.textContent = label;
+  if (state) {
+    state.textContent = label;
+    state.dataset.state = String(label || '').toLowerCase().replace(/\s+/g, '-');
+  }
 }
 
 // ============================================================================
@@ -49,6 +52,7 @@ function setSourceFilter(value, persist = true) {
 
 function toggleOrphans(show) {
   showOrphans = Boolean(show);
+  saveControlValue(STORAGE_KEYS.orphanVisibility, showOrphans);
   const toggle = document.getElementById('orphan-toggle');
   if (toggle) toggle.checked = showOrphans;
   if (sourceGraphData) initNetwork(sourceGraphData, { preserveView: true, reheat: true });
@@ -118,10 +122,16 @@ function restoreGraphControlState() {
   const savedSourceFilter = loadControlValue(STORAGE_KEYS.sourceFilter, sourceFilter);
   if (['all', 'vault', 'external'].includes(savedSourceFilter)) sourceFilter = savedSourceFilter;
   restoredZoom = clampNumber(loadControlValue(STORAGE_KEYS.zoom, ''), 0.2, 4, null);
+  showOrphans = String(loadControlValue(STORAGE_KEYS.orphanVisibility, showOrphans)) === 'true';
+  showPhantom = String(loadControlValue(STORAGE_KEYS.phantomVisibility, showPhantom)) === 'true';
 
   // Neural atmosphere controls (7/8/9/10)
   edgeFadeStrength = clampNumber(loadControlValue(STORAGE_KEYS.edgeFade, edgeFadeStrength), 0, 0.5, 0.05);
-  fogDensity = clampNumber(loadControlValue(STORAGE_KEYS.fogDensity, fogDensity * 1000), 0, 100, 38) / 1000;
+  const storedFogDensity = Number(loadControlValue(STORAGE_KEYS.fogDensity, fogDensity * 1000));
+  const fogPercent = Number.isFinite(storedFogDensity) && storedFogDensity > 0 && storedFogDensity < 1
+    ? storedFogDensity * 1000
+    : storedFogDensity;
+  fogDensity = clampNumber(fogPercent, 0, 100, 38) / 1000;
   particleFlowIntensity = clampNumber(loadControlValue(STORAGE_KEYS.particleFlow, particleFlowIntensity), 0, 1, 0.5);
   edgeCurvatureBase = clampNumber(loadControlValue(STORAGE_KEYS.edgeCurvature, edgeCurvatureBase), 0, 1, 0.25);
 
@@ -143,10 +153,17 @@ function restoreGraphControlState() {
   if (fadeSlider) fadeSlider.value = edgeFadeStrength;
   const fogSlider = document.getElementById('fog-slider');
   if (fogSlider) fogSlider.value = Math.round(fogDensity * 1000);
+  const fogOutput = document.getElementById('fog-val');
+  if (fogOutput) fogOutput.textContent = Math.round(fogDensity * 1000);
   const flowSlider = document.getElementById('particle-flow-slider');
   if (flowSlider) flowSlider.value = Math.round(particleFlowIntensity * 100);
   const curvSlider = document.getElementById('curvature-slider');
   if (curvSlider) curvSlider.value = Math.round(edgeCurvatureBase * 100);
+
+  const orphanToggle = document.getElementById('orphan-toggle');
+  if (orphanToggle) orphanToggle.checked = showOrphans;
+  const phantomToggle = document.getElementById('phantom-toggle');
+  if (phantomToggle) phantomToggle.checked = showPhantom;
 
   syncSourceFilterUI();
 }
@@ -203,6 +220,7 @@ function applyEdgeFilters() {
 
 function togglePhantom(enabled) {
   showPhantom = Boolean(enabled);
+  saveControlValue(STORAGE_KEYS.phantomVisibility, showPhantom);
   const toggle = document.getElementById('phantom-toggle');
   if (toggle) toggle.checked = showPhantom;
   applyEdgeFilters();
@@ -215,6 +233,110 @@ function toggleEdgeType(type, button) {
     button.setAttribute('aria-pressed', String(edgeTypeVisible[type]));
   }
   applyEdgeFilters();
+}
+
+// ============================================================================
+// Retrieval lens — query-first without destroying the full neural topology
+// ============================================================================
+const QUERY_LENS_DEFAULTS = {
+  maxNodes: 140,
+  maxSeeds: 12,
+  hopLimit: 1,
+};
+
+function setRetrievalLensUI(active) {
+  document.body.classList.toggle('retrieval-lens-active', Boolean(active));
+  updateSceneModeUI();
+}
+
+function applyRetrievalLens(notes = [], query = '') {
+  if (!graph) return;
+  const ranked = [...notes]
+    .filter(note => note && note.id)
+    .sort((first, second) => Number(second.final_score ?? second.score ?? 0) - Number(first.final_score ?? first.score ?? 0));
+  if (!ranked.length) {
+    restoreFullGraphView({ fit: false });
+    return;
+  }
+
+  const seedIds = ranked.slice(0, QUERY_LENS_DEFAULTS.maxSeeds).map(note => note.id);
+  const visible = new Set(seedIds);
+  const data = graph.graphData();
+  let frontier = new Set(seedIds);
+  for (let hop = 0; hop < QUERY_LENS_DEFAULTS.hopLimit; hop += 1) {
+    const next = new Set();
+    data.links.forEach(link => {
+      const source = linkEndpointId(link.source);
+      const target = linkEndpointId(link.target);
+      if (link.type === 'phantom') return;
+      if (frontier.has(source) && !visible.has(target)) next.add(target);
+      if (frontier.has(target) && !visible.has(source)) next.add(source);
+    });
+    for (const id of next) {
+      if (visible.size >= QUERY_LENS_DEFAULTS.maxNodes) break;
+      visible.add(id);
+    }
+    frontier = next;
+    if (!frontier.size || visible.size >= QUERY_LENS_DEFAULTS.maxNodes) break;
+  }
+
+  queryLensActive = true;
+  retrievalVisibleNodeIds = visible;
+  retrievalQuery = query;
+  currentLodLevel = 'balanced';
+  setRetrievalLensUI(true);
+  initEdgeVisibility();
+  requestGraphRedraw();
+  window.setTimeout(() => {
+    if (queryLensActive) fitToScreen();
+  }, reducedMotion.matches ? 0 : 90);
+}
+
+function restoreFullGraphView(options = {}) {
+  queryLensActive = false;
+  retrievalVisibleNodeIds = null;
+  retrievalQuery = '';
+  setRetrievalLensUI(false);
+  initEdgeVisibility();
+  requestGraphRedraw();
+  if (options.fit !== false && graph) fitToScreen();
+}
+
+const VIEW_PRESETS = {
+  clean: { orphans: false, phantom: false, threshold: 0.42, fade: 0.08, fog: 24, particles: 0.28, ambient: false },
+  evidence: { orphans: false, phantom: false, threshold: 0.42, fade: 0.12, fog: 18, particles: 0.42, ambient: false },
+  'full-neural': { orphans: true, phantom: true, threshold: 0.15, fade: 0.05, fog: 25, particles: 0.7, ambient: true },
+  debug: { orphans: true, phantom: true, threshold: 0, fade: 0, fog: 0, particles: 0, ambient: false },
+};
+
+function applyVisualizationPreset(name) {
+  const preset = VIEW_PRESETS[name] || VIEW_PRESETS.clean;
+  showOrphans = preset.orphans;
+  showPhantom = preset.phantom;
+  directOnly = false;
+  saveControlValue(STORAGE_KEYS.orphanVisibility, showOrphans);
+  saveControlValue(STORAGE_KEYS.phantomVisibility, showPhantom);
+  updateHebbianThreshold(preset.threshold);
+  updateEdgeFade(preset.fade);
+  updateFogDensity(preset.fog);
+  updateParticleFlow(preset.particles);
+  toggleAmbientMotion(preset.ambient);
+  const orphanToggle = document.getElementById('orphan-toggle');
+  if (orphanToggle) orphanToggle.checked = showOrphans;
+  const phantomToggle = document.getElementById('phantom-toggle');
+  if (phantomToggle) phantomToggle.checked = showPhantom;
+  const directToggle = document.getElementById('direct-toggle');
+  if (directToggle) directToggle.checked = false;
+  if (sourceGraphData) initNetwork(sourceGraphData, { preserveView: true, reheat: true });
+  applyEdgeFilters();
+  if (name === 'evidence' && typeof lastRetrievalNotes !== 'undefined' && lastRetrievalNotes.length) {
+    applyRetrievalLens(lastRetrievalNotes, lastRetrievalQuery);
+  } else if (name !== 'evidence' && queryLensActive) {
+    restoreFullGraphView({ fit: false });
+  }
+  const select = document.getElementById('view-preset');
+  if (select) select.value = VIEW_PRESETS[name] ? name : 'clean';
+  return { name: VIEW_PRESETS[name] ? name : 'clean', ...preset };
 }
 
 function setEdgeLengthMultiplier(value, persist = true) {
@@ -282,6 +404,7 @@ function resetQuery() {
   activatedNotesById.clear();
   clearActivationState();
   endQueryParticles();
+  restoreFullGraphView({ fit: false });
   setResponseState('Ready');
   if (focusMode) exitFocusMode();
   applyEdgeFilters();
@@ -295,6 +418,14 @@ const ZOOM_MAX = 4;
 const zoomSlider = document.getElementById('zoom-slider');
 const zoomLabel = document.getElementById('zoom-value');
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+
+function resetCameraFitBaseline() {
+  fitCameraDistance = null;
+  restoredZoom = null;
+  currentViewScale = 1;
+  if (typeof syncZoomUI === 'function') syncZoomUI(false);
+}
+
 
 function syncZoomUI(persist = false) {
   const scale = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, currentViewScale || 1));
@@ -355,6 +486,7 @@ function clearFocusStateWithoutCameraRestore() {
 function fitToScreen() {
   if (!graph) return;
   clearFocusStateWithoutCameraRestore();
+  resetCameraFitBaseline();
   graph.zoomToFit(reducedMotion.matches ? 0 : 520, 72);
   setTimeout(() => {
     if (!graph) return;
@@ -363,6 +495,7 @@ function fitToScreen() {
     updateNodeWorldScale(fitCameraDistance);
     currentViewScale = 1;
     currentLodLevel = 'balanced';
+    restoredZoom = null;
     syncZoomUI(true);
     updateSceneModeUI();
     requestGraphRedraw();

@@ -34,7 +34,7 @@ function handleActivation(event) {
   // Write activation state to maps (never touch live node objects)
   currentData.nodes.forEach(node => {
     if (hasActivation) {
-      nodeActivationOpacity.set(node.id, activatedIds.has(node.id) ? 1.0 : 0.3);
+      nodeActivationOpacity.set(node.id, activatedIds.has(node.id) ? 1.0 : 0.55);
       if (node.id === seedId) {
         nodeActivationColor.set(node.id, COLORS.seed);
       } else if (activatedIds.has(node.id)) {
@@ -190,6 +190,8 @@ function handleActivation(event) {
 
   // Update side panel
   const listEl = document.getElementById('activated-list');
+  const countEl = document.getElementById('activation-count');
+  if (countEl) countEl.textContent = String(activated.length);
   listEl.innerHTML = '';
   if (activated.length === 0) {
     listEl.innerHTML = '<div class="empty">No notes activated</div>';
@@ -199,9 +201,15 @@ function handleActivation(event) {
       const role = note.role || (note.id === seedId ? 'seed' : 'graph_neighbor');
       const roleLabel = role === 'seed' ? 'seed' : 'hop ' + (note.hop ?? 1);
       li.className = role;
-      const score = Number(note.score || 0).toFixed(4);
+      const score = Number(note.final_score ?? note.score ?? 0).toFixed(4);
       const hybrid = Number(note.hybrid_score || 0).toFixed(3);
-      li.innerHTML = '<span><strong class="activation-role">' + escapeHtml(roleLabel) + '</strong> ' + escapeHtml(note.title) + '</span>' +
+      const label = note.display_label || note.title || note.id;
+      const path = note.relative_path || note.path || '';
+      const source = note.source_id || note.source_type || 'vault';
+      li.innerHTML = '<span class="activation-copy"><strong class="activation-role">' + escapeHtml(roleLabel) + '</strong> ' +
+        '<strong class="activation-title">' + escapeHtml(label) + '</strong>' +
+        (path ? '<small class="activation-path">' + escapeHtml(path) + '</small>' : '') +
+        '<small class="activation-source">' + escapeHtml(source) + '</small></span>' +
         '<span class="score" title="final ' + score + ' · hybrid ' + hybrid + '">' + score + '</span>';
       li.addEventListener('mouseenter', (evt) => showActivatedTooltip(note, evt));
       li.addEventListener('mousemove', (evt) => positionTooltip(evt));
@@ -227,6 +235,14 @@ function handleActivation(event) {
       conceptsList.appendChild(li);
     });
   }
+
+  if (typeof renderRetrievalDiagnostics === 'function') {
+    renderRetrievalDiagnostics({ ...event, query: event.query || lastRetrievalQuery, activated_notes: activated });
+  }
+  // Query lens is opt-in — do not auto-activate it on every query.
+  // The graph stays fully visible with activated nodes highlighted by opacity + bloom.
+  // Users can still click "Retrieval lens" to filter manually.
+  // if (typeof applyRetrievalLens === 'function') applyRetrievalLens(activated, event.query || lastRetrievalQuery);
 
   // Add new concept nodes (neurogenesis) with birth animation
   // Build fresh graph with new nodes — never mutate live data.
@@ -368,7 +384,9 @@ function handleActivation(event) {
 
   // Show indicator pulse
   const ind = document.getElementById('status-indicator');
-  ind.classList.add('active');
-  setTimeout(() => ind.classList.remove('active'), 1000);
+  if (ind) {
+    ind.classList.add('active');
+    setTimeout(() => ind.classList.remove('active'), 1000);
+  }
 }
 

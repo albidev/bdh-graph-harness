@@ -127,15 +127,17 @@ const TAG_COLORS = [
 ];
 
 const STORAGE_KEYS = {
-  hebbianThreshold: 'bdh-graph-hebbian-threshold-v3',
+  hebbianThreshold: 'bdh-graph-hebbian-threshold-v4',
   spacing: 'bdh-graph-spacing-v2',
   edgeLength: 'bdh-graph-edge-length-v2',
   sourceFilter: 'bdh-graph-source-filter',
-  zoom: 'bdh-graph-camera-scale-v1',
+  zoom: 'bdh-graph-camera-scale-v2',
   edgeFade: 'bdh-graph-edge-fade-v1',
   fogDensity: 'bdh-graph-fog-density-v1',
   particleFlow: 'bdh-graph-particle-flow-v1',
   edgeCurvature: 'bdh-graph-edge-curvature-v1',
+  orphanVisibility: 'bdh-graph-orphans-v1',
+  phantomVisibility: 'bdh-graph-phantom-v1',
 };
 
 function clampNumber(value, min, max, fallback) {
@@ -301,8 +303,8 @@ let orphanNodeIds = [];
 let tagColorMap = {};
 let showTagColors = true;
 let directOnly = false;
-let hebbianThreshold = 0.15;
-let showPhantom = true;
+let hebbianThreshold = 0.42;
+let showPhantom = false;
 let degreeMap = {};
 let neighborMap = {};
 let neurogenesisNodes = {};
@@ -313,7 +315,7 @@ let totalConcepts = 0;
 let edgeLengthMultiplier = 10;
 let spacingValue = 50;
 let restoredZoom = null;
-let showOrphans = true;
+let showOrphans = false;
 let sourceFilter = 'all';
 let sourceGraphData = null;
 let lastMouseEvent = { clientX: 0, clientY: 0 };
@@ -331,6 +333,9 @@ let nodeWorldScale = 1;
 let currentLodLevel = 'overview';
 let fitCameraDistance = null;
 let focusMode = null;
+let queryLensActive = false;
+let retrievalVisibleNodeIds = null;
+let retrievalQuery = '';
 let graphRenderPaused = false;
 let graphLayoutActive = false;
 let graphIdleTimer = null;
@@ -596,6 +601,7 @@ function setNeighborhoodFocus(nodeId) {
 // ============================================================================
 function isCoreNodeVisible(node) {
   if (!node || node._hidden) return false;
+  if (queryLensActive && retrievalVisibleNodeIds && !retrievalVisibleNodeIds.has(node.id)) return false;
   if (currentLodLevel !== 'overview') return true;
   if (selectedNodeId === node.id || focusedNodeId === node.id || activatedNotesById.has(node.id)) return true;
   if (isNeurogenesisNode(node)) return true;
@@ -606,6 +612,11 @@ function effectiveLinkVisibility(link, options = {}) {
   if (!link || link._visible === false) return false;
   if (linkActivationVisible.get(linkKey(link)) === false) return false;
   if (linkVisibilityState.get(linkKey(link)) === false) return false;
+  if (queryLensActive && retrievalVisibleNodeIds) {
+    const source = linkEndpointId(link.source);
+    const target = linkEndpointId(link.target);
+    if (!retrievalVisibleNodeIds.has(source) || !retrievalVisibleNodeIds.has(target)) return false;
+  }
 
   const highlighted = !options.ignoreHighlight && isHighlightedLink(link);
   if (highlighted) return true;
@@ -804,9 +815,9 @@ function installBloomPass() {
     0.68,
     0.52,
   );
-  bloomPass.threshold = 0.78;
-  bloomPass.strength = 1.15;
-  bloomPass.radius = 0.82;
+  bloomPass.threshold = 0.42;
+  bloomPass.strength = 1.35;
+  bloomPass.radius = 0.72;
   composer.addPass(bloomPass);
   if (typeof window.SMAAPass === 'function') {
     smaaPass = new window.SMAAPass(width, height);
@@ -1009,7 +1020,7 @@ function updateNodeThreeObject(node) {
     } else {
       // Uniform ambient glow creates visual density in clusters; emphasis adds focus.
       // glowMultiplier scales the whole thing from console (BDHGlow.set(2)).
-      const ambientGlow = 0.09; // light, uniform — forms "nebula" density in clusters and periphery
+      const ambientGlow = activationColor ? 0.22 : 0.09; // activated nodes glow brighter for bloom
       // Hebbian ratio: when highlighting a node with many Hebbian synapses, reduce per-node glow
       // to prevent the cluster from blowing out. Few synapses = more glow per node.
       const hebbianCount = countHebbianInHighlight(node);
@@ -1428,7 +1439,8 @@ function showActivatedTooltip(note, event) {
   ensureTooltip();
   if (!note) return;
   const role = note.role === 'seed' ? 'Seed' : 'Graph neighbor';
-  let html = `<div class="tooltip-kicker">${role}</div><strong class="tooltip-title">${escapeHtml(note.title || note.id)}</strong>`;
+  const title = note.display_label || note.title || note.id;
+  let html = `<div class="tooltip-kicker">${role} · ${escapeHtml(note.source_id || note.source_type || 'vault')}</div><strong class="tooltip-title">${escapeHtml(title)}</strong>`;
   html += '<div class="score-grid">';
   html += `<span>Final score</span><b>${Number(note.final_score ?? note.score ?? 0).toFixed(4)}</b>`;
   html += `<span>Hybrid</span><b>${Number(note.hybrid_score || 0).toFixed(4)}</b>`;
@@ -1437,6 +1449,7 @@ function showActivatedTooltip(note, event) {
   html += `<span>Hebbian boost</span><b>${Number(note.hebbian_boost || 0).toFixed(4)}</b>`;
   html += `<span>Hop</span><b>${note.hop ?? 0}</b>`;
   html += '</div>';
+  if (note.relative_path || note.path) html += `<div class="tooltip-path">${escapeHtml(note.relative_path || note.path)}</div>`;
   if (note.parent_id) html += `<div class="tooltip-path">From ${escapeHtml(note.parent_id)}</div>`;
   tooltipEl.innerHTML = html;
   tooltipEl.hidden = false;
