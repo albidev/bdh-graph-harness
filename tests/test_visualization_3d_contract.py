@@ -184,6 +184,19 @@ def test_neural_cosmetics_keep_particles_and_install_bloom_on_native_composer():
     assert "graph.scene().background = new window.THREE.Color(COLORS.bg)" in graph_init
 
 
+def test_pointer_exit_clears_tooltips_and_desktop_rendering_uses_antialiasing_budget():
+    core = (ROOT / "bdh_graph_harness/visualization/templates/graph-core.js").read_text()
+    graph_init = (ROOT / "bdh_graph_harness/visualization/templates/graph-init.js").read_text()
+
+    assert "sphere: new T.SphereGeometry(1, 20, 14)" in core
+    assert "hub: new T.IcosahedronGeometry(1, 2)" in core
+    assert ".linkResolution(constrained ? 5 : 8)" in graph_init
+    assert ".linkDirectionalParticleResolution(constrained ? 4 : 6)" in graph_init
+    assert "Math.min(window.devicePixelRatio || 1, constrained ? 1.5 : 2)" in graph_init
+    assert "area.addEventListener('pointerleave'" in graph_init
+    assert "clearHoverHighlight();\n    hideTooltip();" in graph_init
+
+
 def test_camera_model_supports_focus_restore_fit_and_orientation_reset():
     graph_init = (ROOT / "bdh_graph_harness/visualization/templates/graph-init.js").read_text()
     controls = (ROOT / "bdh_graph_harness/visualization/templates/ui-controls.js").read_text()
