@@ -173,6 +173,12 @@ def test_neural_cosmetics_keep_particles_and_install_bloom_on_native_composer():
     assert "postProcessingComposer" in core
     assert "function installBloomPass()" in core
     assert "composer.addPass(bloomPass)" in core
+    assert "new window.THREE.CylinderGeometry(1, 1, 1, 12, 1, false)" in core
+    assert "new window.THREE.MeshBasicMaterial({" in core
+    assert "new window.THREE.LineDashedMaterial" not in core
+    assert "bloomPass.threshold = 0.62" in core
+    assert "bloomPass.strength = 1.15" in core
+    assert "bloomPass.radius = 0.82" in core
     assert "if (isAmbientFlowLink(link)) return particleConfig.ambientParticles;" in core
     assert "scheduleBloomInstall();" in graph_init
     assert "ambientThreshold: 0.28" in core

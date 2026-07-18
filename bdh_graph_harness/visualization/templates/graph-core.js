@@ -660,9 +660,9 @@ function installBloomPass() {
     0.68,
     0.52,
   );
-  bloomPass.threshold = 0.78;
-  bloomPass.strength = 0.78;
-  bloomPass.radius = 0.55;
+  bloomPass.threshold = 0.62;
+  bloomPass.strength = 1.15;
+  bloomPass.radius = 0.82;
   composer.addPass(bloomPass);
   if (typeof window.SMAAPass === 'function') {
     smaaPass = new window.SMAAPass(width, height);
@@ -969,29 +969,34 @@ function linkMaterial(link) {
 
 function createDashedLinkObject(link) {
   if (!link._dashes) return null;
-  const geometry = new window.THREE.BufferGeometry();
-  geometry.setAttribute('position', new window.THREE.BufferAttribute(new Float32Array(6), 3));
-  const material = new window.THREE.LineDashedMaterial({
+  const highlighted = hoverEdgeId === link._id || isHighlightedLink(link);
+  const radius = highlighted ? 1.35 : Math.max(0.62, Math.min(1.2, linkDisplayWidth(link) * 0.38));
+  const geometry = new window.THREE.CylinderGeometry(1, 1, 1, 12, 1, false);
+  const material = new window.THREE.MeshBasicMaterial({
     color: linkDisplayColor(link),
     transparent: true,
     opacity: linkDisplayOpacity(link),
-    dashSize: link.type === 'phantom' ? 8 : 11,
-    gapSize: link.type === 'phantom' ? 6 : 5,
     depthWrite: false,
+    blending: window.THREE.NormalBlending,
   });
-  const line = new window.THREE.Line(geometry, material);
-  line.frustumCulled = false;
-  link._threeLinkObject = line;
-  return line;
+  const filament = new window.THREE.Mesh(geometry, material);
+  filament.scale.set(radius, 1, radius);
+  filament.frustumCulled = false;
+  link._threeLinkObject = filament;
+  return filament;
 }
 
 function updateDashedLinkPosition(object, coordinates, link) {
   if (!link || !link._dashes || !object || !coordinates) return false;
-  const position = object.geometry.getAttribute('position');
-  position.setXYZ(0, coordinates.start.x, coordinates.start.y, coordinates.start.z);
-  position.setXYZ(1, coordinates.end.x, coordinates.end.y, coordinates.end.z);
-  position.needsUpdate = true;
-  object.computeLineDistances();
+  const start = new window.THREE.Vector3(coordinates.start.x, coordinates.start.y, coordinates.start.z);
+  const end = new window.THREE.Vector3(coordinates.end.x, coordinates.end.y, coordinates.end.z);
+  const direction = end.clone().sub(start);
+  const length = Math.max(0.001, direction.length());
+  const highlighted = hoverEdgeId === link._id || isHighlightedLink(link);
+  const radius = highlighted ? 1.35 : Math.max(0.62, Math.min(1.2, linkDisplayWidth(link) * 0.38));
+  object.position.copy(start.clone().add(end).multiplyScalar(0.5));
+  object.scale.set(radius, length, radius);
+  object.quaternion.setFromUnitVectors(new window.THREE.Vector3(0, 1, 0), direction.normalize());
   return true;
 }
 
@@ -1001,6 +1006,10 @@ function syncDashedLinkVisual(link) {
   object.visible = effectiveLinkVisibility(link);
   object.material.color.set(linkDisplayColor(link));
   object.material.opacity = linkDisplayOpacity(link);
+  const highlighted = hoverEdgeId === link._id || isHighlightedLink(link);
+  const radius = highlighted ? 1.35 : Math.max(0.62, Math.min(1.2, linkDisplayWidth(link) * 0.38));
+  object.scale.x = radius;
+  object.scale.z = radius;
   object.material.needsUpdate = true;
 }
 
