@@ -137,9 +137,9 @@ def test_overview_edges_keep_a_visible_dark_mode_baseline():
     graph_core = (ROOT / "bdh_graph_harness/visualization/templates/graph-core.js").read_text()
 
     assert "edgeWikilink: '#6b7787'" in graph_core
-    assert "wikilink: 0.40" in graph_core
-    assert "hebbian: 0.24" in graph_core
-    assert "phantom: 0.40" in graph_core
+    assert "wikilink: 0.52" in graph_core
+    assert "hebbian: 0.32" in graph_core
+    assert "phantom: 0.46" in graph_core
     assert "link.type === 'wikilink' ? 0.78 : 0.82" in graph_core
 
 
@@ -176,6 +176,8 @@ def test_neural_cosmetics_keep_particles_and_install_bloom_on_native_composer():
     assert "scheduleBloomInstall();" in graph_init
     assert "ambientThreshold: 0.62" in core
     assert "ambientWidth: 1.6" in core
+    assert "function hasAmbientParticleFlow()" in graph_init
+    assert "|| hasAmbientParticleFlow()" in graph_init
 
 
 def test_camera_model_supports_focus_restore_fit_and_orientation_reset():
@@ -279,6 +281,6 @@ def test_ui_groups_controls_around_a_graph_first_scene_and_mobile_tabs():
     assert styles.count("@media (max-width: 768px)") == 1
     assert "body.controls-tab #control-dock" in styles
     assert "min-height: 44px" in styles
-    assert "--scene-bg: #0d1117" in styles
+    assert "--scene-bg: #070a0f" in styles
     assert "#graph-area" in styles
     assert "prefers-reduced-motion: reduce" in styles

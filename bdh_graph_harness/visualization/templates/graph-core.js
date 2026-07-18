@@ -21,18 +21,18 @@ const COLORS = {
   edgeProjectReference: '#f2cc60',
   sourceVault: '#58a6ff',
   sourceExternal: '#f0883e',
-  bg: '#0d1117',
+  bg: '#070a0f',
   surface: '#161b22',
 };
 
 const EDGE_OPACITY = {
-  wikilink: 0.40,
-  hebbian: 0.24,
-  phantom: 0.40,
-  counterpart: 0.58,
-  project_context: 0.42,
-  project_reference: 0.54,
-  neurogenesis: 0.72,
+  wikilink: 0.52,
+  hebbian: 0.32,
+  phantom: 0.46,
+  counterpart: 0.64,
+  project_context: 0.52,
+  project_reference: 0.62,
+  neurogenesis: 0.86,
 };
 
 const HEBBIAN_MIN_RENDER_WEIGHT = 0.15;
@@ -504,12 +504,19 @@ function linkDisplayWidth(link) {
   if (stateWidth != null) return Math.min(3.2, Math.max(0, stateWidth * 0.42));
   if (hoverEdgeId === link._id || isHighlightedLink(link)) return Math.max(0.8, Math.min(2.2, (link.width || 1) * 0.55));
   if (currentLodLevel === 'overview') {
-    if (link.type === 'counterpart' || link.type === 'project_reference' || link.type === 'neurogenesis') return 0.34;
-    return 0;
+    if (link.type === 'wikilink') return 0.58;
+    if (link.type === 'phantom') return 0.48;
+    if (link.type === 'hebbian') return 0.72;
+    if (link.type === 'project_context') return 0.68;
+    if (link.type === 'counterpart' || link.type === 'project_reference' || link.type === 'neurogenesis') return 1.05;
+    return 0.52;
   }
-  if (link.type === 'hebbian' && (link.weight || 0) >= 0.7) return 0.28;
-  if (link.type === 'counterpart' || link.type === 'project_reference' || link.type === 'neurogenesis') return 0.32;
-  return 0;
+  if (link.type === 'wikilink') return 0.72;
+  if (link.type === 'phantom') return 0.58;
+  if (link.type === 'hebbian') return (link.weight || 0) >= 0.7 ? 1.05 : 0.72;
+  if (link.type === 'project_context') return 0.82;
+  if (link.type === 'counterpart' || link.type === 'project_reference' || link.type === 'neurogenesis') return 1.22;
+  return 0.65;
 }
 
 function hoverAwareParticles(link) {
@@ -565,9 +572,9 @@ function installBloomPass() {
     0.68,
     0.52,
   );
-  bloomPass.threshold = 0.52;
-  bloomPass.strength = 0.95;
-  bloomPass.radius = 0.68;
+  bloomPass.threshold = 0.78;
+  bloomPass.strength = 0.78;
+  bloomPass.radius = 0.55;
   composer.addPass(bloomPass);
   return true;
 }

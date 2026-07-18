@@ -595,13 +595,18 @@ function resumeGraphRendering() {
   graph.resumeAnimation();
 }
 
+function hasAmbientParticleFlow() {
+  if (!graph || typeof isAmbientFlowLink !== 'function') return false;
+  return graph.graphData().links.some(isAmbientFlowLink);
+}
+
 function scheduleGraphIdlePause(delay = 0) {
   if (!graph) return;
   if (graphIdleTimer) clearTimeout(graphIdleTimer);
   const remaining = Math.max(delay, graphActiveUntil - performance.now(), 220);
   graphIdleTimer = setTimeout(() => {
     graphIdleTimer = null;
-    if (!graph || graphLayoutActive || performance.now() < graphActiveUntil || queryParticleMode || isHoverActive()) {
+    if (!graph || graphLayoutActive || performance.now() < graphActiveUntil || queryParticleMode || isHoverActive() || hasAmbientParticleFlow()) {
       scheduleGraphIdlePause(300);
       return;
     }
