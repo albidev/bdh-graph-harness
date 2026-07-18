@@ -148,8 +148,10 @@ function initNetwork(graphData, options = {}) {
   orphanNodeIds = graphNodes.filter(node => !connectedNodes.has(node.id)).map(node => node.id);
   const maxDegree = Math.max(1, ...Object.values(degreeMap));
   const hubThreshold = Math.max(5, maxDegree * 0.4);
+  // When there are no edges, every node is an orphan — show them all regardless of the orphan toggle.
+  const showAllOrphans = showOrphans || graphEdges.length === 0;
   const activeNodeIds = graphNodes
-    .filter(node => sourceVisibleIds.has(node.id) && (showOrphans || connectedNodes.has(node.id)))
+    .filter(node => sourceVisibleIds.has(node.id) && (showAllOrphans || connectedNodes.has(node.id)))
     .map(node => node.id);
   const activeNodeSet = new Set(activeNodeIds);
 
