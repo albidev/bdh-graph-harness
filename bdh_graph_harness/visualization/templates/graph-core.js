@@ -782,7 +782,6 @@ function ensureThreeResources() {
   };
   threeResources.geometries.dormant.rotateX(Math.PI);
   threeResources.ringTexture = createRingTexture();
-  threeResources.ringTexture = createRingTexture();
   threeResources.glowTexture = createGlowTexture();
   threeResources.initialized = true;
   return threeResources;
@@ -831,11 +830,11 @@ function nodeMaterial(color, opacity, emphasis, dormant = false) {
   const emphasisBucket = Math.round(Math.max(0, Math.min(1, emphasis)) * 4) / 4;
   const key = `${color}|${opacityBucket}|${emphasisBucket}|${dormant ? 'dormant' : 'active'}`;
   if (!resources.nodeMaterials.has(key)) {
-    const baseEmissive = dormant ? 0.24 : 0.12;
+    const baseEmissive = dormant ? 0.12 : 0.45;
     const material = new window.THREE.MeshLambertMaterial({
       color,
       emissive: color,
-      emissiveIntensity: baseEmissive + emphasisBucket * 0.78,
+      emissiveIntensity: baseEmissive + emphasisBucket * 0.55,
       transparent: opacityBucket < 1,
       opacity: opacityBucket,
       depthWrite: opacityBucket >= 0.55,
@@ -942,18 +941,21 @@ function updateNodeThreeObject(node) {
 
   const birthScale = nodeBirthScaleState.get(node.id) || 1;
   const radius = nodeRadius(node.val || 4) * nodeWorldScale * birthScale * (selected || focused ? 1.08 : 1);
-  body.scale.setScalar(radius);
+  // Body is a tiny bright core (0.35x), not a solid planet. The glow sprite is the visual.
+  body.scale.setScalar(node._dormant ? radius * 0.2 : radius * 0.35);
 
   // Glow halo: hidden for dormant nodes, visible for all others (2).
   if (glow) {
     if (node._dormant) {
       glow.visible = false;
     } else {
-      const glowOpacity = Math.min(0.65, 0.25 + emphasis * 0.45) * opacity;
+      // Cap at 0.32 to avoid blinding clusters. Emphasis adds a little, not a lot.
+      const glowOpacity = Math.min(0.32, 0.12 + emphasis * 0.20) * opacity;
       glow.visible = glowOpacity > 0.02;
       if (glow.visible) {
         glow.material = glowMaterial(baseColor, glowOpacity);
-        glow.scale.setScalar(radius * nodeGlowRadius(node.val || 4));
+        // Halo is 1.5x the core, not 2.2x — tighter, less overwhelming in clusters.
+        glow.scale.setScalar(radius * 1.5);
       }
     }
   }
@@ -1044,6 +1046,7 @@ function disposeNodeVisual(node) {
   node._threeObject = null;
   node._bodyObject = null;
   node._auraObject = null;
+  node._glowObject = null;
 }
 
 let labelUpdateTimer = null;
