@@ -514,6 +514,10 @@ function connectWS() {
     stopPollingFallback();
     setConnectionStatus('connected', 'Live');
     setVaultSelectorStatus('');
+    // Proactively fetch the graph snapshot — the server may not send a 'graph' event on connect.
+    if (typeof fetchGraphSnapshot === 'function') {
+      fetchGraphSnapshot({ reason: 'websocket-connect', preserveView: Boolean(graph && sourceGraphData), force: true });
+    }
   };
 
   socket.onmessage = message => {
