@@ -520,6 +520,25 @@ function linkByIdMap(links) {
   return m;
 }
 
+// Count Hebbian synapses connected to a node that are part of the current highlight.
+// Used to scale glow inversely: many Hebbian = less per-node glow to prevent blowout.
+function countHebbianInHighlight(node) {
+  const highlight = activeHighlight();
+  if (!highlight || !highlight.linkIds || highlight.linkIds.size === 0) return 0;
+  if (!graph) return 0;
+  const data = graph.graphData();
+  let count = 0;
+  for (let i = 0; i < data.links.length; i++) {
+    const link = data.links[i];
+    if (link.type !== 'hebbian') continue;
+    if (!highlight.linkIds.has(link._id)) continue;
+    const source = linkEndpointId(link.source);
+    const target = linkEndpointId(link.target);
+    if (source === node.id || target === node.id) count++;
+  }
+  return count;
+}
+
 function setPathHighlight(pathIds = []) {
   if (!graph || !pathIds.length) return;
   const pathSet = new Set(pathIds);
@@ -987,7 +1006,11 @@ function updateNodeThreeObject(node) {
       // Uniform ambient glow creates visual density in clusters; emphasis adds focus.
       // glowMultiplier scales the whole thing from console (BDHGlow.set(2)).
       const ambientGlow = 0.09; // light, uniform — forms "nebula" density in clusters and periphery
-      const focusGlow = Math.min(0.08, emphasis * 0.08); // halved — hover/click adds less glow
+      // Hebbian ratio: when highlighting a node with many Hebbian synapses, reduce per-node glow
+      // to prevent the cluster from blowing out. Few synapses = more glow per node.
+      const hebbianCount = countHebbianInHighlight(node);
+      const hebbianGlowRatio = hebbianCount > 0 ? Math.min(1, 4 / (hebbianCount + 2)) : 1;
+      const focusGlow = Math.min(0.08, emphasis * 0.08) * hebbianGlowRatio;
       const baseGlow = (ambientGlow + focusGlow) * opacity;
       const glowOpacity = Math.min(1, baseGlow * glowMultiplier);
       glow.visible = glowOpacity > 0.02;
