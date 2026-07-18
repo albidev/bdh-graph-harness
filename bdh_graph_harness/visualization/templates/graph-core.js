@@ -30,7 +30,7 @@ const EDGE_OPACITY = {
   hebbian: 0.46,
   phantom: 0.46,
   counterpart: 0.64,
-  project_context: 0.52,
+  project_context: 0.70,
   project_reference: 0.62,
   neurogenesis: 0.86,
 };
