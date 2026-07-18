@@ -546,18 +546,16 @@ function directionalParticleObject(link) {
   const T = window.THREE;
   if (!T) return null;
   const color = particleColor(link);
-  const group = new T.Group();
-  const core = new T.Mesh(
+  const particle = new T.Mesh(
     new T.SphereGeometry(1.9, 10, 8),
     new T.MeshBasicMaterial({ color, transparent: true, opacity: 0.98 }),
   );
   const halo = new T.Sprite(ringMaterial(color, 0.58));
   halo.scale.setScalar(8.5);
   halo.renderOrder = 4;
-  group.add(halo);
-  group.add(core);
-  group.renderOrder = 4;
-  return group;
+  particle.add(halo);
+  particle.renderOrder = 4;
+  return particle;
 }
 
 // ============================================================================
