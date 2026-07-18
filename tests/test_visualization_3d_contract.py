@@ -193,9 +193,11 @@ def test_pointer_exit_clears_tooltips_and_desktop_rendering_uses_antialiasing_bu
 
     assert "sphere: new T.SphereGeometry(1, 20, 14)" in core
     assert "hub: new T.IcosahedronGeometry(1, 2)" in core
-    assert ".linkResolution(constrained ? 5 : 8)" in graph_init
-    assert ".linkDirectionalParticleResolution(constrained ? 4 : 6)" in graph_init
-    assert "Math.min(window.devicePixelRatio || 1, constrained ? 1.5 : 2)" in graph_init
+    assert ".linkResolution(constrained ? 8 : 12)" in graph_init
+    assert ".linkHoverPrecision(constrained ? 10 : 16)" in graph_init
+    assert ".linkDirectionalParticleResolution(constrained ? 6 : 8)" in graph_init
+    assert "Math.min(window.devicePixelRatio || 1, constrained ? 1.75 : 2)" in graph_init
+    assert "antialias: true" in graph_init
     assert "area.addEventListener('pointerleave'" in graph_init
     assert "clearHoverHighlight();\n    hideTooltip();" in graph_init
     assert "canvas.addEventListener('pointerleave', dismissHoverUI" in graph_init

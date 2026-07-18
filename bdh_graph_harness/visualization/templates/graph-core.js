@@ -504,19 +504,19 @@ function linkDisplayWidth(link) {
   if (stateWidth != null) return Math.min(3.2, Math.max(0, stateWidth * 0.42));
   if (hoverEdgeId === link._id || isHighlightedLink(link)) return Math.max(0.8, Math.min(2.2, (link.width || 1) * 0.55));
   if (currentLodLevel === 'overview') {
-    if (link.type === 'wikilink') return 1.10;
-    if (link.type === 'phantom') return 0.92;
-    if (link.type === 'hebbian') return 1.45;
-    if (link.type === 'project_context') return 1.25;
-    if (link.type === 'counterpart' || link.type === 'project_reference' || link.type === 'neurogenesis') return 1.95;
-    return 1.00;
+    if (link.type === 'wikilink') return 1.50;
+    if (link.type === 'phantom') return 1.25;
+    if (link.type === 'hebbian') return 1.85;
+    if (link.type === 'project_context') return 1.65;
+    if (link.type === 'counterpart' || link.type === 'project_reference' || link.type === 'neurogenesis') return 2.35;
+    return 1.35;
   }
-  if (link.type === 'wikilink') return 1.45;
-  if (link.type === 'phantom') return 1.15;
-  if (link.type === 'hebbian') return (link.weight || 0) >= 0.7 ? 2.10 : 1.45;
-  if (link.type === 'project_context') return 1.65;
-  if (link.type === 'counterpart' || link.type === 'project_reference' || link.type === 'neurogenesis') return 2.60;
-  return 1.25;
+  if (link.type === 'wikilink') return 1.80;
+  if (link.type === 'phantom') return 1.45;
+  if (link.type === 'hebbian') return (link.weight || 0) >= 0.7 ? 2.55 : 1.85;
+  if (link.type === 'project_context') return 2.05;
+  if (link.type === 'counterpart' || link.type === 'project_reference' || link.type === 'neurogenesis') return 2.90;
+  return 1.60;
 }
 
 function hoverAwareParticles(link) {

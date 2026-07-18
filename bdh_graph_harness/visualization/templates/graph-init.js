@@ -389,7 +389,7 @@ function createGraphInstance() {
   graph = new ForceGraph3D(container, {
     controlType: 'trackball',
     rendererConfig: {
-      antialias: !constrained,
+      antialias: true,
       alpha: false,
       powerPreference: 'high-performance',
     },
@@ -407,7 +407,8 @@ function createGraphInstance() {
     .linkVisibility(effectiveLinkVisibility)
     .linkMaterial(linkMaterial)
     .linkWidth(linkDisplayWidth)
-    .linkResolution(constrained ? 5 : 8)
+    .linkResolution(constrained ? 8 : 12)
+    .linkHoverPrecision(constrained ? 10 : 16)
     .linkCurvature(link => link._dashes ? 0 : (link.type === 'hebbian' ? 0.04 : 0.08))
     .linkThreeObject(createDashedLinkObject)
     .linkThreeObjectExtend(false)
@@ -417,7 +418,7 @@ function createGraphInstance() {
     .linkDirectionalParticleWidth(hoverAwareParticleWidth)
     .linkDirectionalParticleColor(particleColor)
     .linkDirectionalParticleThreeObject(directionalParticleObject)
-    .linkDirectionalParticleResolution(constrained ? 4 : 6)
+    .linkDirectionalParticleResolution(constrained ? 6 : 8)
     .warmupTicks(constrained ? 45 : 90)
     .cooldownTime(constrained ? 8000 : 15000)
     .enablePointerInteraction(true)
@@ -478,7 +479,7 @@ function createGraphInstance() {
     });
 
   const renderer = graph.renderer();
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, constrained ? 1.5 : 2));
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, constrained ? 1.75 : 2));
   renderer.setClearColor(COLORS.bg, 1);
   graph.scene().background = new window.THREE.Color(COLORS.bg);
   graph.scene().fog = new window.THREE.FogExp2(COLORS.bg, constrained ? 0.00055 : 0.00038);
