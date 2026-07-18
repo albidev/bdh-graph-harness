@@ -188,6 +188,7 @@ def test_neural_cosmetics_keep_particles_and_install_bloom_on_native_composer():
     assert "function syncRegularLinkVisual(link)" in core
     assert "link.__lineObj" in core
     assert "data.links.forEach(syncRegularLinkVisual);" in core
+    assert "if (graphLayoutActive) return;" in core
     assert "const perLinkMaterials = new Map();" in core
     assert "perLinkMaterials.set(id, material);" in core
     assert "bloomPass.threshold = 0.62" in core
