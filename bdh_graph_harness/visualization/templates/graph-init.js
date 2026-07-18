@@ -500,7 +500,8 @@ function createGraphInstance() {
   installMouseTracking();
   hideWebGLFallback();
 
-  // Zoom toward cursor: shift the orbit target toward the 3D point under the mouse before the trackball dolly.
+  // Zoom toward cursor: gently nudge the orbit target toward the 3D point under the mouse.
+  // Small lerp factor prevents the target from drifting away from the graph during multi-event pinch.
   (function installZoomToCursor() {
     const canvas = renderer.domElement;
     if (!canvas) return;
@@ -514,7 +515,6 @@ function createGraphInstance() {
       const controls = graph.controls();
       if (!controls || !controls.target) return;
       // On macOS trackpads, pinch-to-zoom fires wheel with ctrlKey=true.
-      // Prevent the browser from hijacking it as page zoom.
       if (e.ctrlKey) e.preventDefault();
       const rect = canvas.getBoundingClientRect();
       ndc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
@@ -525,9 +525,10 @@ function createGraphInstance() {
       const plane = new T.Plane().setFromNormalAndCoplanarPoint(cameraDir.negate(), controls.target);
       const hit = raycaster.ray.intersectPlane(plane, tmpVec);
       if (!hit) return;
-      // Lerp the orbit target toward the cursor point — the trackball dolly then zooms toward it.
-      controls.target.lerp(hit, 0.35);
-      controls.update();
+      // Gentle nudge: 10% toward cursor per event. Over a 20-event pinch this
+      // moves the target ~88% of the way, but never overshoots past the graph.
+      controls.target.lerp(hit, 0.10);
+      // Do NOT call controls.update() — trackball controls will do it themselves.
     }, { passive: false, capture: true });
   })();
 }
