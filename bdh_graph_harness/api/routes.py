@@ -363,9 +363,14 @@ async def run_attention_and_plasticity(
 ) -> tuple[dict, list, list, dict]:
     """Run one vault query against an atomic runtime snapshot."""
     async with ctx.runtime_lock:
-        return await _run_attention_and_plasticity_unlocked(
-            query, ctx, ws_clients, source=source, learn=learn
+        active, activated_notes, hebbian_updates, routing = (
+            await _run_attention_and_plasticity_unlocked(
+                query, ctx, ws_clients, source=source, learn=learn
+            )
         )
+        # Store routing for neurogenesis to filter activated_from_ids
+        ctx._last_routing = routing
+        return active, activated_notes, hebbian_updates, routing
 
 
 def run_neurogenesis(
@@ -385,8 +390,34 @@ def run_neurogenesis(
         return new_concepts_list
     if config.get('neurogenesis_enabled', True):
         n = ctx.nodes
-        active_titles = [n[nid]['title'] for nid in active if nid in n]
-        active_source_ids = [nid for nid in active if nid in n]
+
+        # Filter activated notes to only include semantically relevant seeds,
+        # not graph neighbors pulled in by Hebbian expansion. Graph neighbors
+        # have hybrid_score 0 (they were activated via graph traversal, not
+        # retrieval) and would pollute the activated_from_ids metadata.
+        activation_details = {}
+        if hasattr(ctx, '_last_routing') and ctx._last_routing:
+            activation_details = {
+                item['id']: item
+                for item in ctx._last_routing.get('activation_details', [])
+            }
+        active_source_ids = []
+        active_titles = []
+        for nid in active:
+            if nid not in n:
+                continue
+            detail = activation_details.get(nid, {})
+            role = detail.get('role', 'seed')
+            hybrid_score = detail.get('hybrid_score', 0.0)
+            # Include only seeds with meaningful hybrid score, or notes where
+            # we don't have routing details (backward compat).
+            if role == 'seed' and hybrid_score >= 0.30:
+                active_source_ids.append(nid)
+                active_titles.append(n[nid]['title'])
+            elif not activation_details:
+                # No routing metadata available (old path), include all
+                active_source_ids.append(nid)
+                active_titles.append(n[nid]['title'])
         try:
             new_concepts = extract_new_concepts(
                 response_text, query, active, n, allow_existing=True
