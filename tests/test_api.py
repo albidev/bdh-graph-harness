@@ -78,6 +78,31 @@ def _capture_app(monkeypatch, config, nodes, edges, collection, state):
     return captured['app']
 
 
+
+# ---------------------------------------------------------------------------
+# GET /health
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_api_health(mock_app_setup, monkeypatch):
+    from aiohttp.test_utils import TestClient, TestServer
+
+    nodes, edges, collection, state, config, _ = mock_app_setup
+    app = _capture_app(monkeypatch, config, nodes, edges, collection, state)
+
+    server = TestServer(app)
+    client = TestClient(server)
+    await client.start_server()
+
+    try:
+        resp = await client.get('/health')
+        assert resp.status == 200
+        data = await resp.json()
+        assert data['status'] == 'ok'
+    finally:
+        await client.close()
+
+
 # ---------------------------------------------------------------------------
 # GET /api/stats
 # ---------------------------------------------------------------------------
