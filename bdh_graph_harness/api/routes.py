@@ -132,6 +132,11 @@ async def index(request, app_state: dict) -> web.Response:
     )
 
 
+async def api_health(request, app_state: dict) -> web.Response:
+    """Lightweight liveness probe — returns 200 if the server is up."""
+    return web.json_response({'status': 'ok'})
+
+
 async def api_stats(request, app_state: dict) -> web.Response:
     """Return graph stats + Hebbian summary as JSON."""
     ctx, err = _resolve_vault_ctx(app_state, _vault_id_from_query(request))
@@ -1342,6 +1347,9 @@ def setup_routes(app: web.Application, app_state: dict, ws_clients: set) -> None
     async def _ws(request):
         return await websocket_handler(request, app_state, ws_clients)
 
+    async def _health(request):
+        return await api_health(request, app_state)
+
     async def _stats(request):
         return await api_stats(request, app_state)
 
@@ -1383,6 +1391,7 @@ def setup_routes(app: web.Application, app_state: dict, ws_clients: set) -> None
 
     app.router.add_get('/', _index)
     app.router.add_get('/ws', _ws)
+    app.router.add_get('/health', _health)
 
     # Serve static files (CSS, JS) from the templates directory
     templates_dir = os.path.dirname(get_template_path())
