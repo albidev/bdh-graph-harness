@@ -1225,6 +1225,47 @@ body.controls-collapsed .vault-control {
   transition: opacity 200ms ease;
 }
 
+/* Floating expand buttons — only visible when the corresponding panel is collapsed */
+.expand-fab {
+  position: absolute;
+  z-index: 200;
+  bottom: 20px;
+  left: 20px;
+  display: none !important;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--surface-float);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(14px);
+  color: var(--text-secondary);
+  font-size: 18px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 200ms ease, transform 200ms ease;
+}
+
+.expand-fab:hover {
+  transform: scale(1.08);
+  color: var(--text);
+}
+
+.expand-fab-right {
+  left: auto;
+  right: 20px;
+}
+
+body.controls-collapsed #expand-controls {
+  display: flex !important;
+}
+
+body.panel-collapsed #expand-panel {
+  display: flex !important;
+}
+
 #side-panel > section {
   flex: 0 0 auto;
   padding: 16px 18px;
