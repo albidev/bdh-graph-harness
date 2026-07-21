@@ -182,6 +182,8 @@ async function fetchGraphSnapshot(options = {}) {
       });
       const graphArea = document.getElementById('graph-area');
       if (graphArea) graphArea.classList.remove('vault-loading');
+      // Safety net: ensure panels are restored even if onEngineStop never fires.
+      if (typeof hideGraphLoader === 'function') hideGraphLoader();
       setVaultSelectorStatus('');
       resetCameraOnNextGraph = false;
       if (options.reason === 'polling') setConnectionStatus('degraded', 'Polling');
