@@ -368,6 +368,9 @@ function initNetwork(graphData, options = {}) {
     configureForces();
     resizeGraphToContainer();
     syncThreeVisualState();
+    // Restore panels immediately after first render — don't wait for onEngineStop
+    // which may never fire if the simulation doesn't converge.
+    hideGraphLoader();
     // graphData() creates and heats the internal force layout on its deferred
     // update. Reheating synchronously here starts tickFrame before layout exists.
   } else if (preserveView) {
