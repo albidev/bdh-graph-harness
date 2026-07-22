@@ -645,6 +645,13 @@ function setGraphDataPreservingView(data, options = {}) {
 
 function requestGraphRedraw() {
   if (!graph) return;
+  // Keep post-processing inside the same visual budget as the selected
+  // neighborhood. A dense hub gets a tighter/weaker bloom automatically.
+  if (typeof bloomPass !== 'undefined' && bloomPass) {
+    const intensity = typeof activeHighlightIntensity === 'function' ? activeHighlightIntensity() : 1;
+    bloomPass.strength = 0.52 + intensity * 0.35;
+    bloomPass.radius = 0.42 + intensity * 0.16;
+  }
   resumeGraphRendering();
   syncThreeVisualState();
   markGraphActive(520);
