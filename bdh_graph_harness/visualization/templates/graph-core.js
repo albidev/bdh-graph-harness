@@ -551,6 +551,20 @@ function countHebbianInHighlight(node) {
   return count;
 }
 
+// Selection visual budget: a small neighborhood can be expressive, but a hub
+// with dozens of connected edges must not turn the viewport into a white blob.
+// The factor is intentionally based on the whole highlighted subgraph rather
+// than on the selected node only, because focus/hover highlights all incident
+// links and their endpoints.
+function activeHighlightIntensity() {
+  const highlight = activeHighlight();
+  if (!highlight) return 1;
+  const nodeCount = highlight.nodeIds ? highlight.nodeIds.size : 0;
+  const linkCount = highlight.linkIds ? highlight.linkIds.size : 0;
+  const visualLoad = (linkCount / 8) + (Math.max(0, nodeCount - 1) / 14);
+  return Math.max(0.38, Math.min(1, 1 / Math.sqrt(1 + visualLoad)));
+}
+
 function setPathHighlight(pathIds = []) {
   if (!graph || !pathIds.length) return;
   const pathSet = new Set(pathIds);
@@ -654,9 +668,13 @@ function linkDisplayColor(link) {
 
 function linkDisplayOpacity(link) {
   if (!effectiveLinkVisibility(link)) return 0;
-  if (hoverEdgeId === link._id || isHighlightedLink(link)) return 0.92;
+  if (hoverEdgeId === link._id || isHighlightedLink(link)) {
+    // Dense selections stay bright enough to trace, without every edge
+    // contributing the same full-strength bloom.
+    return 0.42 + activeHighlightIntensity() * 0.42;
+  }
   const highlight = activeHighlight();
-  if (highlight) return 0.055;
+  if (highlight) return 0.07 + activeHighlightIntensity() * 0.04;
   let opacity = EDGE_OPACITY[link.type] || 0.28;
   if (currentLodLevel === 'overview') opacity *= link.type === 'wikilink' ? 0.78 : 0.82;
   if (link.type === 'hebbian') opacity *= 0.7 + Math.min(0.8, link.weight || 0);
@@ -692,7 +710,9 @@ function linkDisplayWidth(link) {
   else if (link.type === 'project_context') width = 2.75;
   else if (link.type === 'counterpart' || link.type === 'project_reference' || link.type === 'neurogenesis') width = 3.80;
   else width = 2.10;
-  const scale = (hoverEdgeId === link._id || isHighlightedLink(link)) ? HIGHLIGHT_WIDTH_SCALE : EDGE_WIDTH_SCALE;
+  const scale = (hoverEdgeId === link._id || isHighlightedLink(link))
+    ? (1.55 + activeHighlightIntensity() * 1.35)
+    : EDGE_WIDTH_SCALE;
   return width * scale;
 }
 
@@ -819,13 +839,13 @@ function installBloomPass() {
   const height = Math.max(1, container ? container.clientHeight : window.innerHeight);
   bloomPass = new window.UnrealBloomPass(
     new window.THREE.Vector2(width, height),
-    0.95,
-    0.68,
+    0.72,
     0.52,
+    0.58,
   );
-  bloomPass.threshold = 0.42;
-  bloomPass.strength = 1.35;
-  bloomPass.radius = 0.72;
+  bloomPass.threshold = 0.52;
+  bloomPass.strength = 0.72;
+  bloomPass.radius = 0.56;
   composer.addPass(bloomPass);
   if (typeof window.SMAAPass === 'function') {
     smaaPass = new window.SMAAPass(width, height);
@@ -1003,6 +1023,7 @@ function updateNodeThreeObject(node) {
   const highlighted = isHighlightedNode(node);
   const direct = isDirectHighlightedNode(node);
   const highlight = activeHighlight();
+  const highlightIntensity = activeHighlightIntensity();
   if (highlight) opacity = highlighted ? Math.max(opacity, 0.96) : Math.min(opacity, 0.22);
   if (node._dormant) opacity *= 0.15; // Dormant nodes nearly invisible (4)
 
@@ -1033,7 +1054,7 @@ function updateNodeThreeObject(node) {
       // to prevent the cluster from blowing out. Few synapses = more glow per node.
       const hebbianCount = countHebbianInHighlight(node);
       const hebbianGlowRatio = hebbianCount > 0 ? Math.min(1, 8 / (hebbianCount + 2)) : 1;
-      const focusGlow = Math.min(0.08, emphasis * 0.08) * hebbianGlowRatio;
+      const focusGlow = Math.min(0.08, emphasis * 0.08) * hebbianGlowRatio * highlightIntensity;
       const baseGlow = (ambientGlow + focusGlow) * opacity;
       const glowOpacity = Math.min(1, baseGlow * glowMultiplier);
       glow.visible = glowOpacity > 0.02;
@@ -1050,7 +1071,7 @@ function updateNodeThreeObject(node) {
   if (activationColor) ringOpacity = 0.92;
   else if (selected || focused || direct) {
     ringColor = selected ? COLORS.selected : baseColor;
-    ringOpacity = 0.78;
+    ringOpacity = 0.34 + highlightIntensity * 0.34;
   } else if (neurogenesis) {
     ringColor = COLORS.neurogenesis;
     ringOpacity = 0.46;
@@ -1063,7 +1084,7 @@ function updateNodeThreeObject(node) {
   aura.visible = ringOpacity > 0 && !node._dormant;
   if (aura.visible) {
     aura.material = ringMaterial(ringColor, ringOpacity * opacity);
-    aura.scale.setScalar(radius * (activationColor ? 3.25 : 2.65));
+    aura.scale.setScalar(radius * (activationColor ? 2.5 : 1.75 + highlightIntensity * 0.55));
   }
   group.visible = !node._hidden;
 }
@@ -1088,7 +1109,7 @@ function ensureNodeLabelSprite(node) {
   canvas.width = 512;
   canvas.height = 96;
   const context = canvas.getContext('2d');
-  context.font = '600 28px system-ui, -apple-system, sans-serif';
+  context.font = '600 32px system-ui, -apple-system, sans-serif';
   const measured = Math.min(460, Math.ceil(context.measureText(display).width + 42));
   const x = (512 - measured) / 2;
   roundedRect(context, x, 14, measured, 68, 18);
@@ -1112,7 +1133,7 @@ function ensureNodeLabelSprite(node) {
   });
   const sprite = new window.THREE.Sprite(material);
   const width = Math.max(34, measured * 0.11);
-  sprite.scale.set(width, 10.5, 1);
+  sprite.scale.set(width, 12, 1);
   sprite.position.set(0, nodeRadius(node.val || 4) * nodeWorldScale + 9, 0);
   sprite.renderOrder = 4;
   sprite.visible = false;
