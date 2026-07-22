@@ -1909,6 +1909,76 @@ body.retrieval-lens-active #camera-mode {
 }
 
 /* ========================================================================== */
+/* Readability pass — information density without microscopic UI text         */
+/* ========================================================================== */
+:root {
+  --ui-font-size: 15px;
+  --ui-font-size-sm: 13px;
+  --ui-font-size-xs: 11px;
+}
+
+body {
+  font-size: var(--ui-font-size);
+}
+
+.brand-copy strong,
+.vault-control select,
+.search-control input,
+.stat-chip b {
+  font-size: var(--ui-font-size-sm);
+}
+
+.brand-copy small,
+.vault-control label,
+.eyebrow,
+.vault-selector-status,
+.connection-state,
+.stat-chip small {
+  font-size: var(--ui-font-size-xs);
+}
+
+#control-dock,
+#side-panel {
+  font-size: var(--ui-font-size);
+}
+
+.dock-heading strong,
+.control-group h2,
+.section-heading strong {
+  font-size: var(--ui-font-size-sm);
+}
+
+.preset-control > span,
+.toggle-row > span,
+.slider-control > span,
+.slider-control output,
+.edge-filter-btn,
+.segmented button {
+  font-size: var(--ui-font-size-sm);
+}
+
+.preset-control b,
+.toggle-row b,
+.slider-control b,
+.preset-control small,
+.toggle-row small,
+.scene-hint,
+.focus-hud small,
+.graph-tooltip .eyebrow {
+  font-size: var(--ui-font-size-xs);
+}
+
+#query-input,
+#response-text,
+#activated-list,
+#new-concepts-list,
+.graph-tooltip p,
+.graph-tooltip a {
+  font-size: var(--ui-font-size-sm);
+  line-height: 1.45;
+}
+
+/* ========================================================================== */
 /* Medium desktop                                                              */
 /* ========================================================================== */
 @media (max-width: 1180px) and (min-width: 769px) {
