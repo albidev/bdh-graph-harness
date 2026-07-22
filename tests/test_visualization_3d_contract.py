@@ -219,9 +219,13 @@ def test_neural_cosmetics_keep_particles_and_install_bloom_on_native_composer():
     assert "edgeCurvature: 'bdh-graph-edge-curvature-v1'" in core
     assert "const perLinkMaterials = new Map();" in core
     assert "perLinkMaterials.set(id, material);" in core
-    assert "bloomPass.threshold = 0.42" in core
-    assert "bloomPass.strength = 1.35" in core
-    assert "bloomPass.radius = 0.72" in core
+    # Dense selections use a higher threshold and lower baseline bloom so the
+    # highlighted neighborhood remains legible instead of blowing out white.
+    assert "bloomPass.threshold = 0.52" in core
+    assert "bloomPass.strength = 0.72" in core
+    assert "bloomPass.radius = 0.56" in core
+    assert "function activeHighlightIntensity()" in core
+    assert "bloomPass.strength = 0.52 + intensity * 0.35" in graph_init
     assert "isAmbientFlowLink(link)) return Math.round(particleConfig.ambientParticles" in core
     assert "scheduleBloomInstall();" in graph_init
     assert "ambientThreshold: 0.28" in core
