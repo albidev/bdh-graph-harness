@@ -649,11 +649,40 @@ function restorePanelState() {
   syncPanelWidthForViewport();
   const collapsed = localStorage.getItem(PANEL_COLLAPSED_KEY) === 'true';
   document.body.classList.toggle('panel-collapsed', collapsed);
-  if (collapseButton) collapseButton.textContent = collapsed ? '◂' : '▸';
   const controlsCollapsed = localStorage.getItem(CONTROLS_COLLAPSED_KEY) === 'true';
   document.body.classList.toggle('controls-collapsed', controlsCollapsed);
-  const controlsButton = document.getElementById('controls-collapse');
-  if (controlsButton) controlsButton.textContent = controlsCollapsed ? '›' : '‹';
+  syncPanelToggleUI();
+}
+
+function syncPanelToggleUI() {
+  const panelCollapsed = document.body.classList.contains('panel-collapsed');
+  const controlsCollapsed = document.body.classList.contains('controls-collapsed');
+  const inspectorButtons = [document.getElementById('collapse-btn'), document.getElementById('expand-panel')].filter(Boolean);
+  const controlsButtons = [document.getElementById('controls-collapse'), document.getElementById('expand-controls')].filter(Boolean);
+
+  inspectorButtons.forEach(button => {
+    const expanded = !panelCollapsed;
+    const label = expanded ? 'Hide inspector' : 'Show inspector';
+    const icon = button.querySelector('.panel-toggle-icon');
+    const text = button.querySelector('.panel-toggle-label');
+    if (icon) icon.textContent = expanded ? '▸' : '◂';
+    if (text) text.textContent = 'Inspector';
+    button.title = label;
+    button.setAttribute('aria-label', label);
+    button.setAttribute('aria-expanded', String(expanded));
+  });
+
+  controlsButtons.forEach(button => {
+    const expanded = !controlsCollapsed;
+    const label = expanded ? 'Hide controls' : 'Show controls';
+    const icon = button.querySelector('.panel-toggle-icon');
+    const text = button.querySelector('.panel-toggle-label');
+    if (icon) icon.textContent = expanded ? '‹' : '›';
+    if (text) text.textContent = 'Controls';
+    button.title = label;
+    button.setAttribute('aria-label', label);
+    button.setAttribute('aria-expanded', String(expanded));
+  });
 }
 
 panelResize?.addEventListener('mousedown', event => {
@@ -682,17 +711,17 @@ document.addEventListener('mouseup', () => {
 function togglePanel() {
   document.body.classList.toggle('panel-collapsed');
   const collapsed = document.body.classList.contains('panel-collapsed');
-  if (collapseButton) collapseButton.textContent = collapsed ? '◂' : '▸';
   localStorage.setItem(PANEL_COLLAPSED_KEY, String(collapsed));
+  syncPanelToggleUI();
   requestAnimationFrame(() => resizeGraphToContainer());
 }
 
 function toggleControlsDock() {
   document.body.classList.toggle('controls-collapsed');
   const collapsed = document.body.classList.contains('controls-collapsed');
-  const button = document.getElementById('controls-collapse');
-  if (button) button.textContent = collapsed ? '›' : '‹';
   localStorage.setItem(CONTROLS_COLLAPSED_KEY, String(collapsed));
+  syncPanelToggleUI();
+  requestAnimationFrame(() => resizeGraphToContainer());
 }
 
 window.addEventListener('resize', () => {
@@ -700,6 +729,12 @@ window.addEventListener('resize', () => {
   requestAnimationFrame(() => resizeGraphToContainer());
 });
 window.addEventListener('keydown', event => {
+  if ((event.metaKey || event.ctrlKey) && event.key === '\\') {
+    event.preventDefault();
+    if (event.shiftKey) toggleControlsDock();
+    else togglePanel();
+    return;
+  }
   if (event.key === 'Escape') {
     if (focusMode) exitFocusMode();
     else hideTooltip();

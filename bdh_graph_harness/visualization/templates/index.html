@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#0d1117">
 <title>BDH Graph Harness — 3D Knowledge Space</title>
-<link rel="stylesheet" href="/static/styles.css?v=3d-v59">
+<link rel="stylesheet" href="/static/styles.css?v=3d-v66">
 <script>
   window.__BDH_RUNTIME_ERRORS__ = [];
   window.addEventListener('error', event => {
@@ -57,7 +57,6 @@
       <span id="stat-dormant" class="stat-chip optional-stat" hidden><b id="stat-dormant-count">0</b><small>dormant</small></span>
       <span id="stat-phantom" class="stat-chip optional-stat" hidden><b id="stat-phantom-count">0</b><small>phantom</small></span>
     </div>
-    <button class="icon-btn collapse-btn" onclick="togglePanel()" title="Toggle inspector" aria-label="Toggle inspector" id="collapse-btn">▸</button>
   </div>
 </header>
 
@@ -70,6 +69,7 @@
 <main id="main">
   <section id="graph-area" aria-label="Interactive 3D knowledge graph">
     <div id="graph-container"></div>
+
 
     <div id="graph-loader" role="status" aria-label="Loading graph">
       <div class="loader-spinner"></div>
@@ -85,7 +85,10 @@
     <aside id="control-dock" aria-label="Graph controls">
       <div class="dock-heading">
         <div><span class="eyebrow">Instrument controls</span><strong>Graph view</strong></div>
-        <button id="controls-collapse" class="icon-btn" type="button" onclick="toggleControlsDock()" title="Collapse controls" aria-label="Collapse controls">‹</button>
+        <button id="controls-collapse" class="panel-toggle-btn" type="button" onclick="toggleControlsDock()"
+                title="Hide controls" aria-label="Hide controls" aria-expanded="true" aria-controls="control-dock">
+          <span class="panel-toggle-icon" aria-hidden="true">‹</span>
+        </button>
       </div>
 
       <div class="dock-content">
@@ -230,6 +233,13 @@
   <div id="panel-resize" role="separator" aria-orientation="vertical" aria-label="Resize inspector"></div>
 
   <aside id="side-panel" aria-label="Query and graph inspector">
+    <div class="panel-heading">
+      <div><span class="eyebrow">Inspector</span><strong>Query &amp; graph</strong></div>
+      <button id="collapse-btn" class="panel-toggle-btn" type="button" onclick="togglePanel()"
+              title="Hide inspector" aria-label="Hide inspector" aria-expanded="true" aria-controls="side-panel">
+        <span class="panel-toggle-icon" aria-hidden="true">▸</span>
+      </button>
+    </div>
     <section id="query-section">
       <div class="section-heading"><span class="eyebrow">Retrieval</span><h2>Query the graph</h2></div>
       <div class="query-wrap">
@@ -311,12 +321,12 @@
       return bloom;
     });
 </script>
-<script src="/static/graph-3d-utils.js?v=3d-v59"></script>
-<script src="/static/graph-core.js?v=3d-v59"></script>
-<script src="/static/graph-init.js?v=3d-v59"></script>
-<script src="/static/activation.js?v=3d-v59"></script>
-<script src="/static/vault-selector.js?v=3d-v59"></script>
-<script src="/static/websocket.js?v=3d-v59"></script>
-<script src="/static/ui-controls.js?v=3d-v59"></script>
+<script src="/static/graph-3d-utils.js?v=3d-v66"></script>
+<script src="/static/graph-core.js?v=3d-v66"></script>
+<script src="/static/graph-init.js?v=3d-v66"></script>
+<script src="/static/activation.js?v=3d-v66"></script>
+<script src="/static/vault-selector.js?v=3d-v66"></script>
+<script src="/static/websocket.js?v=3d-v66"></script>
+<script src="/static/ui-controls.js?v=3d-v66"></script>
 </body>
 </html>
