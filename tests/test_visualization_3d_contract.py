@@ -375,6 +375,22 @@ def test_ui_groups_controls_around_a_graph_first_scene_and_mobile_tabs():
     assert "prefers-reduced-motion: reduce" in styles
 
 
+def test_panel_visibility_uses_one_toggle_inside_each_panel():
+    html = (ROOT / "bdh_graph_harness/visualization/templates/index.html").read_text()
+    styles = (ROOT / "bdh_graph_harness/visualization/templates/styles.css").read_text()
+    controls = (ROOT / "bdh_graph_harness/visualization/templates/ui-controls.js").read_text()
+
+    assert 'id="controls-collapse"' in html
+    assert 'id="collapse-btn"' in html
+    assert 'id="panel-rail"' not in html
+    assert 'id="expand-controls"' not in html
+    assert 'id="expand-panel"' not in html
+    assert 'class="panel-heading"' in html
+    assert 'body.panel-collapsed #side-panel .panel-heading' in styles
+    assert 'body.controls-collapsed #control-dock .dock-heading' in styles
+    assert 'function syncPanelToggleUI()' in controls
+
+
 def test_retrieval_panel_exposes_grounding_status_and_next_actions():
     html = (ROOT / "bdh_graph_harness/visualization/templates/index.html").read_text()
     websocket = (ROOT / "bdh_graph_harness/visualization/templates/websocket.js").read_text()
