@@ -519,6 +519,62 @@ body.panel-resizing #graph-container {
   letter-spacing: -0.018em;
 }
 
+.panel-heading {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 58px;
+  padding: 0 14px 0 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+.panel-heading > div {
+  display: grid;
+  gap: 3px;
+}
+
+.panel-heading strong {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 560;
+}
+
+.panel-toggle-btn {
+  display: inline-flex;
+  width: 30px;
+  height: 30px;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 30px;
+  border: 1px solid rgba(139, 148, 158, 0.28);
+  border-radius: 8px;
+  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.025);
+  cursor: pointer;
+  transition: color 160ms ease, border-color 160ms ease, background 160ms ease;
+}
+
+.panel-toggle-btn:hover {
+  color: var(--text);
+  border-color: rgba(88, 166, 255, 0.65);
+  background: rgba(88, 166, 255, 0.1);
+}
+
+.panel-toggle-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.panel-toggle-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  font-size: 18px;
+  line-height: 1;
+}
+
 .dock-content {
   max-height: calc(100dvh - var(--topbar-height) - 88px);
   overflow: auto;
@@ -1204,8 +1260,29 @@ body.controls-collapsed #scene-hud {
   box-shadow: -14px 0 44px rgba(0, 0, 0, 0.16);
 }
 
-body.panel-collapsed #side-panel,
+body.panel-collapsed #side-panel {
+  width: 48px !important;
+  min-width: 48px;
+  max-width: 48px;
+}
+
 body.panel-collapsed #panel-resize {
+  display: none;
+}
+
+body.panel-collapsed #side-panel > :not(.panel-heading) {
+  display: none;
+}
+
+body.panel-collapsed #side-panel .panel-heading {
+  height: 100%;
+  align-items: flex-start;
+  padding: 14px 0 0;
+  justify-content: center;
+  border-bottom: 0;
+}
+
+body.panel-collapsed #side-panel .panel-heading > div {
   display: none;
 }
 
@@ -1213,11 +1290,9 @@ body.controls-collapsed #graph-minimap,
 body.controls-collapsed #edge-legend,
 body.controls-collapsed .tag-legend,
 body.controls-collapsed #zoom-controls,
-body.controls-collapsed #control-dock,
 body.controls-collapsed #scene-hud,
 body.controls-collapsed .search-control,
 body.controls-collapsed .stats,
-body.controls-collapsed .collapse-btn,
 body.controls-collapsed .connection-state,
 body.controls-collapsed .vault-control {
   opacity: 0;
