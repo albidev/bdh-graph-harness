@@ -94,6 +94,13 @@ CONFIG = {
     'consolidation_weak_weight_threshold': 0.15,
     'consolidation_weak_max_frequency': 1.0,
     'consolidation_weak_min_age_hours': 48,
+    # Safe consolidation guardrails. Candidates must survive confirmation before
+    # deletion; a cycle aborts instead of committing an anomalous mass prune.
+    'consolidation_prune_confirm_cycles': 2,
+    'consolidation_max_prune_ratio': 0.35,
+    'consolidation_max_prune_per_cycle': 0.15,
+    'consolidation_protect_backbone': True,
+    'consolidation_protect_recent_hours': 72,
     'consolidation_dormant_persist_cycles': 3, # remove nodes dormant for N+ consolidation cycles
     'consolidation_prune_dormant_nodes': True,  # actually delete stale dormant nodes
     # Interactive neurogenesis is conservative but can retain several independent durable concepts.
