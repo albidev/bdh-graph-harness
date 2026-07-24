@@ -28,13 +28,23 @@ vault_path: ./wiki  # path to your Obsidian vault
 #         vault_path: projects/bdh-graph-harness/overview.md
 #         external_path: bdh-graph-harness/README.md
 
-# Ollama
+# LLM
+# Provider values: ollama (local native API), ollama-cloud (Ollama Cloud
+# OpenAI-compatible API), or openrouter (legacy OpenAI-compatible provider).
 ollama_url: http://127.0.0.1:11434
 embedding_model: nomic-embed-text-v2-moe
-llm_provider: openrouter       # ollama | openrouter
-llm_model: openrouter/free      # auto-selects available free models
-openrouter_url: https://openrouter.ai/api/v1/chat/completions
-openrouter_key: ${OPENROUTER_API_KEY}  # read from env, or paste key directly
+llm_provider: ollama
+llm_model: gemma4:12b-mlx
+# Ollama Cloud example:
+# llm_provider: ollama-cloud
+# llm_model: deepseek-v4-flash:cloud
+# llm_base_url: https://ollama.com/v1
+# llm_api_key: ${OLLAMA_API_KEY}
+# OpenRouter legacy example:
+# llm_provider: openrouter
+# llm_model: openrouter/free
+# openrouter_url: https://openrouter.ai/api/v1/chat/completions
+# openrouter_key: ${OPENROUTER_API_KEY}
 llm_temperature: 0.3
 llm_max_ctx: 4096
 llm_timeout: 300

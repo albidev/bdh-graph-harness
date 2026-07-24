@@ -67,6 +67,56 @@ def test_build_payload_openrouter_format(mock_active_notes, mock_nodes, monkeypa
     assert headers['X-Title'] == 'BDH Graph Harness'
 
 
+def test_build_payload_ollama_cloud_uses_canonical_openai_compatible_config(
+    mock_active_notes, mock_nodes, monkeypatch,
+):
+    """Ollama Cloud uses its own provider name, not the OpenRouter code path label."""
+    monkeypatch.setattr(bdh_config, 'CONFIG', {
+        'llm_provider': 'ollama-cloud',
+        'llm_model': 'deepseek-v4-flash:cloud',
+        'llm_temperature': 0.1,
+        'llm_max_ctx': 4096,
+        'llm_api_key': 'ollama-cloud-test-key',
+    })
+    data, headers = harness._build_llm_payload(
+        'test query', mock_active_notes, mock_nodes, stream=True,
+    )
+    payload = json.loads(data)
+    assert payload['model'] == 'deepseek-v4-flash:cloud'
+    assert payload['temperature'] == 0.1
+    assert headers['Authorization'] == 'Bearer ollama-cloud-test-key'
+    assert 'HTTP-Referer' not in headers
+
+
+def test_config_reports_ollama_cloud_runtime_without_openrouter_alias(monkeypatch):
+    """Canonical config exposes the actual provider and endpoint semantics."""
+    import tempfile, os
+
+    original_config = bdh_config.CONFIG.copy()
+    original_llm_url = bdh_config.OLLAMA_LLM_URL
+    monkeypatch.setenv('TEST_OLLAMA_CLOUD_KEY', 'ollama-cloud-secret')
+    try:
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+            f.write(
+                'llm_provider: ollama-cloud\n'
+                'llm_base_url: https://ollama.com/v1\n'
+                'llm_api_key: ${TEST_OLLAMA_CLOUD_KEY}\n'
+                'llm_model: deepseek-v4-flash:cloud\n'
+            )
+            f.flush()
+            config = harness.load_config(f.name)
+            os.unlink(f.name)
+
+        assert config['llm_provider'] == 'ollama-cloud'
+        assert config['llm_transport'] == 'openai-compatible'
+        assert config['llm_provider_label'] == 'Ollama Cloud'
+        assert bdh_config.OLLAMA_LLM_URL == 'https://ollama.com/v1/chat/completions'
+    finally:
+        bdh_config.CONFIG.clear()
+        bdh_config.CONFIG.update(original_config)
+        bdh_config.OLLAMA_LLM_URL = original_llm_url
+
+
 def test_build_payload_messages_always_present(mock_active_notes, mock_nodes, monkeypatch):
     """Both providers get messages array with system + user roles."""
     monkeypatch.setattr(bdh_config, 'CONFIG', {
