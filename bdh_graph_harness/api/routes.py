@@ -155,6 +155,13 @@ async def api_stats(request, app_state: dict) -> web.Response:
         'dormant_neurons': len(dormant),
         'active_neurons': len(n) - len(dormant),
         'top_hebbian': [],
+        'llm_runtime': {
+            'provider': ctx.config.settings.get('llm_provider', 'ollama'),
+            'provider_label': ctx.config.settings.get('llm_provider_label', 'Ollama'),
+            'transport': ctx.config.settings.get('llm_transport', 'ollama-native'),
+            'model': ctx.config.settings.get('llm_model'),
+            'endpoint': ctx.config.settings.get('llm_endpoint'),
+        },
     }
     stats.update(hebbian_tail_stats(s, config=ctx.config.settings))
     if s['synapses']:
@@ -1255,7 +1262,7 @@ async def api_consolidate(request, app_state: dict, ws_clients: set) -> web.Resp
         state_copy = deepcopy(ctx.state)
         results = consolidate(
             state_copy, n, e,
-            config=config, collection=ctx.collection,
+            config=config, collection=ctx.collection, dry_run=True,
         )
         results['dry_run'] = True
         return web.json_response(results)

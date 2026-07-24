@@ -135,6 +135,10 @@ async def test_api_stats(mock_app_setup, monkeypatch):
         assert data['hebbian_strong_synapses'] == 1
         assert data['hebbian_weak_synapses'] == 0
         assert data['hebbian_stale_weak_synapses'] == 0
+        assert data['llm_runtime']['provider'] == config['llm_provider']
+        assert data['llm_runtime']['transport'] == config['llm_transport']
+        assert data['llm_runtime']['model'] == config['llm_model']
+        assert 'api_key' not in data['llm_runtime']
     finally:
         await client.close()
 
