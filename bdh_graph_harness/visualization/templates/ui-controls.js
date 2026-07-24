@@ -775,6 +775,15 @@ async function startVisualization() {
   setConnectionStatus('', 'Connecting');
   recoverWhenRendererArrives();
 
+  // Safety net: if hideGraphLoader() is never called (CDN timeout, engine stall,
+  // WS failure), restore panels after 12s so the UI is never stuck collapsed.
+  setTimeout(() => {
+    if (document.getElementById('graph-loader') && !document.getElementById('graph-loader').hidden) {
+      console.warn('[BDH 3D] Safety timeout — forcing panel restore');
+      if (typeof hideGraphLoader === 'function') hideGraphLoader();
+    }
+  }, 12000);
+
   try {
     if (typeof loadVaultSelector === 'function') await loadVaultSelector();
   } catch (error) {

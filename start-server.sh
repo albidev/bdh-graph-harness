@@ -1,6 +1,7 @@
 #!/bin/bash
 # BDH Graph Harness server launcher
-# Expects OPENCODE_ZEN_API_KEY (preferred) or OPENROUTER_API_KEY in env or .env file
+# Expects OLLAMA_API_KEY for Ollama Cloud, OPENCODE_ZEN_API_KEY for OpenCode,
+# or OPENROUTER_API_KEY for the legacy OpenRouter provider.
 for varname in OPENCODE_ZEN_API_KEY OPENROUTER_API_KEY OLLAMA_API_KEY; do
   if [ -z "${!varname}" ]; then
     for envfile in "$(dirname "$0")/.env" "$HOME/.hermes/.env" "$HOME/.env"; do

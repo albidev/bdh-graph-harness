@@ -8,6 +8,7 @@ import json
 from bdh_graph_harness.config import CONFIG, retry_with_backoff
 import bdh_graph_harness.config as _config
 from bdh_graph_harness.neurogenesis.dedupe import is_duplicate, is_semantic_duplicate
+from bdh_graph_harness.llm.providers import uses_openai_compatible_api
 
 
 # --- Noise filters (deterministic, applied before LLM and after) ---
@@ -100,24 +101,25 @@ def extract_new_concepts(llm_response, query, active_notes, nodes, *, allow_exis
         ],
         "stream": False,
         **({"format": "json", "options": {"temperature": 0.1, "num_ctx": CONFIG['llm_max_ctx']}}
-           if CONFIG.get('llm_provider', 'ollama') == 'ollama'
+           if not uses_openai_compatible_api()
            else {"temperature": 0.1, "max_tokens": CONFIG['llm_max_ctx'],
                  "response_format": {"type": "json_object"}}),
     }).encode()
 
     provider = CONFIG.get('llm_provider', 'ollama')
     headers = {'Content-Type': 'application/json'}
-    if provider == 'openrouter':
-        headers['Authorization'] = f"Bearer {CONFIG.get('openrouter_key', '')}"
-        headers['HTTP-Referer'] = 'https://github.com/bdh-graph-harness'
-        headers['X-Title'] = 'BDH Graph Harness'
+    if uses_openai_compatible_api(provider):
+        headers['Authorization'] = f"Bearer {CONFIG.get('llm_api_key') or CONFIG.get('openrouter_key', '')}"
         headers['User-Agent'] = 'BDH-Graph-Harness/1.0'
+        if provider == 'openrouter':
+            headers['HTTP-Referer'] = 'https://github.com/bdh-graph-harness'
+            headers['X-Title'] = 'BDH Graph Harness'
 
     def _extract_call():
         req = urllib.request.Request(_config.OLLAMA_LLM_URL, data=data, headers=headers)
         with urllib.request.urlopen(req, timeout=120) as resp:
             result = json.loads(resp.read())
-            if provider == 'openrouter':
+            if uses_openai_compatible_api(provider):
                 choices = result.get('choices', [])
                 content = choices[0].get('message', {}).get('content', '[]') if choices else '[]'
             else:
@@ -131,7 +133,7 @@ def extract_new_concepts(llm_response, query, active_notes, nodes, *, allow_exis
             content = re.sub(r'^json\s*', '', content)
             content = content.strip()
             # Parse the canonical object wrapper, while accepting legacy arrays
-            # and the single-object shape returned by some OpenRouter free models.
+            # and the single-object shape returned by some legacy free models.
             try:
                 parsed = json.loads(content)
             except json.JSONDecodeError:
