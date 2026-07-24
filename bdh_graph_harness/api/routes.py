@@ -155,6 +155,13 @@ async def api_stats(request, app_state: dict) -> web.Response:
         'dormant_neurons': len(dormant),
         'active_neurons': len(n) - len(dormant),
         'top_hebbian': [],
+        'llm_runtime': {
+            'provider': ctx.config.settings.get('llm_provider', 'ollama'),
+            'provider_label': ctx.config.settings.get('llm_provider_label', 'Ollama'),
+            'transport': ctx.config.settings.get('llm_transport', 'ollama-native'),
+            'model': ctx.config.settings.get('llm_model'),
+            'endpoint': ctx.config.settings.get('llm_endpoint'),
+        },
     }
     stats.update(hebbian_tail_stats(s, config=ctx.config.settings))
     if s['synapses']:
