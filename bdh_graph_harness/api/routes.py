@@ -1255,7 +1255,7 @@ async def api_consolidate(request, app_state: dict, ws_clients: set) -> web.Resp
         state_copy = deepcopy(ctx.state)
         results = consolidate(
             state_copy, n, e,
-            config=config, collection=ctx.collection,
+            config=config, collection=ctx.collection, dry_run=True,
         )
         results['dry_run'] = True
         return web.json_response(results)
