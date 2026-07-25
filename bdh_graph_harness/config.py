@@ -73,8 +73,10 @@ CONFIG = {
     'python_exec': sys.executable,
     # Hybrid search (Phase 3.1)
     'hybrid_search': True,
+    'hybrid_fusion': 'rrf',  # 'weighted' | 'rrf'
     'hybrid_alpha': 0.7,   # weight for vector similarity
     'hybrid_beta': 0.3,    # weight for BM25 keyword score
+    'rrf_k': 60,
     'bm25_k1': 1.5,
     'bm25_b': 0.75,
     # Adaptive threshold (Phase 3.3)
