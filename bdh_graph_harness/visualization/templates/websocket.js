@@ -156,9 +156,13 @@ function renderRetrievalDiagnostics(payload = {}) {
 // an empty trace; partial payloads still render whatever the backend provides.
 function normalizeRetrievalTrace(payload) {
   if (!payload || typeof payload !== 'object') return null;
+  const routing = payload.routing && typeof payload.routing === 'object' ? payload.routing : {};
+  const isMultiQuery = Array.isArray(payload.query_variants) && payload.query_variants.length > 1;
   const variants = Array.isArray(payload.query_variants) ? payload.query_variants
-    : (payload.search_queries || payload.retrieval_variants || []);
-  const fusionMethod = payload.fusion_method || payload.fusion || (variants.length ? 'rrf' : 'single');
+    : (Array.isArray(routing.query_variants) ? routing.query_variants
+      : (payload.search_queries || payload.retrieval_variants || []));
+  const fusionMethod = payload.fusion_method || payload.fusion || payload.multi_query_fusion
+    || routing.multi_query_fusion || (isMultiQuery || variants.length > 1 ? 'rrf' : 'single');
   const perVariant = {};
   const noteVariantHits = {};
   notesForTrace(payload).forEach(note => {
@@ -169,7 +173,9 @@ function normalizeRetrievalTrace(payload) {
       noteVariantHits[note.id] = (noteVariantHits[note.id] || 0) + 1;
     });
   });
-  const multiVariantCount = Object.values(noteVariantHits).filter(count => count > 1).length;
+  const multiVariantCount = payload.multi_query_multivariant_hits
+    ?? routing.multi_query_multivariant_hits
+    ?? Object.values(noteVariantHits).filter(count => count > 1).length;
   return {
     query: payload.query || '',
     variants: variants.map((variant, index) => ({
@@ -207,7 +213,9 @@ function renderRetrievalTrace(trace, options = {}) {
   variantsEl.textContent = trace.variants && trace.variants.length
     ? trace.variants.map(v => `${v.label} (w${v.weight})`).join(' · ')
     : 'single query';
-  fusionEl.textContent = trace.fusionMethod || 'single';
+  fusionEl.textContent = trace.variants.length > 1
+    ? `Fused ${trace.variants.length} variants via ${trace.fusionMethod || 'rrf'}`
+    : (trace.fusionMethod || 'single');
 
   const perVariant = trace.perVariant || {};
   const perVariantText = Object.keys(perVariant).length
