@@ -401,11 +401,23 @@ def test_retrieval_panel_exposes_grounding_status_and_next_actions():
         "retrieval-found",
         "retrieval-missing",
         "retrieval-actions",
+        "retrieval-trace-toggle",
+        "retrieval-trace",
+        "trace-query",
+        "trace-variants",
+        "trace-fusion",
+        "trace-per-variant",
+        "trace-multi",
     ]:
         assert f'id="{element_id}"' in html
     assert "function renderRetrievalDiagnostics(" in websocket
     assert "applyRetrievalLens(" in websocket
+    assert "function normalizeRetrievalTrace(" in websocket
+    assert "function renderRetrievalTrace(" in websocket
+    assert "function toggleRetrievalTrace(" in websocket
     assert "#retrieval-status" in styles
+    assert ".retrieval-trace" in styles
+    assert ".trace-block" in styles
 
 
 def test_query_lens_is_reversible_and_does_not_destroy_full_graph_state():
@@ -417,6 +429,22 @@ def test_query_lens_is_reversible_and_does_not_destroy_full_graph_state():
     assert "function restoreFullGraphView(" in controls
     assert "queryLensActive" in core
     assert "retrievalVisibleNodeIds" in core
+
+
+def test_activation_payload_with_provenance_renders_variant_badges():
+    activation = (ROOT / "bdh_graph_harness/visualization/templates/activation.js").read_text()
+    core = (ROOT / "bdh_graph_harness/visualization/templates/graph-core.js").read_text()
+    styles = (ROOT / "bdh_graph_harness/visualization/templates/styles.css").read_text()
+
+    assert "normalizeProvenance(note.matched_by)" in activation
+    assert "provenance-badge" in activation
+    assert "formatProvenanceTooltip(provenance)" in activation
+    assert "function normalizeProvenance(input)" in core
+    assert "function formatProvenanceTooltip(provenance)" in core
+    assert "Matched by" in core
+    assert "provenance-badge" in styles
+    assert ".score-wrap" in styles
+    assert ".tooltip-provenance" in styles
 
 
 def test_fit_resets_camera_baseline_before_restoring_persisted_zoom():
@@ -449,3 +477,27 @@ def test_visualization_presets_and_minimap_are_available_without_replacing_rende
     assert "function updateGraphMinimap(" in graph_init
     assert "#graph-minimap" in styles
     assert "setSourceFilter('all')" not in controls.split("function applyVisualizationPreset(", 1)[-1].split("\n}", 1)[0]
+
+
+def test_canonical_graph_identity_dedupes_duplicate_nodes_and_edges():
+    core = (ROOT / "bdh_graph_harness/visualization/templates/graph-core.js").read_text()
+    init = (ROOT / "bdh_graph_harness/visualization/templates/graph-init.js").read_text()
+
+    assert "function dedupeNodesById(nodes)" in core
+    assert "function canonicalLinkKey(link)" in core
+    assert "function dedupeLinksByCanonicalKey(links)" in core
+    assert "dedupeNodesById(" in init
+    assert "dedupeLinksByCanonicalKey(" in init
+    assert "one canonical edge per relationship" in init
+    assert "Hebbian edges are canonical per undirected pair" in init
+
+
+def test_activation_does_not_replace_full_graph_data_for_ordinary_events():
+    activation = (ROOT / "bdh_graph_harness/visualization/templates/activation.js").read_text()
+
+    assert "nodeActivationOpacity.set" in activation
+    assert "nodeActivationColor.set" in activation
+    assert "linkParticlesState.set" in activation
+    assert "setGraphDataPreservingView" in activation
+    assert "graph.graphData(currentData)" not in activation
+    assert "setGraphDataPreservingView(updated" not in activation

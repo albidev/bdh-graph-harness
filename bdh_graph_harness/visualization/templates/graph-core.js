@@ -380,6 +380,36 @@ function linkKey(link) {
     : `${target}→${source}:${link.type || 'syn'}`;
 }
 
+// Canonical identity helpers — one node / one edge per canonical concept.
+// These are used when structural updates arrive so the frontend never renders
+// duplicate graph entities even if the backend payload contains duplicates.
+function dedupeNodesById(nodes) {
+  const seen = new Map();
+  (nodes || []).forEach(node => {
+    if (!node || !node.id) return;
+    if (!seen.has(node.id)) seen.set(node.id, node);
+  });
+  return [...seen.values()];
+}
+
+function canonicalLinkKey(link) {
+  const source = linkEndpointId(link.source);
+  const target = linkEndpointId(link.target);
+  const type = link.type || 'wikilink';
+  const sorted = source < target ? [source, target] : [target, source];
+  return `${sorted[0]}↔${sorted[1]}:${type}`;
+}
+
+function dedupeLinksByCanonicalKey(links) {
+  const seen = new Map();
+  (links || []).forEach(link => {
+    if (!link || !link.source || !link.target) return;
+    const key = canonicalLinkKey(link);
+    if (!seen.has(key)) seen.set(key, link);
+  });
+  return [...seen.values()];
+}
+
 function isAmbientFlowLink(link) {
   // Ambient flow disabled — particles only on directly activated synapses.
   return false;
@@ -1478,12 +1508,43 @@ function showActivatedTooltip(note, event) {
   html += `<span>Hebbian boost</span><b>${Number(note.hebbian_boost || 0).toFixed(4)}</b>`;
   html += `<span>Hop</span><b>${note.hop ?? 0}</b>`;
   html += '</div>';
+  const provenance = normalizeProvenance(note.matched_by);
+  if (provenance.length) {
+    html += '<div class="tooltip-provenance"><strong>Matched by</strong>';
+    provenance.forEach(match => {
+      const variant = escapeHtml(match.variant || 'variant');
+      const language = escapeHtml(match.language || 'default');
+      const rank = match.rank != null ? `rank ${match.rank}` : 'matched';
+      const score = Number(match.score || 0).toFixed(3);
+      html += `<div class="provenance-row"><span>${variant} · ${language}</span><span>${rank} · ${score}</span></div>`;
+    });
+    html += '</div>';
+  }
   if (note.relative_path || note.path) html += `<div class="tooltip-path">${escapeHtml(note.relative_path || note.path)}</div>`;
   if (note.parent_id) html += `<div class="tooltip-path">From ${escapeHtml(note.parent_id)}</div>`;
   tooltipEl.innerHTML = html;
   tooltipEl.hidden = false;
   tooltipEl.style.display = 'block';
   positionTooltip(event);
+}
+
+// Normalize the optional `matched_by` provenance field. Accepts legacy payloads
+// where the field is missing, malformed, or not an array.
+function normalizeProvenance(input) {
+  if (!input) return [];
+  if (Array.isArray(input)) return input.filter(item => item && typeof item === 'object');
+  if (typeof input === 'object') return [input];
+  return [];
+}
+
+function formatProvenanceTooltip(provenance) {
+  return provenance.map(match => {
+    const variant = match.variant || 'variant';
+    const language = match.language || 'default';
+    const rank = match.rank != null ? `#${match.rank}` : 'matched';
+    const score = Number(match.score || 0).toFixed(3);
+    return `${variant} (${language}) ${rank} · ${score}`;
+  }).join('\n');
 }
 
 function hideTooltip() {

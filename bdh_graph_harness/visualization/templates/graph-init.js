@@ -95,10 +95,16 @@ function initNetwork(graphData, options = {}) {
 
   const firstGraph = !graph;
   const preserveView = options.preserveView !== false && !firstGraph;
-  const graphNodes = graphData.nodes || [];
-  const graphEdges = graphData.edges || [];
-  const graphHebbian = graphData.hebbian || [];
-  const graphPhantom = graphData.phantom || [];
+  // Structural deduplication is handled by graph-init.js helpers, but we keep
+  // the source-of-truth maps canonical as well so downstream UI never splits one
+  // note into two entries.
+  const canonicalNodes = dedupeNodesById((graphData.nodes || []));
+  const canonicalEdges = dedupeLinksByCanonicalKey((graphData.edges || []));
+
+  const graphNodes = JSON.parse(JSON.stringify(canonicalNodes));
+  const graphEdges = JSON.parse(JSON.stringify(canonicalEdges));
+  const graphHebbian = JSON.parse(JSON.stringify(graphData.hebbian || []));
+  const graphPhantom = JSON.parse(JSON.stringify(graphData.phantom || []));
   const graphStats = graphData.stats || {};
 
   sourceGraphData = JSON.parse(JSON.stringify(graphData));
@@ -137,9 +143,12 @@ function initNetwork(graphData, options = {}) {
     incrementDegree(edge.source, edge.target);
   });
 
-  hebbianMap = {};
+  // Hebbian degree increments with dedupe-by-pair (direction-insensitive).
+  const hebbianDegreeSeen = new Set();
   graphHebbian.forEach(synapse => {
-    const key = synapse.note_a + '|' + synapse.note_b;
+    const key = [synapse.note_a, synapse.note_b].sort().join('|');
+    if (hebbianDegreeSeen.has(key)) return;
+    hebbianDegreeSeen.add(key);
     hebbianMap[key] = synapse.weight;
     incrementDegree(synapse.note_a, synapse.note_b);
   });
@@ -241,8 +250,10 @@ function initNetwork(graphData, options = {}) {
   fgLinks = [];
   edgeInfoMap = {};
   const nodeIdSet = new Set(activeNodeIds);
-  const renderedStructural = new Set();
 
+  // Structural edge rendering uses an undirected pair + type key to guarantee
+  // one canonical edge per relationship even for multi-query payloads.
+  const renderedStructural = new Set();
   graphEdges.forEach(edge => {
     if (!nodeIdSet.has(edge.source) || !nodeIdSet.has(edge.target)) return;
     const type = edge.type || 'wikilink';
@@ -278,8 +289,14 @@ function initNetwork(graphData, options = {}) {
     });
   });
 
+  // Phantom links are canonical per directed pair; duplicate similarity links
+  // from different variants collapse to the same edge.
+  const renderedPhantom = new Set();
   graphPhantom.forEach(link => {
     if (!nodeIdSet.has(link.source) || !nodeIdSet.has(link.target)) return;
+    const dedupeKey = [link.source, link.target].sort().join('↔');
+    if (renderedPhantom.has(dedupeKey)) return;
+    renderedPhantom.add(dedupeKey);
     const id = `phantom_${link.source}→${link.target}`;
     edgeInfoMap[id] = {
       source_title: (nodeDataMap[link.source] || {}).display_label || (nodeDataMap[link.source] || {}).title || link.source,
@@ -302,12 +319,23 @@ function initNetwork(graphData, options = {}) {
 
   let hebbianRendered = 0;
   let hebbianSkipped = 0;
+  // Hebbian edges are canonical per undirected pair; keep the strongest weight.
+  const renderedHebbian = new Map();
   graphHebbian.forEach(synapse => {
     if (!nodeIdSet.has(synapse.note_a) || !nodeIdSet.has(synapse.note_b)) return;
     if (synapse.weight < HEBBIAN_MIN_RENDER_WEIGHT) {
       hebbianSkipped += 1;
       return;
     }
+    const pair = [synapse.note_a, synapse.note_b].sort().join('↔');
+    if (renderedHebbian.has(pair)) {
+      const existing = renderedHebbian.get(pair);
+      if (synapse.weight <= existing.weight) return;
+      // Replace with stronger duplicate.
+    }
+    renderedHebbian.set(pair, synapse);
+  });
+  renderedHebbian.forEach(synapse => {
     const id = `hebb_${synapse.note_a}→${synapse.note_b}`;
     edgeInfoMap[id] = {
       source_title: (nodeDataMap[synapse.note_a] || {}).display_label || (nodeDataMap[synapse.note_a] || {}).title || synapse.note_a,
@@ -355,8 +383,8 @@ function initNetwork(graphData, options = {}) {
   }
 
   const data = {
-    nodes: fgNodes.map(node => graphNodeSnapshot(node, liveNodeById.get(node.id) || {})),
-    links: fgLinks.map(graphLinkSnapshot),
+    nodes: dedupeNodesById(fgNodes.map(node => graphNodeSnapshot(node, liveNodeById.get(node.id) || {}))),
+    links: dedupeLinksByCanonicalKey(fgLinks.map(graphLinkSnapshot)),
   };
 
   if (firstGraph) {
@@ -623,8 +651,8 @@ function setGraphDataPreservingView(data, options = {}) {
   });
 
   const safeData = {
-    nodes: data.nodes.map(node => graphNodeSnapshot(node, liveNodeById.get(node.id) || {})),
-    links: (data.links || []).map(graphLinkSnapshot),
+    nodes: dedupeNodesById(data.nodes.map(node => graphNodeSnapshot(node, liveNodeById.get(node.id) || {}))),
+    links: dedupeLinksByCanonicalKey((data.links || []).map(graphLinkSnapshot)),
   };
   safeData.links.sort((first, second) => {
     const order = { wikilink: 0, phantom: 1, project_context: 2, counterpart: 3, project_reference: 3, hebbian: 4, neurogenesis: 5 };
