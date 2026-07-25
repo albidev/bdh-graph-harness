@@ -211,9 +211,11 @@ function renderRetrievalTrace(trace, options = {}) {
   }
 
   queryEl.textContent = trace.query || '—';
-  variantsEl.textContent = trace.variants && trace.variants.length
-    ? trace.variants.map(v => `${v.text} (w${v.weight})`).join(' · ')
-    : 'single query';
+  const variantCount = document.getElementById('trace-variant-count');
+  if (variantCount) variantCount.textContent = trace.variants.length;
+  variantsEl.innerHTML = trace.variants && trace.variants.length
+    ? trace.variants.map((v, index) => `<li class="trace-variant-row"><span class="trace-variant-index">${index + 1}</span><span class="trace-variant-copy">${escapeHtml(v.text)}</span><span class="trace-variant-meta">${escapeHtml(v.language)} · w${v.weight}</span></li>`).join('')
+    : '<li class="trace-empty">single query</li>';
   fusionEl.textContent = trace.variants.length > 1
     ? `Fused ${trace.variants.length} variants via ${trace.fusionMethod || 'rrf'}`
     : (trace.fusionMethod || 'single');
