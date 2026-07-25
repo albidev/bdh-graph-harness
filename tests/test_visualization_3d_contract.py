@@ -422,6 +422,15 @@ def test_retrieval_panel_exposes_grounding_status_and_next_actions():
     assert ".trace-block" in styles
 
 
+def test_multi_query_trace_shows_variant_text_and_opens_for_multiple_variants():
+    websocket = (ROOT / "bdh_graph_harness/visualization/templates/websocket.js").read_text()
+
+    assert "variant.query ||" in websocket
+    assert "const hasMultipleVariants" in websocket
+    assert "container.hidden = !hasMultipleVariants" in websocket
+    assert "Fused ${trace.variants.length} variants" in websocket
+
+
 def test_query_lens_is_reversible_and_does_not_destroy_full_graph_state():
     controls = (ROOT / "bdh_graph_harness/visualization/templates/ui-controls.js").read_text()
     core = (ROOT / "bdh_graph_harness/visualization/templates/graph-core.js").read_text()
