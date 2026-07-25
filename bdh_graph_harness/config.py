@@ -257,6 +257,34 @@ def load_config(config_path: str | None = None):
 
 
 # ---------------------------------------------------------------------------
+# Config overlay — for parametric evaluation
+# ---------------------------------------------------------------------------
+
+from contextlib import contextmanager
+
+
+@contextmanager
+def config_overlay(overrides: dict):
+    """Temporarily override CONFIG keys inside a narrow scope.
+
+    Use this for parametric ablations and tests: changes are applied
+    in-process and reverted on exit. Does not touch the on-disk config
+    file or persisted Hebbian state.
+    """
+    original = {k: CONFIG[k] for k in overrides if k in CONFIG}
+    absent = [k for k in overrides if k not in CONFIG]
+    CONFIG.update(overrides)
+    try:
+        yield
+    finally:
+        for k in overrides:
+            if k in original:
+                CONFIG[k] = original[k]
+            elif k in absent:
+                CONFIG.pop(k, None)
+
+
+# ---------------------------------------------------------------------------
 # Retry helper
 # ---------------------------------------------------------------------------
 
