@@ -233,10 +233,13 @@
   <div id="panel-resize" role="separator" aria-orientation="vertical" aria-label="Resize inspector"></div>
 
   <aside id="side-panel" aria-label="Query and graph inspector">
-    <button id="collapse-btn" class="panel-toggle-btn panel-toggle-floating" type="button" onclick="togglePanel()"
-            title="Hide inspector" aria-label="Hide inspector" aria-expanded="true" aria-controls="side-panel">
-      <span class="panel-toggle-icon" aria-hidden="true">▸</span>
-    </button>
+    <div class="panel-heading">
+      <div aria-hidden="true"></div>
+      <button id="collapse-btn" class="panel-toggle-btn" type="button" onclick="togglePanel()"
+              title="Hide inspector" aria-label="Hide inspector" aria-expanded="true" aria-controls="side-panel">
+        <span class="panel-toggle-icon" aria-hidden="true">▸</span>
+      </button>
+    </div>
     <section id="query-section">
       <div class="section-heading"><span class="eyebrow">Retrieval</span><h2>Query the graph</h2></div>
       <div class="query-wrap">

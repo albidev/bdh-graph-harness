@@ -555,13 +555,6 @@ body.panel-resizing #graph-container {
   transition: color 160ms ease, border-color 160ms ease, background 160ms ease;
 }
 
-.panel-toggle-floating {
-  position: absolute;
-  z-index: 2;
-  top: 12px;
-  right: 12px;
-}
-
 .panel-toggle-btn:hover {
   color: var(--text);
   border-color: rgba(88, 166, 255, 0.65);
