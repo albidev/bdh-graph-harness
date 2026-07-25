@@ -162,6 +162,34 @@ curl http://localhost:8643/api/vaults
 
 `vault_id` is also accepted by MCP tools such as `query(question="...", vault_id="research")`. Omitting it selects `default_vault` (or the first configured vault).
 
+### Multi-query retrieval
+
+When `multi_query_enabled: true` in config, clients can send `query_variants` alongside the primary query. The server retrieves seed candidates for each variant, merges them via reciprocal-rank fusion (RRF) or weighted-max, then performs one canonical graph expansion for the primary query. It returns canonical notes with per-note provenance (`matched_by`, `variant_hits`). This lets callers explore a query from multiple angles (e.g. Italian + English rewrites, paraphrases, keyword decompositions) in a single round-trip. The feature is opt-in; when disabled, supplied variants are ignored and the legacy single-query path is used.
+
+```bash
+# Multi-query: fan out across variant rewrites
+curl -X POST http://localhost:8643/api/query \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "query": "How does retrieval work?",
+    "query_variants": [
+      {"query": "How does retrieval work?", "language": "en"},
+      {"query": "Come funziona il retrieval?", "language": "it"}
+    ]
+  }'
+```
+
+The `routing` object in the response always includes these contract fields regardless of path:
+
+| Field | Description |
+|-------|-------------|
+| `multi_query_enabled` | Whether multi-query was active for this request |
+| `multi_query_variant_count` | Number of variants actually evaluated (1 when no variants) |
+| `query_variants` | Array of variant objects (`query`, `language`, `weight`) |
+| `multi_query_fusion` | Fusion strategy used (`'rrb'`, `'weighted'`, or `null`) |
+| `multi_query_unique_notes` | Count of distinct notes returned |
+| `multi_query_multivariant_hits` | Notes matched by 2+ variants (0 for single-query) |
+
 ### Running as a service (macOS)
 
 ```bash
@@ -201,6 +229,8 @@ See `bdh-config.yaml` for all parameters. Key ones:
 | `consolidation_weak_max_frequency` | 1.0 | Stale weak traces above this frequency survive |
 | `consolidation_weak_min_age_hours` | 48 | Fresh weak traces get a grace period before pruning |
 | `neurogenesis_source_edges_enabled` | `true` | Materialize validated `neurogenesis_source` generated edges from `activated_from_ids` frontmatter |
+| `multi_query_enabled` | `false` | Enable multi-query fan-out; when `false`, `query_variants` in requests are silently ignored |
+| `multi_query_max_variants` | 3 | Hard cap on evaluated variants per request (after dedup and empty-drop) |
 | `consolidation_dormant_persist_cycles` | 3 | Remove nodes dormant for N+ consolidation cycles |
 | `consolidation_prune_dormant_nodes` | `true` | Delete stale dormant nodes (not just hide) |
 
