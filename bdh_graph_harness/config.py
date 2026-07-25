@@ -61,6 +61,7 @@ CONFIG = {
     'hub_degree_threshold': 25,      # dampen only very high-degree hubs (e.g. wiki/index)
     'max_neighbors_per_hop': 10,
     'hop_decay': 0.5,  # score decay per hop (single application, not compound)
+    'hebbian_gain': 0.0,  # multiplier on learned synapse weight during propagation; 0 = disabled
     'alpha': 0.7,
     'beta': 0.3,
     'decay': 0.95,
@@ -82,7 +83,7 @@ CONFIG = {
     'bm25_k1': 1.5,
     'bm25_b': 0.75,
     # Adaptive threshold (Phase 3.3)
-    'adaptive_threshold': True,
+    'adaptive_threshold': False,
     'threshold_floor': 0.15,
     # Online plasticity (Phase 3.2)
     'online_plasticity': True,
@@ -143,7 +144,7 @@ CONFIG = {
     'semantic_consolidation_source': 'nightly_semantic_consolidation',
     'semantic_consolidation_frequency_increment': 0.3,
     # Integrate-and-Fire attention model
-    'experimental_integrate_fire': False,  # IaF attention — enable via bdh-config.yaml
+    'experimental_integrate_fire': False,  # IaF is experimental and currently underperforming; keep off by default
     'iaf_tau_base': 0.15,       # base firing threshold
     'iaf_tau_k': 0.075,         # degree scaling factor: τ_j = base + k * log(1 + deg)
     'iaf_max_steps': 5,         # max integration steps

@@ -33,17 +33,28 @@ def compute_adaptive_threshold(scores, floor=0.05, min_activations=3):
     Returns:
         float threshold value
     """
-    if not scores or len(scores) < 3:
+    if not scores:
         return floor
 
     sorted_scores = sorted(scores, reverse=True)
+    # Guarantee min_activations before any statistical filtering.
+    if len(sorted_scores) <= min_activations:
+        return floor
 
-    # Statistical threshold
+    # Statistical threshold: median + 0.3*std
     median = statistics.median(scores)
     stdev = statistics.stdev(scores) if len(scores) > 1 else 0.0
     threshold = max(median + 0.3 * stdev, floor)
 
-    logger.info(f"Adaptive threshold: median+0.3std={median + 0.3 * stdev:.3f}, floor={floor} → {threshold:.3f}")
+    # If threshold is so strict it drops below min_activations, relax it,
+    # but never below floor.
+    kept = sum(1 for s in scores if s >= threshold)
+    if kept < min_activations:
+        relaxed = sorted_scores[min_activations - 1]
+        threshold = max(relaxed, floor)
+
+    logger.info(f"Adaptive threshold: median+0.3std={median + 0.3 * stdev:.3f}, floor={floor}, "
+                f"min_activations={min_activations} → {threshold:.3f}")
     return threshold
 
 
@@ -344,6 +355,14 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
     for note_id, score in seeds:
         queue.append((note_id, score, 0, None))
 
+    # Unified threshold policy for propagation
+    traversal_threshold = CONFIG['active_threshold']
+    if CONFIG.get('adaptive_threshold', False) and len(scores) >= 5:
+        traversal_threshold = compute_adaptive_threshold(
+            list(scores.values()),
+            floor=CONFIG.get('threshold_floor', 0.05),
+        )
+
     while queue:
         current_id, score, hop, parent_id = queue.popleft()
         if hop >= max_hop:
@@ -365,13 +384,25 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
         neighbors = neighbors[:CONFIG['max_neighbors_per_hop']]
 
         for target_id, n_sim in neighbors:
-            # Decay score by hop distance (single decay per hop)
+            # Decay score by hop distance (single decay per hop).
             new_score = score * CONFIG.get('hop_decay', 0.5)
 
             # Hub dampening for the target
             if CONFIG['hub_dampening'] and degree.get(target_id, 0) > CONFIG['hub_degree_threshold']:
                 dampen = 1.0 / (1.0 + 0.15 * (degree[target_id] - CONFIG['hub_degree_threshold']))
                 new_score *= dampen
+
+            # Hebbian gain: learned synaptic weight between current_id and target_id
+            # boosts propagation when the synapse exists. hebbian_gain=0 reproduces old behavior.
+            hebbian_gain = CONFIG.get('hebbian_gain', 0.0)
+            if hebbian_gain > 0 and hebbian_state:
+                syn_key = (
+                    f"{current_id}|{target_id}" if current_id < target_id
+                    else f"{target_id}|{current_id}"
+                )
+                syn_weight = hebbian_state.get('synapses', {}).get(syn_key, {}).get('weight', 0.0)
+                if syn_weight > 0:
+                    new_score *= (1.0 + hebbian_gain * syn_weight)
 
             if target_id in active:
                 if new_score > active[target_id]:
@@ -382,7 +413,7 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
                             'parent_id': current_id,
                             'final_score': round(new_score, 4),
                         })
-            elif new_score > CONFIG['active_threshold']:
+            elif new_score > traversal_threshold:
                 active[target_id] = new_score
                 activation_details[target_id] = {
                     'role': 'graph_neighbor',
