@@ -46,7 +46,7 @@ def _note_variants(query_entry: dict) -> list[dict]:
     return [v for v in variants if v.get("query")]
 
 
-def _valid_variants(query_entry: dict, max_variants: int = 4) -> list[dict]:
+def _valid_variants(query_entry: dict, max_variants: int = 3) -> list[dict]:
     """Normalize variants the way the future backend contract will:
 
     - strip empty / whitespace-only queries
@@ -73,7 +73,7 @@ def _valid_variants(query_entry: dict, max_variants: int = 4) -> list[dict]:
     return result
 
 
-def audit_contract(golden_path: Path | str, max_variants: int = 4) -> dict:
+def audit_contract(golden_path: Path | str, max_variants: int = 3) -> dict:
     """Run contract-level checks on the Issue #19 golden set.
 
     Returns a dict with counts and any failing checks per query.
@@ -261,7 +261,7 @@ def main() -> None:
     parser.add_argument(
         "--max-variants",
         type=int,
-        default=4,
+        default=3,
         help="Maximum number of query variants the contract allows",
     )
     parser.add_argument(

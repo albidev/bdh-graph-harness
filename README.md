@@ -198,7 +198,7 @@ cp ai.bdh.graph-harness.plist ~/Library/LaunchAgents/
 launchctl load ~/Library/LaunchAgents/ai.bdh.graph-harness.plist
 ```
 
-The service auto-restarts on crash (`KeepAlive: true`). Logs at `~/.hermes/logs/bdh-server.log`. The `start-server.sh` wrapper exports `OPENROUTER_API_KEY` from `~/.hermes/.env` before launching.
+The service auto-restarts on crash (`KeepAlive: true`). Logs at `~/.hermes/logs/bdh-server.log`. The `start-server.sh` wrapper loads the configured provider credential from the environment (`OLLAMA_API_KEY`, `OPENROUTER_API_KEY`, or `OPENCODE_ZEN_API_KEY`) before launching.
 
 ## Config
 
@@ -215,8 +215,10 @@ See `bdh-config.yaml` for all parameters. Key ones:
 | `hybrid_search` | `false` | Enable BM25 hybrid mode (disabled by default for Italian vaults) |
 | `hybrid_alpha` | 0.7 | Vector search weight (only when `hybrid_search: true`) |
 | `hybrid_beta` | 0.3 | BM25 search weight (only when `hybrid_search: true`) |
-| `llm_provider` | `openrouter` | `openrouter` (any OpenAI-compatible endpoint) or `ollama` (local) |
-| `llm_model` | `openrouter/free` | Model name for chosen provider |
+| `llm_provider` | `ollama` | `ollama` (local), `ollama-cloud`, or `openrouter` (OpenAI-compatible endpoints) |
+| `llm_model` | `gemma4:12b-mlx` | Model name for chosen provider |
+| `llm_base_url` | — | OpenAI-compatible base URL for `ollama-cloud` |
+| `llm_api_key` | — | Environment-expanded credential for the selected provider |
 | `api_port` | 8643 | Server port |
 | `quality_threshold` | 0.25 | Quality score below this → node marked dormant |
 | `quality_reactivation_score` | 0.50 | Activation score to re-awaken a dormant node |
@@ -247,7 +249,7 @@ python -m pytest -q
 python -m pytest -q --cov=bdh_graph_harness --cov-branch --cov-report=term-missing
 ```
 
-The current `develop` baseline is **214 passing tests** and **50% package branch coverage**. The mobile/provenance branch has been verified with **222 passing tests**. The target is 100%, without excluding application modules just to manufacture a prettier number. Regression coverage is already complete for state persistence, consolidation, node quality, BM25, mobile visualization layout, and neurogenesis provenance; the remaining work focuses on API/WebSocket, CLI/MCP, graph/cache, embeddings, and provider failure paths.
+The branch currently verifies **361 passing tests**. The `develop` baseline remains documented separately where relevant; this branch adds regression coverage for multi-query retrieval, API contracts, provenance, WebSocket ordering, and the retrieval inspector UI.
 
 See [`docs/testing.md`](docs/testing.md) for the coverage policy, exact commands, and multi-vault regression requirements. [`docs/coverage.md`](docs/coverage.md) records the current versioned baseline; GitHub Actions keeps the XML and JSON report for every later `develop` or `main` run.
 

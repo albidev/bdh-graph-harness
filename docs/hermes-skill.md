@@ -157,6 +157,19 @@ llm_model: gemma4:12b-mlx
 - Uses Ollama `/api/chat` endpoint
 - Payload: `{"model": "...", "messages": [...], "options": {"temperature": 0.3, "num_ctx": 4096}}`
 
+### Ollama Cloud (OpenAI-compatible)
+
+```yaml
+llm_provider: ollama-cloud
+llm_model: deepseek-v4-flash:cloud
+llm_base_url: https://ollama.com/v1
+llm_api_key: ${OLLAMA_API_KEY}
+```
+
+- Uses Ollama Cloud `/v1/chat/completions`
+- Keep the credential in the environment; do not commit it to the config
+- Embeddings remain on the local Ollama endpoint
+
 ### OpenRouter (cloud, OpenAI-compatible)
 
 ```yaml
@@ -167,13 +180,12 @@ openrouter_key: ${OPENROUTER_API_KEY}  # env var expansion
 ```
 
 - Uses OpenAI-compatible `/v1/chat/completions` endpoint
-- Headers: `Authorization: Bearer <key>`
-- Config env var expansion: `${OPENROUTER_API_KEY}` is expanded at config load time
+- Config env var expansion keeps credentials out of committed config
 
-Start the server with the API key in the environment:
+Start the server with the selected provider credential in the environment:
 
 ```bash
-export OPENROUTER_API_KEY=your-key-here
+export OLLAMA_API_KEY=your-key-here  # or the key for the selected provider
 cd /path/to/bdh-graph-harness && python -m bdh_graph_harness --config bdh-config.yaml --serve
 ```
 
@@ -196,7 +208,6 @@ The harness caches the full graph (nodes + edges + per-file mtimes) in `.bdh-gra
 
 Override with `--no-cache` to force full rebuild.
 
-## Visualization
 ## Visualization
 The web UI at `:8643` shows:
 - **Nodes** colored by activation state or by Obsidian tags (toggle)

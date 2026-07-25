@@ -1,9 +1,9 @@
 # BDH Graph Harness — Evidence-Driven Refactor Report
 
-**Branch:** `refactor/evidence-driven-refactor`  
-**Run date:** 2026-07-25  
-**Vault:** `/Users/albi/Documents/Hermes` — 353 neurons  
-**Golden set:** `benchmarks/golden_set.yaml` v2, 40 queries  
+**Branch:** `refactor/evidence-driven-refactor`
+**Run date:** 2026-07-25
+**Vault:** `/Users/albi/Documents/Hermes` — 353 neurons
+**Golden set:** `benchmarks/golden_set.yaml` v2, 40 queries
 **Status:** draft, `reviewed: false`
 
 ---
@@ -23,7 +23,7 @@
 - RRF and weighted hybrid **do not beat vector-only** on MRR.
 - Hybrid methods do improve **Recall@5** slightly (+1.7% over vector-only).
 
-**Default config change:**  
+**Default config change:**
 BDH default is now `hybrid_search: true` with `hybrid_fusion: rrf`, but per-vault tuning is required. The `bdh-config.local.yaml` for the Hermes vault keeps `hybrid_search: true` for now; after golden-set review we can decide if vector-only should be the local default.
 
 ---
