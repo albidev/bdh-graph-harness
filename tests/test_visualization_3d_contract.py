@@ -385,7 +385,9 @@ def test_panel_visibility_uses_one_toggle_inside_each_panel():
     assert 'id="panel-rail"' not in html
     assert 'id="expand-controls"' not in html
     assert 'id="expand-panel"' not in html
-    assert 'class="panel-heading"' in html
+    assert 'class="panel-heading"' not in html
+    assert 'panel-toggle-floating' in html
+    assert '.panel-toggle-floating' in styles
     assert 'body.panel-collapsed #side-panel .panel-heading' in styles
     assert 'body.controls-collapsed #control-dock .dock-heading' in styles
     assert 'function syncPanelToggleUI()' in controls
