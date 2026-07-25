@@ -146,6 +146,92 @@ function renderRetrievalDiagnostics(payload = {}) {
   if (normalizedQuery.includes('branch')) missingItems.push('branch name and checkout state');
   missing.textContent = missingItems.length ? missingItems.join(' · ') : 'No obvious evidence gap in the retrieved context.';
   if (focusButton) focusButton.disabled = !notes.length;
+
+  // Optional retrieval trace — tolerates missing fields so it never blocks rendering.
+  const trace = normalizeRetrievalTrace(payload);
+  renderRetrievalTrace(trace, { notes });
+}
+
+// Normalize optional multi-query provenance fields. Missing / legacy payloads produce
+// an empty trace; partial payloads still render whatever the backend provides.
+function normalizeRetrievalTrace(payload) {
+  if (!payload || typeof payload !== 'object') return null;
+  const variants = Array.isArray(payload.query_variants) ? payload.query_variants
+    : (payload.search_queries || payload.retrieval_variants || []);
+  const fusionMethod = payload.fusion_method || payload.fusion || (variants.length ? 'rrf' : 'single');
+  const perVariant = {};
+  const noteVariantHits = {};
+  notesForTrace(payload).forEach(note => {
+    const provenance = normalizeProvenance(note.matched_by);
+    provenance.forEach(match => {
+      const variant = match.variant || 'variant-0';
+      perVariant[variant] = (perVariant[variant] || 0) + 1;
+      noteVariantHits[note.id] = (noteVariantHits[note.id] || 0) + 1;
+    });
+  });
+  const multiVariantCount = Object.values(noteVariantHits).filter(count => count > 1).length;
+  return {
+    query: payload.query || '',
+    variants: variants.map((variant, index) => ({
+      label: variant.label || variant.language || `variant-${index}`,
+      language: variant.language || 'default',
+      weight: variant.weight != null ? Number(variant.weight).toFixed(2) : '1.00',
+    })),
+    fusionMethod,
+    perVariant,
+    multiVariantCount,
+  };
+}
+
+function notesForTrace(payload) {
+  if (Array.isArray(payload.activated_notes)) return payload.activated_notes;
+  if (Array.isArray(payload.notes)) return payload.notes;
+  return lastRetrievalNotes || [];
+}
+
+function renderRetrievalTrace(trace, options = {}) {
+  const container = document.getElementById('retrieval-trace');
+  const queryEl = document.getElementById('trace-query');
+  const variantsEl = document.getElementById('trace-variants');
+  const fusionEl = document.getElementById('trace-fusion');
+  const perVariantEl = document.getElementById('trace-per-variant');
+  const multiEl = document.getElementById('trace-multi');
+  if (!container || !queryEl || !variantsEl || !fusionEl || !perVariantEl || !multiEl) return;
+
+  if (!trace) {
+    container.hidden = true;
+    return;
+  }
+
+  queryEl.textContent = trace.query || '—';
+  variantsEl.textContent = trace.variants && trace.variants.length
+    ? trace.variants.map(v => `${v.label} (w${v.weight})`).join(' · ')
+    : 'single query';
+  fusionEl.textContent = trace.fusionMethod || 'single';
+
+  const perVariant = trace.perVariant || {};
+  const perVariantText = Object.keys(perVariant).length
+    ? Object.entries(perVariant).map(([variant, count]) => `${variant}: ${count}`).join(' · ')
+    : 'no variant breakdown';
+  perVariantEl.textContent = perVariantText;
+
+  const noteCount = options.notes ? options.notes.length : lastRetrievalNotes.length;
+  multiEl.textContent = trace.multiVariantCount > 0
+    ? `${trace.multiVariantCount} of ${noteCount} notes matched by multiple variants`
+    : 'no multi-variant matches';
+
+  // Show the toggle button whenever the backend provided variant metadata.
+  const toggleBtn = document.getElementById('retrieval-trace-toggle');
+  if (toggleBtn) toggleBtn.hidden = !(trace.variants && trace.variants.length);
+}
+
+function toggleRetrievalTrace() {
+  const container = document.getElementById('retrieval-trace');
+  const button = document.getElementById('retrieval-trace-toggle');
+  if (!container) return;
+  const showing = !container.hidden;
+  container.hidden = showing;
+  if (button) button.textContent = showing ? 'Trace' : 'Hide trace';
 }
 
 function focusRetrievalEvidence() {

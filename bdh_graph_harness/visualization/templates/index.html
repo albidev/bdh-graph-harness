@@ -265,6 +265,14 @@
         <div id="retrieval-actions" class="retrieval-actions">
           <button type="button" id="retrieval-focus-btn" onclick="focusRetrievalEvidence()">Focus evidence</button>
           <button type="button" id="retrieval-full-btn" onclick="restoreFullGraphView()">Full graph</button>
+          <button type="button" id="retrieval-trace-toggle" onclick="toggleRetrievalTrace()">Trace</button>
+        </div>
+        <div id="retrieval-trace" class="retrieval-trace" hidden>
+          <div class="trace-block"><small>Original query</small><p id="trace-query">—</p></div>
+          <div class="trace-block"><small>Variants accepted</small><p id="trace-variants">—</p></div>
+          <div class="trace-block"><small>Fusion method</small><p id="trace-fusion">—</p></div>
+          <div class="trace-block"><small>Notes per variant</small><p id="trace-per-variant">—</p></div>
+          <div class="trace-block"><small>Multi-variant notes</small><p id="trace-multi">—</p></div>
         </div>
       </div>
     </section>
