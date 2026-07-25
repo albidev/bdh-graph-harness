@@ -61,16 +61,16 @@ Every entry uses the same YAML schema as the existing golden sets, with an optio
 
 Two modes:
 
-- `python benchmarks/run_issue19_audit.py --mode contract`  
-  Validates the golden-set contract: bounds, deduplication, mixed-language labeling, and write-semantics preservation.  This fails only if the golden set itself is malformed; it does not need the vault or embeddings.
+- `python benchmarks/run_issue19_audit.py --mode contract`
+  Validates the golden-set contract: bounds, deduplication, mixed-language labeling, and write-semantics preservation. This fails only if the golden set itself is malformed; it does not need the vault or embeddings.
 
-- `python benchmarks/run_issue19_audit.py --mode baseline`  
-  Runs the Issue #19 golden set through the existing ablation runner to record the **current** single-query baseline.  This requires the real vault and embeddings.
+- `python benchmarks/run_issue19_audit.py --mode baseline`
+  Runs the Issue #19 golden set through the existing ablation runner to record the **current** single-query baseline. This requires the real vault and embeddings.
 
-- `python benchmarks/run_issue19_audit.py --mode both --output benchmarks/issue19_audit.json`  
+- `python benchmarks/run_issue19_audit.py --mode both --output benchmarks/issue19_audit.json`
   Runs both and writes the full report.
 
-## Expected future request contract
+## Request contract
 
 Existing clients stay valid:
 
@@ -97,47 +97,30 @@ Rules:
 
 - `query` is always required and is the **write-path signal**.
 - `query_variants` is optional.  Empty and exact-duplicate variants are removed.
-- No more than `max_variants` distinct variants are accepted (default 4).
+- No more than `max_variants` distinct variants are accepted (default 3).
 - `language` is opaque metadata; the backend may ignore it.
-- `weight` is a per-variant fusion hint; `rrf` ignores it, `weighted` uses it.
+- `weight` is a per-variant fusion hint; `rrb` ignores it, `weighted` uses it.
 - The legacy bridge field `search_query` remains accepted as an alias for the single variant `query`.
 
-## Provenance fields (reserved, backward-compatible)
+## Provenance fields (implemented, backward-compatible)
 
-Current activated-note payload shape already supports diagnostic fields:
-
-```json
-{
-  "id": "canonical-note-id",
-  "title": "...",
-  "score": 0.84,
-  "role": "seed",
-  "hop": 0,
-  "parent_id": null,
-  "vector_score": 0.81,
-  "bm25_score": 0.44,
-  "hybrid_score": 0.84,
-  "hebbian_boost": 0.0,
-  "final_score": 0.84
-}
-```
-
-Future additive field:
+Activated notes expose additive provenance without changing the canonical note identity:
 
 ```json
 "matched_by": [
   {"variant": "variant-0", "language": "en", "rank": 1, "score": 0.86}
-]
+],
+"variant_hits": 2
 ```
 
-Adding `matched_by` must not break existing clients; older payloads simply omit it.
+The UI renders this provenance as compact variant badges and the retrieval trace summarizes the per-variant counts. Older clients can ignore these fields safely.
 
 ## Configuration proposal
 
 ```yaml
 multi_query_enabled: false        # opt-in flag
-multi_query_max_variants: 4       # hard bound
-multi_query_fusion: rrf         # 'rrf' | 'weighted'
+multi_query_max_variants: 3       # hard bound
+multi_query_fusion: rrb           # 'rrb' | 'weighted'
 query_rewrite_enabled: false    # bridge-side rewrite toggle
 query_rewrite_timeout: 5          # seconds
 ```
@@ -156,7 +139,7 @@ In both cases the backend must produce results identical to the current single-q
 ## Residual risks (recorded, not fixed here)
 
 1. **BM25 still hurts Italian paraphrase.** The Italian golden set (`benchmarks/golden_set_ita.yaml`) shows vector-only MRR 0.53 vs RRF 0.43.  Multi-query rewrite will not fix this if variants are still fed into the same BM25 index.
-2. **Latency.** Even with parallel execution, two variants roughly double embedding and ChromaDB query time.  The default `max_variants=4` is a safety cap; real deployments may want `2`.
+2. **Latency.** Even with parallel execution, two variants roughly double embedding and ChromaDB query time. The default `max_variants=3` is a safety cap; real deployments may want `2`.
 3. **Bridge contract drift.** The bridge uses `search_queries`, while the backend uses `query_variants`.  The bridge mapping remains the integration boundary; language labels stay opaque metadata.
 4. **Provenance payload size.** If every activated note lists every matching variant, large result sets will bloat the WebSocket payload.  The implementation should cap `matched_by` to the top 2 variants per note.
 
