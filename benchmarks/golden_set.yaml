@@ -2,9 +2,8 @@ version: 2026-07-25-v1-draft
 review_status: pending
 auto_generated: true
 vault_path: /Users/albi/Documents/Hermes
-vault_size: 350
-coverage_warnings:
-- 'news: only 3 candidates available (target 8)'
+vault_size: 353
+coverage_warnings: []
 review_checklist:
 - Verify each query has a single clear answer in the vault.
 - Confirm relevant_note_ids are ordered by relevance where meaningful.
@@ -68,40 +67,19 @@ queries:
   reviewed: false
   source_note_id: wiki/concepts/knowledge-context-confusion
   rationale: Sampled note title as query; needs human review
-- query: agent-email-niche
-  category: entity
+- query: '"Shortest Reliable Path"'
+  category: concept
   relevant_note_ids:
-  - knowledge/agent-email-niche
+  - wiki/concepts/shortest-reliable-path
   reviewed: false
-  source_note_id: knowledge/agent-email-niche
+  source_note_id: wiki/concepts/shortest-reliable-path
   rationale: Sampled note title as query; needs human review
-- query: '"Flipbook Browser"'
-  category: entity
+- query: '"Spatial grid collision optimization"'
+  category: concept
   relevant_note_ids:
-  - wiki/entities/flipbook-browser
+  - wiki/concepts/spatial-grid-collision-optimization
   reviewed: false
-  source_note_id: wiki/entities/flipbook-browser
-  rationale: Sampled note title as query; needs human review
-- query: '"Remotion Lab"'
-  category: entity
-  relevant_note_ids:
-  - wiki/entities/remotion-lab
-  reviewed: false
-  source_note_id: wiki/entities/remotion-lab
-  rationale: Sampled note title as query; needs human review
-- query: '"Hermes Agent"'
-  category: entity
-  relevant_note_ids:
-  - wiki/entities/hermes-agent
-  reviewed: false
-  source_note_id: wiki/entities/hermes-agent
-  rationale: Sampled note title as query; needs human review
-- query: '"Privacy Guard"'
-  category: entity
-  relevant_note_ids:
-  - wiki/entities/privacy-guard
-  reviewed: false
-  source_note_id: wiki/entities/privacy-guard
+  source_note_id: wiki/concepts/spatial-grid-collision-optimization
   rationale: Sampled note title as query; needs human review
 - query: '"Morning Signal"'
   category: entity
@@ -117,6 +95,27 @@ queries:
   reviewed: false
   source_note_id: wiki/entities/video-digest-factory
   rationale: Sampled note title as query; needs human review
+- query: '"Hermes Agent"'
+  category: entity
+  relevant_note_ids:
+  - wiki/entities/hermes-agent
+  reviewed: false
+  source_note_id: wiki/entities/hermes-agent
+  rationale: Sampled note title as query; needs human review
+- query: '"Hermes Sync"'
+  category: entity
+  relevant_note_ids:
+  - wiki/entities/hermes-sync
+  reviewed: false
+  source_note_id: wiki/entities/hermes-sync
+  rationale: Sampled note title as query; needs human review
+- query: Hermes Avatar Widget
+  category: entity
+  relevant_note_ids:
+  - wiki/entities/hermes-avatar-widget
+  reviewed: false
+  source_note_id: wiki/entities/hermes-avatar-widget
+  rationale: Sampled note title as query; needs human review
 - query: '"Tinka"'
   category: entity
   relevant_note_ids:
@@ -124,12 +123,33 @@ queries:
   reviewed: false
   source_note_id: wiki/entities/tinka
   rationale: Sampled note title as query; needs human review
-- query: tools-to-try
-  category: news
+- query: '"Flipbook Browser"'
+  category: entity
   relevant_note_ids:
-  - tools-to-try
+  - wiki/entities/flipbook-browser
   reviewed: false
-  source_note_id: tools-to-try
+  source_note_id: wiki/entities/flipbook-browser
+  rationale: Sampled note title as query; needs human review
+- query: agent-email-niche
+  category: entity
+  relevant_note_ids:
+  - knowledge/agent-email-niche
+  reviewed: false
+  source_note_id: knowledge/agent-email-niche
+  rationale: Sampled note title as query; needs human review
+- query: '"Privacy Guard"'
+  category: entity
+  relevant_note_ids:
+  - wiki/entities/privacy-guard
+  reviewed: false
+  source_note_id: wiki/entities/privacy-guard
+  rationale: Sampled note title as query; needs human review
+- query: '"Hermes Mission Control"'
+  category: entity
+  relevant_note_ids:
+  - wiki/entities/mission-control
+  reviewed: false
+  source_note_id: wiki/entities/mission-control
   rationale: Sampled note title as query; needs human review
 - query: two-tier-memory-honcho-bdh
   category: news
@@ -145,54 +165,33 @@ queries:
   reviewed: false
   source_note_id: wiki/SCHEMA
   rationale: Sampled note title as query; needs human review
-- query: README
-  category: activity
+- query: tools-to-try
+  category: news
   relevant_note_ids:
-  - projects/hermes-sync/README
+  - tools-to-try
   reviewed: false
-  source_note_id: projects/hermes-sync/README
+  source_note_id: tools-to-try
   rationale: Sampled note title as query; needs human review
-- query: README
+- query: sessions
   category: activity
   relevant_note_ids:
-  - projects/remotion-lab-ai/README
+  - projects/hermes-mission-control/sections/sessions
   reviewed: false
-  source_note_id: projects/remotion-lab-ai/README
+  source_note_id: projects/hermes-mission-control/sections/sessions
   rationale: Sampled note title as query; needs human review
-- query: bdh-session-recovery-delta
+- query: issue-10-ambient-particle-field
   category: activity
   relevant_note_ids:
-  - memory/learned/bdh-session-recovery-delta
+  - projects/hermes-avatar-widget/bugs/issue-10-ambient-particle-field
   reviewed: false
-  source_note_id: memory/learned/bdh-session-recovery-delta
+  source_note_id: projects/hermes-avatar-widget/bugs/issue-10-ambient-particle-field
   rationale: Sampled note title as query; needs human review
-- query: agents
+- query: knowledge
   category: activity
   relevant_note_ids:
-  - projects/hermes-mission-control/sections/agents
+  - projects/hermes-mission-control/sections/knowledge
   reviewed: false
-  source_note_id: projects/hermes-mission-control/sections/agents
-  rationale: Sampled note title as query; needs human review
-- query: README
-  category: activity
-  relevant_note_ids:
-  - projects/hydroponic-vertical-garden/README
-  reviewed: false
-  source_note_id: projects/hydroponic-vertical-garden/README
-  rationale: Sampled note title as query; needs human review
-- query: overview
-  category: activity
-  relevant_note_ids:
-  - projects/hermes-mission-control/sections/overview
-  reviewed: false
-  source_note_id: projects/hermes-mission-control/sections/overview
-  rationale: Sampled note title as query; needs human review
-- query: README
-  category: activity
-  relevant_note_ids:
-  - projects/hermes-avatar-widget/bugs/README
-  reviewed: false
-  source_note_id: projects/hermes-avatar-widget/bugs/README
+  source_note_id: projects/hermes-mission-control/sections/knowledge
   rationale: Sampled note title as query; needs human review
 - query: README
   category: activity
@@ -201,6 +200,57 @@ queries:
   reviewed: false
   source_note_id: projects/privacy-guard/README
   rationale: Sampled note title as query; needs human review
+- query: editorial-plan
+  category: activity
+  relevant_note_ids:
+  - projects/theseus-x/editorial-plan
+  reviewed: false
+  source_note_id: projects/theseus-x/editorial-plan
+  rationale: Sampled note title as query; needs human review
+- query: '"Shipd Olympus Submission Workflow"'
+  category: activity
+  relevant_note_ids:
+  - works/shipd/olympus-submission-workflow
+  reviewed: false
+  source_note_id: works/shipd/olympus-submission-workflow
+  rationale: Sampled note title as query; needs human review
+- query: README
+  category: activity
+  relevant_note_ids:
+  - projects/hermes-avatar-widget/README
+  reviewed: false
+  source_note_id: projects/hermes-avatar-widget/README
+  rationale: Sampled note title as query; needs human review
+- query: config
+  category: activity
+  relevant_note_ids:
+  - projects/hermes-mission-control/sections/config
+  reviewed: false
+  source_note_id: projects/hermes-mission-control/sections/config
+  rationale: Sampled note title as query; needs human review
+- query: README
+  category: activity
+  relevant_note_ids:
+  - projects/hydroponic-vertical-garden/README
+  reviewed: false
+  source_note_id: projects/hydroponic-vertical-garden/README
+  rationale: Sampled note title as query; needs human review
+- query: README
+  category: activity
+  relevant_note_ids:
+  - projects/hermes-mission-control/README
+  reviewed: false
+  source_note_id: projects/hermes-mission-control/README
+  rationale: Sampled note title as query; needs human review
+- query: Come si collega "Electron vs Tauri" agli altri concetti?
+  category: crossref
+  relevant_note_ids:
+  - wiki/comparisons/electron-vs-tauri
+  - privacy-guard
+  - tauri-architecture
+  reviewed: false
+  source_note_id: wiki/comparisons/electron-vs-tauri
+  rationale: LLM-style cross-reference; needs human review
 - query: Come si collega "BDH Graph Harness — PoC Benchmark v3 (ChromaDB + Full Vault)"
     agli altri concetti?
   category: crossref
@@ -211,23 +261,14 @@ queries:
   reviewed: false
   source_note_id: wiki/queries/bdh-graph-harness-poc-benchmark
   rationale: LLM-style cross-reference; needs human review
-- query: Come si collega GLM-5.2 Full on Mac mini 64GB — Assessment agli altri concetti?
+- query: Come si collega "BM25 Does Not Help Italian Vaults" agli altri concetti?
   category: crossref
   relevant_note_ids:
-  - wiki/queries/glm-5-2-mac-mini-64gb-assessment
-  - entities/glm-5-2-full-mlx-colibri
-  - concepts/mlx-out-of-core-inference
-  reviewed: false
-  source_note_id: wiki/queries/glm-5-2-mac-mini-64gb-assessment
-  rationale: LLM-style cross-reference; needs human review
-- query: Come si collega Local Config Pattern for Public Repos agli altri concetti?
-  category: crossref
-  relevant_note_ids:
-  - wiki/lessons/local-config-pattern
+  - wiki/lessons/bm25-italian-failure
   - bdh-graph-harness
-  - entities/hermes-agent-core
+  - hebbian-learning
   reviewed: false
-  source_note_id: wiki/lessons/local-config-pattern
+  source_note_id: wiki/lessons/bm25-italian-failure
   rationale: LLM-style cross-reference; needs human review
 - query: Come si collega "BM25 Benchmark Comparison" agli altri concetti?
   category: crossref
@@ -247,6 +288,15 @@ queries:
   reviewed: false
   source_note_id: wiki/comparisons/bdh-vs-transformer
   rationale: LLM-style cross-reference; needs human review
+- query: Come si collega GLM-5.2 Full on Mac mini 64GB — Assessment agli altri concetti?
+  category: crossref
+  relevant_note_ids:
+  - wiki/queries/glm-5-2-mac-mini-64gb-assessment
+  - entities/glm-5-2-full-mlx-colibri
+  - concepts/mlx-out-of-core-inference
+  reviewed: false
+  source_note_id: wiki/queries/glm-5-2-mac-mini-64gb-assessment
+  rationale: LLM-style cross-reference; needs human review
 - query: Come si collega "Hybrid Search Disabled by Default" agli altri concetti?
   category: crossref
   relevant_note_ids:
@@ -255,22 +305,4 @@ queries:
   - lessons/bm25-italian-failure
   reviewed: false
   source_note_id: wiki/lessons/hybrid-search-disabled
-  rationale: LLM-style cross-reference; needs human review
-- query: Come si collega Python Import By Reference agli altri concetti?
-  category: crossref
-  relevant_note_ids:
-  - wiki/lessons/python-import-by-reference
-  - bdh-graph-harness
-  - bdh-graph-harness
-  reviewed: false
-  source_note_id: wiki/lessons/python-import-by-reference
-  rationale: LLM-style cross-reference; needs human review
-- query: Come si collega local-llm-coding-benchmarks agli altri concetti?
-  category: crossref
-  relevant_note_ids:
-  - local-llm-coding-benchmarks
-  - wiki/entities/glm-5-2-full-mlx-colibri
-  - wiki/concepts/mlx-out-of-core-inference
-  reviewed: false
-  source_note_id: local-llm-coding-benchmarks
   rationale: LLM-style cross-reference; needs human review

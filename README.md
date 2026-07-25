@@ -18,7 +18,7 @@ Turns an Obsidian vault into a living knowledge graph where:
 - **Wikilinks → synapses** — graph edges from `[[wikilinks]]`
 - **Hebbian learning** — co-activated notes strengthen their synaptic weight over time (frequency + recency + activation correlation)
 - **Vector + lexical retrieval** — semantic search via Chroma embeddings with optional BM25 Hybrid scoring (`hybrid_search: true`, α=0.7 / β=0.3)
-- **Adaptive thresholding** — `max(Q75, mean+1std, 0.15)` to filter noise dynamically
+- **Adaptive thresholding** — dynamic threshold from the score distribution (`median + 0.3*std`, with a configurable floor and a minimum-activation guarantee) to filter noise adaptively
 - **Neurogenesis** — LLM extracts new concepts from queries and creates notes in the vault, filtered by a 3-layer signal system (prompt engineering + regex blocklist + semantic dedup) to prevent noise; generation provenance is kept in frontmatter so it does not pollute embeddings
 - **Node quality scoring** — composite score (strong edges + mean weight + frequency) auto-prunes dormant nodes from visualization; re-activates on strong re-encounter
 - **Sleep-cycle consolidation** — periodic synaptic downscaling (×0.9), structural pruning below weight floor, and stale dormant node removal — mirrors biological sleep consolidation

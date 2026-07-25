@@ -52,6 +52,7 @@ CONFIG = {
     'llm_temperature': 0.3,
     'llm_max_ctx': 4096,
     'llm_timeout': 300,
+    'embed_timeout': 120,  # also used by ChromaDB Ollama embedding function
     'chroma_path': '.bdh-chroma',
     'chroma_collection': 'notes',
     'seed_count': 5,

@@ -17,7 +17,7 @@ Use this skill when the user:
 ```
 [Query]
    ↓
-[Attention: ChromaDB KNN seed + BM25 hybrid scoring + k-hop graph traversal + hub dampening + adaptive threshold]
+[Attention: ChromaDB KNN seed + BM25 hybrid scoring + k-hop graph traversal + hub dampening + adaptive threshold (`median + 0.3*std` with floor + min-activation guarantee)]
    ↓
 [Active Notes subset] → [Hebbian Update (online plasticity — before LLM)]
    ↓                          ↓
@@ -40,7 +40,7 @@ Hebbian update runs *immediately after attention*, not after the LLM responds. S
 
 ### Adaptive Threshold
 
-Instead of a fixed threshold, the system computes a dynamic threshold from the score distribution: `threshold = max(Q75, mean + 1*std, floor)` where `floor` defaults to 0.15. Requires ≥5 candidates to activate.
+Instead of a fixed threshold, the system computes a dynamic threshold from the score distribution: `threshold = median + 0.3*std`, with a configurable `floor` (default 0.05) and a guaranteed minimum number of activations (`min_activations`, default 3). Requires ≥5 candidates to activate.
 
 ## Key Parameters
 

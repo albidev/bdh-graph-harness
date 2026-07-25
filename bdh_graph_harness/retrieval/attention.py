@@ -5,7 +5,6 @@ BDH-style attention: embedding seed (ChromaDB KNN) + graph traversal (k-hop expa
 Includes adaptive threshold, hybrid search support, and Integrate-and-Fire model.
 """
 import math
-import os
 import statistics
 from collections import defaultdict, deque
 
@@ -23,8 +22,11 @@ from bdh_graph_harness.graph.builder import _resolve_target
 def compute_adaptive_threshold(scores, floor=0.05, min_activations=3):
     """Compute a dynamic threshold from score distribution.
 
-    Uses median + 0.3*std with a low floor, but guarantees at least
-    min_activations notes are always kept (regardless of threshold).
+    Implementation: median + 0.3*std with a low floor. Also guarantees at
+    least min_activations notes are kept by relaxing the threshold if needed.
+
+    This matches the code in this module. README / IMPLEMENTATION_PLAN / other
+    docs that state ``max(Q75, mean+1std, 0.15)`` are stale; code is truth.
 
     Args:
         scores: list of float scores from attention
@@ -52,9 +54,10 @@ def compute_adaptive_threshold(scores, floor=0.05, min_activations=3):
     if kept < min_activations:
         relaxed = sorted_scores[min_activations - 1]
         threshold = max(relaxed, floor)
-
-    logger.info(f"Adaptive threshold: median+0.3std={median + 0.3 * stdev:.3f}, floor={floor}, "
-                f"min_activations={min_activations} → {threshold:.3f}")
+        logger.info(f"Adaptive threshold relaxed to {threshold:.3f} to keep {min_activations} activations")
+    else:
+        logger.info(f"Adaptive threshold: median+0.3std={median + 0.3 * stdev:.3f}, floor={floor}, "
+                    f"min_activations={min_activations} → {threshold:.3f}")
     return threshold
 
 
