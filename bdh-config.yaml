@@ -131,9 +131,11 @@ api_port: 8643
 # See benchmarks/BM25_ANALYSIS.md for full benchmark results and rationale.
 # Enable only if your vault contains multilingual or English-heavy content
 # where exact keyword matching adds value.
-hybrid_search: false
-hybrid_alpha: 0.7   # weight for vector similarity (only used if hybrid_search: true)
-hybrid_beta: 0.3    # weight for BM25 keyword score (only used if hybrid_search: true)
+hybrid_search: true
+hybrid_fusion: rrf   # 'weighted' or 'rrf'
+hybrid_alpha: 0.7   # weight for vector similarity (only used if hybrid_search: true and hybrid_fusion: weighted)
+hybrid_beta: 0.3    # weight for BM25 keyword score (only used if hybrid_search: true and hybrid_fusion: weighted)
+rrf_k: 60           # rank fusion constant (only used if hybrid_search: true and hybrid_fusion: rrf)
 bm25_k1: 1.5
 bm25_b: 0.75
 
