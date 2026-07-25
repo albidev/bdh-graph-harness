@@ -277,11 +277,12 @@ async def api_hebbian(request, app_state: dict) -> web.Response:
 
 async def _run_attention_and_plasticity_unlocked(
     query: str, ctx, ws_clients: set, source: str | None = None,
-    learn: bool = True,
+    learn: bool = True, query_variants: list | None = None,
 ) -> tuple[dict, list, list, dict]:
     """Run attention and optionally mutate Hebbian/neurogenesis state.
 
     ``learn=False`` is the read-only path used by automatic retrieval.
+    ``query_variants`` enables language-agnostic multi-query retrieval.
     """
     config = ctx.config.settings
     n = ctx.nodes
@@ -290,12 +291,40 @@ async def _run_attention_and_plasticity_unlocked(
     bm25 = ctx.bm25_index
     vault_id = ctx.config.id
 
-    # Attention — run blocking I/O (embeddings) in a thread
-    routing = {}
-    active = await asyncio.to_thread(
-        attention, query, n, e, coll, None, None, bm25, ctx.state,
-        routing_meta=routing,
-    )
+    # Multi-query retrieval when enabled and variants are provided; otherwise single-query.
+    multi_query_enabled = config.get('multi_query_enabled', False)
+    if multi_query_enabled and query_variants:
+        from bdh_graph_harness.retrieval.multi_query import multi_query_attention
+        active, routing = await asyncio.to_thread(
+            multi_query_attention,
+            query, query_variants, n, e, coll, bm25, ctx.state,
+            k=config.get('seed_count', 5),
+            max_hop=config.get('max_hop', 2),
+            max_variants=config.get('multi_query_max_variants', 3),
+            enabled=True,
+        )
+    else:
+        # Attention — run blocking I/O (embeddings) in a thread
+        routing = {}
+        active = await asyncio.to_thread(
+            attention, query, n, e, coll, None, None, bm25, ctx.state,
+            routing_meta=routing,
+        )
+        # Make the legacy single-query routing metadata contract-consistent with
+        # the multi-query path without forcing multi-query retrieval.
+        routing.update({
+            'query': query,
+            'query_variants': [{
+                'query': query,
+                'language': 'original',
+                'weight': 1.0,
+            }],
+            'multi_query_fusion': None,
+            'multi_query_variant_count': 1,
+            'multi_query_unique_notes': len(active),
+            'multi_query_multivariant_hits': 0,
+            'multi_query_enabled': False,
+        })
 
     activated_notes = []
     activation_details = {
@@ -353,6 +382,7 @@ async def _run_attention_and_plasticity_unlocked(
         'sequence': ctx.event_sequence,
         'vault_id': vault_id,
         'query': query,
+        'query_variants': routing.get('query_variants') if query_variants else None,
         'activated_notes': activated_notes,
         'hebbian_updates': hebbian_updates,
         'hebbian_synapses': len(ctx.state['synapses']),
@@ -371,14 +401,18 @@ async def _run_attention_and_plasticity_unlocked(
 
 async def run_attention_and_plasticity(
     query: str, ctx, ws_clients: set, source: str | None = None,
-    learn: bool = True,
+    learn: bool = True, query_variants: list | None = None,
 ) -> tuple[dict, list, list, dict]:
     """Run one vault query against an atomic runtime snapshot."""
     async with ctx.runtime_lock:
+        # Keep the legacy call shape when no variants were supplied. Besides
+        # preserving the single-query path, this keeps test/integration hooks
+        # that wrap the established helper signature working unchanged.
+        kwargs = {'source': source, 'learn': learn}
+        if query_variants is not None:
+            kwargs['query_variants'] = query_variants
         active, activated_notes, hebbian_updates, routing = (
-            await _run_attention_and_plasticity_unlocked(
-                query, ctx, ws_clients, source=source, learn=learn
-            )
+            await _run_attention_and_plasticity_unlocked(query, ctx, ws_clients, **kwargs)
         )
         # Store routing for neurogenesis to filter activated_from_ids
         ctx._last_routing = routing
@@ -519,6 +553,7 @@ async def api_query(request, app_state: dict, ws_clients: set) -> web.Response:
       - learn: false performs retrieval without Hebbian update or neurogenesis
       - respond: false skips the BDH synthesis LLM and returns activated notes only
       - user_prompt: original user question, combined with query for LLM context
+      - query_variants: optional list of language-agnostic retrieval variants
     """
     try:
         data = await request.json()
@@ -537,13 +572,14 @@ async def api_query(request, app_state: dict, ws_clients: set) -> web.Response:
     learn = data.get('learn', True) is not False
     respond = data.get('respond', True) is not False
     user_prompt = data.get('user_prompt', '').strip()
+    query_variants = data.get('query_variants') or None
 
     llm_query = query
     if user_prompt:
         llm_query = f"{user_prompt}\n\n---\n\n{query}"
 
     active, activated_notes, hebbian_updates, routing = await run_attention_and_plasticity(
-        query, ctx, ws_clients, source=source, learn=learn
+        query, ctx, ws_clients, source=source, learn=learn, query_variants=query_variants
     )
 
     n = ctx.nodes
@@ -613,7 +649,9 @@ async def api_stream(request, app_state: dict, ws_clients: set) -> web.StreamRes
 
     SSE format: data: {json}\\n\\n
 
-    Optional body field: vault_id.
+    Optional body fields:
+      - vault_id: select vault (default used if omitted)
+      - query_variants: optional list of language-agnostic retrieval variants
     """
     try:
         data = await request.json()
@@ -630,6 +668,7 @@ async def api_stream(request, app_state: dict, ws_clients: set) -> web.StreamRes
 
     source = data.get('source')
     user_prompt = data.get('user_prompt', '').strip()
+    query_variants = data.get('query_variants') or None
 
     llm_query = query
     if user_prompt:
@@ -638,7 +677,7 @@ async def api_stream(request, app_state: dict, ws_clients: set) -> web.StreamRes
     n = ctx.nodes
 
     active, activated_notes, hebbian_updates, routing = await run_attention_and_plasticity(
-        query, ctx, ws_clients, source=source
+        query, ctx, ws_clients, source=source, query_variants=query_variants
     )
 
     resp = web.StreamResponse(
@@ -654,6 +693,8 @@ async def api_stream(request, app_state: dict, ws_clients: set) -> web.StreamRes
     init_data = json.dumps({
         'type': 'activation',
         'vault_id': ctx.config.id,
+        'query': query,
+        'query_variants': routing.get('query_variants') if routing.get('query_variants') else None,
         'activated_notes': activated_notes,
         'hebbian_synapses': len(ctx.state['synapses']),
         'routing': routing,
