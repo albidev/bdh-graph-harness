@@ -1,13 +1,13 @@
 # Issue #19 — Multi-Query Retrieval Contract
 
-This document records the **compatibility audit**, **mixed-language benchmark coverage**, and **English-language documentation** for Issue #19: *Language-agnostic multi-query retrieval and visualization*.  It lives in the evidence worktree while the implementation runs in parallel in task `t_09a2f4c9`.
+This document records the **compatibility audit**, **mixed-language benchmark coverage**, and **English-language documentation** for Issue #19: *Language-agnostic multi-query retrieval and visualization*.
 
 ## Scope
 
 - Add a new golden set and audit runner focused on the Issue #19 contract.
 - Document the opt-in multi-query request contract, legacy fallback, original-query write semantics, bounds, fusion, provenance, event ordering, and rollback.
-- Verify that the **current** backend already satisfies the compatibility requirements that do not require new code.
-- **Do not** change core retrieval, the frontend, or the WebSocket event shape.
+- Verify the backend, frontend, and WebSocket compatibility requirements against the implementation.
+- Keep the new fields additive so existing single-query clients remain valid.
 
 ## What Issue #19 asks for
 
@@ -22,22 +22,22 @@ The user message should remain the authoritative signal for writes (Hebbian upda
 
 The bridge and backend must remain language-agnostic: `language` is opaque metadata, never a retrieval gate.
 
-## Current contract status (this commit)
+## Current contract status
 
 | Requirement | Status | Evidence |
 |-------------|--------|----------|
 | Legacy single-query request remains valid | **already satisfied** | `POST /api/query {"query": "..."}` is the only path exercised today |
 | Original query is the write-path signal | **already satisfied** | `api_query` uses `query` for `run_attention_and_plasticity` and `run_neurogenesis`; `user_prompt` is only prepended to the LLM context string |
-| Optional `query_variants` accepted in request model | **not implemented** | Reserved in `docs/issue19-contract.md` for the implementation task |
-| Variant deduplication and empty filtering | **not implemented** | Implemented only in the audit helper `_valid_variants` for contract testing |
-| Max-variant bound enforced | **not implemented** | Audit defaults to `max_variants=4` |
-| Parallel per-variant retrieval | **not implemented** | Current `attention()` takes a single query |
-| Backend fusion once, then graph expansion once | **not implemented** | `attention()` currently expands one seed set |
-| One ordered activation event after fusion | **already satisfied** | `api_query` emits exactly one `activation`, one optional `neurogenesis`, and one final `query_response` event with monotonic `sequence` |
-| Canonical node/edge identity preserved | **already satisfied** | `api_graph` returns canonical IDs; no variant-specific nodes exist |
-| Additive provenance in activated notes | **partially satisfied** | `routing.activation_details` already expose `role`, `hop`, `parent_id`, `vector_score`, `bm25_score`, `hybrid_score`, `hebbian_boost`, and `final_score`.  A `matched_by` field is reserved for the future |
-| Feature can be disabled without code changes | **not implemented** | Configuration flags documented but not wired |
-| Mixed-language benchmark coverage | **added here** | `benchmarks/golden_set_issue19.yaml` (21 queries) |
+| Optional `query_variants` accepted in request model | **satisfied** | `api_query` accepts the optional list and preserves the legacy `{query}` request |
+| Variant deduplication and empty filtering | **satisfied** | `normalize_query_variants()` removes empty and case-insensitive duplicate candidates |
+| Max-variant bound enforced | **satisfied** | `multi_query_max_variants` bounds the normalized list, including the original query |
+| Parallel per-variant retrieval | **satisfied** | Variant seed retrieval runs off the event loop and is fused in `retrieval/multi_query.py` |
+| Backend fusion once, then graph expansion once | **satisfied** | Variant results are fused, followed by one canonical original-query attention/expansion pass |
+| One ordered activation event after fusion | **satisfied** | `api_query` emits one `activation` event with monotonic `sequence` after retrieval and fusion |
+| Canonical node/edge identity preserved | **satisfied** | `api_graph` and the frontend use canonical IDs; activation never creates variant-specific nodes or edges |
+| Additive provenance in activated notes | **satisfied** | Activated notes expose `matched_by` and `variant_hits` alongside the existing routing fields |
+| Feature can be disabled without code changes | **satisfied** | `multi_query_enabled: false` is the default and omitting variants preserves the single-query path |
+| Mixed-language benchmark coverage | **satisfied** | `benchmarks/golden_set_issue19.yaml` contains 18 contract queries; the evidence report also records 40-query EN/ITA retrieval results |
 
 ## Golden set: `benchmarks/golden_set_issue19.yaml`
 
@@ -78,7 +78,7 @@ Existing clients stay valid:
 {"query": "Original user message"}
 ```
 
-Opt-in multi-query form (not yet accepted by the server):
+Opt-in multi-query form:
 
 ```json
 {
@@ -142,7 +142,7 @@ query_rewrite_enabled: false    # bridge-side rewrite toggle
 query_rewrite_timeout: 5          # seconds
 ```
 
-These names are reserved in this document.  The implementation task will wire them into `bdh-config.yaml` and the bridge.
+These names are wired into the backend configuration.  The bridge can remain provider-neutral by mapping its opaque `search_queries` output to `query_variants`.
 
 ## Rollback
 
@@ -157,7 +157,7 @@ In both cases the backend must produce results identical to the current single-q
 
 1. **BM25 still hurts Italian paraphrase.** The Italian golden set (`benchmarks/golden_set_ita.yaml`) shows vector-only MRR 0.53 vs RRF 0.43.  Multi-query rewrite will not fix this if variants are still fed into the same BM25 index.
 2. **Latency.** Even with parallel execution, two variants roughly double embedding and ChromaDB query time.  The default `max_variants=4` is a safety cap; real deployments may want `2`.
-3. **Bridge contract drift.** The bridge uses `search_queries`, the backend will use `query_variants`.  The audit runner includes a normalization helper (`_valid_variants`) that both sides can share.
+3. **Bridge contract drift.** The bridge uses `search_queries`, while the backend uses `query_variants`.  The bridge mapping remains the integration boundary; language labels stay opaque metadata.
 4. **Provenance payload size.** If every activated note lists every matching variant, large result sets will bloat the WebSocket payload.  The implementation should cap `matched_by` to the top 2 variants per note.
 
 ## Links
