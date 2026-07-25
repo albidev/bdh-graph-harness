@@ -65,6 +65,8 @@ CONFIG = {
     'beta': 0.3,
     'decay': 0.95,
     'hebbian_min_score': 0.15,  # min activation score to create Hebbian synapse
+    'hebbian_frequency_scale': 10.0,  # log1p scale for non-saturating frequency compression
+    'tau_recency_hours': 24.0,  # recency half-life in hours
     'neurogenesis_dir': 'wiki/concepts',
     'neurogenesis_enabled': True,
     'api_host': '127.0.0.1',
