@@ -179,6 +179,7 @@ function normalizeRetrievalTrace(payload) {
   return {
     query: payload.query || '',
     variants: variants.map((variant, index) => ({
+      text: variant.query || variant.label || variant.language || `variant-${index}`,
       label: variant.label || variant.language || `variant-${index}`,
       language: variant.language || 'default',
       weight: variant.weight != null ? Number(variant.weight).toFixed(2) : '1.00',
@@ -211,7 +212,7 @@ function renderRetrievalTrace(trace, options = {}) {
 
   queryEl.textContent = trace.query || '—';
   variantsEl.textContent = trace.variants && trace.variants.length
-    ? trace.variants.map(v => `${v.label} (w${v.weight})`).join(' · ')
+    ? trace.variants.map(v => `${v.text} (w${v.weight})`).join(' · ')
     : 'single query';
   fusionEl.textContent = trace.variants.length > 1
     ? `Fused ${trace.variants.length} variants via ${trace.fusionMethod || 'rrf'}`
@@ -228,9 +229,17 @@ function renderRetrievalTrace(trace, options = {}) {
     ? `${trace.multiVariantCount} of ${noteCount} notes matched by multiple variants`
     : 'no multi-variant matches';
 
+  // Multi-query provenance is important evidence, not an advanced detail hidden
+  // behind a click. Open the trace automatically when variants are present.
+  const hasMultipleVariants = trace.variants && trace.variants.length > 1;
+  container.hidden = !hasMultipleVariants;
+
   // Show the toggle button whenever the backend provided variant metadata.
   const toggleBtn = document.getElementById('retrieval-trace-toggle');
-  if (toggleBtn) toggleBtn.hidden = !(trace.variants && trace.variants.length);
+  if (toggleBtn) {
+    toggleBtn.hidden = !(trace.variants && trace.variants.length);
+    toggleBtn.textContent = hasMultipleVariants ? 'Hide trace' : 'Trace';
+  }
 }
 
 function toggleRetrievalTrace() {
