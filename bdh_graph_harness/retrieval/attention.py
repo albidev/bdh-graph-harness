@@ -238,18 +238,24 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
         candidate_ids = list(dict.fromkeys(vector_candidate_ids + bm25_candidate_ids))
         # Compute BM25 scores ONCE for the union of vector and lexical candidates.
         bm25_scores = bm25_index.score_batch(query, candidate_ids)
-        alpha = CONFIG.get('hybrid_alpha', 0.7)
-        beta = CONFIG.get('hybrid_beta', 0.3)
-        scores = {}
-        for nid in candidate_ids:
-            vec_s = raw_vector_scores.get(nid, 0.0)
-            bm_s = bm25_scores.get(nid, 0.0)
-            combined = alpha * vec_s + beta * bm_s
-            # Hub dampening
-            if CONFIG['hub_dampening'] and degree.get(nid, 0) > CONFIG['hub_degree_threshold']:
-                dampen = 1.0 / (1.0 + 0.15 * (degree[nid] - CONFIG['hub_degree_threshold']))
-                combined *= dampen
-            scores[nid] = combined
+
+        fusion = CONFIG.get('hybrid_fusion', 'weighted')
+        if fusion == 'rrf':
+            from bdh_graph_harness.retrieval.hybrid import reciprocal_rank_fusion
+            scores = reciprocal_rank_fusion(raw_vector_scores, bm25_scores, k=CONFIG.get('rrf_k', 60))
+        else:
+            alpha = CONFIG.get('hybrid_alpha', 0.7)
+            beta = CONFIG.get('hybrid_beta', 0.3)
+            scores = {}
+            for nid in candidate_ids:
+                vec_s = raw_vector_scores.get(nid, 0.0)
+                bm_s = bm25_scores.get(nid, 0.0)
+                combined = alpha * vec_s + beta * bm_s
+                # Hub dampening
+                if CONFIG['hub_dampening'] and degree.get(nid, 0) > CONFIG['hub_degree_threshold']:
+                    dampen = 1.0 / (1.0 + 0.15 * (degree[nid] - CONFIG['hub_degree_threshold']))
+                    combined *= dampen
+                scores[nid] = combined
     else:
         scores = {}
         for note_id, sim in raw_vector_scores.items():
@@ -258,9 +264,10 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
                 sim *= dampen
             scores[note_id] = sim
 
+    # Update routing metadata with chosen fusion and component scores.
     if routing_meta is not None:
         ranked = sorted(scores.values(), reverse=True)
-        bm25_ranked = sorted(bm25_scores.items(), key=lambda item: -item[1])
+        bm25_ranked = sorted(bm25_scores.items(), key=lambda item: -item[1]) if hybrid_enabled else []
         bm25_top_id = bm25_ranked[0][0] if bm25_ranked else None
         bm25_query_terms = (
             bm25_index._tokenize(query)
@@ -280,6 +287,7 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
             "hybrid_second_score": ranked[1] if len(ranked) > 1 else 0.0,
             "hybrid_margin": (ranked[0] - ranked[1]) if len(ranked) > 1 else ranked[0] if ranked else 0.0,
             "hybrid_enabled": hybrid_enabled,
+            "hybrid_fusion": CONFIG.get('hybrid_fusion', 'weighted') if hybrid_enabled else None,
         })
 
     # Keep retrieval-only scores separate from Hebbian and hop propagation scores.
