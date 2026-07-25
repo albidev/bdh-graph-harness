@@ -50,7 +50,7 @@ def main():
 
     random.seed(2026)
     queries = []
-    targets = [('concept', 8), ('entity', 8), ('news', 8), ('activity', 8), ('crossref', 8)]
+    targets = [('concept', 10), ('entity', 10), ('news', 3), ('activity', 10), ('crossref', 7)]
     coverage_warnings = []
     for cat, target in targets:
         pool = by_category[cat]

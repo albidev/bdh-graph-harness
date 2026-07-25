@@ -123,7 +123,7 @@ neurogenesis_enabled: true
 neurogenesis_source_edges_enabled: true # validated generated provenance edges
 
 # API server
-api_host: 0.0.0.0  # bind su tutte le interfacce (localhost + tailscale)
+api_host: 127.0.0.1  # default localhost; use 0.0.0.0 only for explicit LAN/Tailscale exposure
 api_port: 8643
 
 # Hybrid search (Phase 3.1)
