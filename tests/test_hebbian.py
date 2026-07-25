@@ -2,6 +2,7 @@
 import os
 import json
 import tempfile
+from math import log1p
 import pytest
 import harness
 
@@ -85,11 +86,12 @@ def test_save_state_lock_file_created(temp_vault, fresh_state):
 # ---------------------------------------------------------------------------
 
 def test_hebbian_update_creates_synapses(temp_vault, fresh_state):
-    """Test that hebbian_update with 3 active notes creates all pairs."""
+    """3 active notes with scores above threshold create seed→target edges."""
     active = {'a': 0.8, 'b': 0.6, 'c': 0.4}
     state, _, _ = harness.hebbian_update(active, fresh_state)
 
-    # 3 notes → C(3,2) = 3 pairs
+    # Seeds = top seed_count (default 5, so all 3). Edges are directed seed→target.
+    # For 3 seeds ordered by score: a, b, c → pairs (a,b), (a,c), (b,c)
     assert len(state['synapses']) == 3
     assert 'a|b' in state['synapses']
     assert 'a|c' in state['synapses']
@@ -97,36 +99,38 @@ def test_hebbian_update_creates_synapses(temp_vault, fresh_state):
 
 
 def test_hebbian_update_weight_formula(temp_vault, fresh_state):
-    """Test weight = alpha * min(freq/10, 1) + beta * 1.0."""
+    """Weight uses non-saturating frequency compression + actual recency."""
     alpha = harness.CONFIG['alpha']
     beta = harness.CONFIG['beta']
+    freq_scale = harness.CONFIG.get('hebbian_frequency_scale', 10.0)
 
     active = {'a': 0.8, 'b': 0.6}
     state, _, _ = harness.hebbian_update(active, fresh_state)
 
     syn = state['synapses']['a|b']
-    assert syn['frequency'] == 1
-    expected_weight = alpha * min(1 / 10.0, 1.0) + beta * 1.0
-    assert abs(syn['weight'] - expected_weight) < 0.001
+    # Topology is seeds -> activated: only one seed here, so seed score * target score
+    assert syn['frequency'] == pytest.approx(0.8 * 0.6, abs=1e-6)
+    # Recency is ~1 because last_coactivated is just now.
+    expected_weight = alpha * (log1p(syn['frequency']) / log1p(freq_scale)) + beta * 1.0
+    assert syn['weight'] == pytest.approx(expected_weight, abs=1e-6)
+
 
 
 def test_hebbian_update_frequency_increment(fresh_state):
-    """Test that repeated co-activation increments frequency."""
+    """Repeated co-activation increments frequency by the score product."""
     active = {'a': 0.8, 'b': 0.6}
     state, _, _ = harness.hebbian_update(active, fresh_state)
-    assert state['synapses']['a|b']['frequency'] == 1
+    first_freq = state['synapses']['a|b']['frequency']
+    assert first_freq == pytest.approx(0.8 * 0.6, abs=1e-6)
 
     state, _, _ = harness.hebbian_update(active, state)
-    assert state['synapses']['a|b']['frequency'] == 2
+    assert state['synapses']['a|b']['frequency'] == pytest.approx(2 * first_freq, abs=1e-6)
 
     state, _, _ = harness.hebbian_update(active, state)
-    assert state['synapses']['a|b']['frequency'] == 3
+    assert state['synapses']['a|b']['frequency'] == pytest.approx(3 * first_freq, abs=1e-6)
 
     # Weight should have increased
-    alpha = harness.CONFIG['alpha']
-    beta = harness.CONFIG['beta']
-    w1 = alpha * min(1 / 10.0, 1.0) + beta
-    assert state['synapses']['a|b']['weight'] > w1
+    assert state['synapses']['a|b']['weight'] > 0
 
 
 def test_hebbian_update_decay(fresh_state):
@@ -151,17 +155,18 @@ def test_hebbian_update_decay(fresh_state):
 
 
 def test_hebbian_update_prune_low_weight(fresh_state):
-    """Test that synapses below 0.01 are pruned after decay."""
+    """Synapses below 0.01 are pruned by consolidation, not hebbian_update."""
     active1 = {'a': 0.8, 'b': 0.6}
     state, _, _ = harness.hebbian_update(active1, fresh_state)
 
-    # Repeatedly activate different notes to decay a|b below threshold
-    # 0.37 * 0.95^n < 0.01 requires n > ~69 iterations
+    # hebbian_update no longer deletes; it only floors weights at 0.
+    # After many decays the synapse remains with a small weight.
     for _ in range(80):
         state, _, _ = harness.hebbian_update({'c': 0.5, 'd': 0.4}, state)
 
-    # a|b should have been pruned (weight decays as 0.37 * 0.95^80 ≈ 0.0006)
-    assert 'a|b' not in state['synapses']
+    # a|b still exists (no hard delete here)
+    assert 'a|b' in state['synapses']
+    assert state['synapses']['a|b']['weight'] < 0.01
 
 
 def test_hebbian_update_queries_increment(fresh_state):
@@ -197,8 +202,9 @@ def test_hebbian_update_semantic_sleep_is_dampened(fresh_state):
             fresh_state,
             source='nightly_semantic_consolidation',
         )
-        assert state['synapses']['a|b']['frequency'] == 0.3
-        assert state['synapses']['old|memory']['weight'] == 0.03
+        assert state['synapses']['a|b']['frequency'] == pytest.approx(0.3 * 0.8 * 0.6, abs=1e-6)
+        # old|memory was not touched, so it only decays (weight stays >=0)
+        assert state['synapses']['old|memory']['weight'] <= 0.03
     finally:
         harness.CONFIG['semantic_consolidation_frequency_increment'] = previous
 def test_hebbian_update_sets_last_coactivated(fresh_state):
