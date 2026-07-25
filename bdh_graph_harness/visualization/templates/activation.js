@@ -206,11 +206,16 @@ function handleActivation(event) {
       const label = note.display_label || note.title || note.id;
       const path = note.relative_path || note.path || '';
       const source = note.source_id || note.source_type || 'vault';
+      // Provenance badge: compact indicator of how many query variants matched this note.
+      const provenance = normalizeProvenance(note.matched_by);
+      const provenanceBadge = provenance.length
+        ? `<span class="provenance-badge" title="${escapeHtml(formatProvenanceTooltip(provenance))}">${provenance.length} variant${provenance.length === 1 ? '' : 's'}</span>`
+        : '';
       li.innerHTML = '<span class="activation-copy"><strong class="activation-role">' + escapeHtml(roleLabel) + '</strong> ' +
         '<strong class="activation-title">' + escapeHtml(label) + '</strong>' +
         (path ? '<small class="activation-path">' + escapeHtml(path) + '</small>' : '') +
         '<small class="activation-source">' + escapeHtml(source) + '</small></span>' +
-        '<span class="score" title="final ' + score + ' · hybrid ' + hybrid + '">' + score + '</span>';
+        '<span class="score-wrap">' + provenanceBadge + '<span class="score" title="final ' + score + ' · hybrid ' + hybrid + '">' + score + '</span></span>';
       li.addEventListener('mouseenter', (evt) => showActivatedTooltip(note, evt));
       li.addEventListener('mousemove', (evt) => positionTooltip(evt));
       li.addEventListener('mouseleave', () => hideTooltip());

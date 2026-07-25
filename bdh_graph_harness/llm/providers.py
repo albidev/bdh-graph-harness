@@ -6,6 +6,7 @@ delegate to ollama.py or openrouter.py based on CONFIG['llm_provider'].
 
 import json
 import re
+import logging
 
 from bdh_graph_harness.config import retry_with_backoff
 import bdh_graph_harness.config as _config
@@ -16,6 +17,9 @@ from bdh_graph_harness.llm.openai_compatible import (
     parse_openai_compatible_response,
     parse_openai_compatible_stream_token,
 )
+
+
+logger = logging.getLogger('bdh.llm')
 
 
 OPENAI_COMPATIBLE_PROVIDERS = frozenset({'openrouter', 'ollama-cloud'})
@@ -69,7 +73,8 @@ def llm_respond(query, active_notes, nodes):
 
     def _llm_call():
         req = urllib.request.Request(_config.OLLAMA_LLM_URL, data=data, headers=headers)
-        with urllib.request.urlopen(req, timeout=_config.CONFIG.get('llm_timeout', 300)) as resp:
+        timeout = _config.CONFIG.get('llm_timeout', 300)
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
             result = json.loads(resp.read())
             return _parse_llm_response(result, provider)
 
@@ -89,6 +94,7 @@ def llm_respond(query, active_notes, nodes):
                 break
         return raw if raw else '[no response from LLM]'
     except Exception as e:
+        logger.error(f"LLM respond failed: {e}", exc_info=True)
         return f"[LLM error: {e}]"
 
 
@@ -110,7 +116,8 @@ def llm_stream(query, active_notes, nodes):
     req = urllib.request.Request(_config.OLLAMA_LLM_URL, data=data, headers=headers)
 
     try:
-        with urllib.request.urlopen(req, timeout=_config.CONFIG.get('llm_timeout', 300)) as resp:
+        timeout = _config.CONFIG.get('llm_timeout', 300)
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
             buffer = b''
             for chunk in iter(lambda: resp.read(1), b''):
                 buffer += chunk
@@ -145,4 +152,5 @@ def llm_stream(query, active_notes, nodes):
                         except json.JSONDecodeError:
                             continue
     except Exception as e:
+        logger.error(f"LLM stream failed: {e}", exc_info=True)
         yield f"[LLM stream error: {e}]"
