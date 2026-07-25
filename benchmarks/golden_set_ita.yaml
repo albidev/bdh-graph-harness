@@ -1,0 +1,267 @@
+queries:
+- query: "Cos'è l'apprendimento Hebbiano?"
+  category: concept
+  relevant_note_ids:
+  - wiki/concepts/hebbian-edge-weight-threshold
+  - wiki/concepts/synaptic-plasticity
+  reviewed: false
+  rationale: Domanda naturale italiana sul concetto Hebbiano
+- query: "Come funziona il meccanismo di attenzione del BDH?"
+  category: concept
+  relevant_note_ids:
+  - wiki/concepts/bdh-attention-mechanism
+  - wiki/concepts/k-hop-graph-traversal
+  reviewed: false
+  rationale: Domanda naturale sul retrieval BDH
+- query: "Che cos'è la soglia adattiva?"
+  category: concept
+  relevant_note_ids:
+  - wiki/concepts/hebbian-edge-weight-threshold
+  reviewed: false
+  rationale: Concetto interno BDH
+- query: "Spiegami il neurogenesis nel grafo"
+  category: concept
+  relevant_note_ids:
+  - wiki/concepts/neurogenesis
+  reviewed: false
+  rationale: Concetto chiave del sistema
+- query: "Cosa sono le fonti Markdown federate?"
+  category: concept
+  relevant_note_ids:
+  - wiki/concepts/federated-markdown-sources
+  reviewed: false
+  rationale: Concetto di architettura
+- query: "Cos'è il modello a tre livelli di memoria?"
+  category: concept
+  relevant_note_ids:
+  - wiki/concepts/three-tier-memory-model
+  reviewed: false
+  rationale: Concetto architetturale
+- query: "Come funziona il gate di retrieval ibrido?"
+  category: concept
+  relevant_note_ids:
+  - wiki/concepts/hybrid-retrieval-gate
+  - wiki/concepts/relevance-gate
+  reviewed: false
+  rationale: Gate di routing
+- query: "Cosa significa sparse activation?"
+  category: concept
+  relevant_note_ids:
+  - wiki/concepts/sparse-activation
+  reviewed: false
+  rationale: Termine tecnico
+- query: "Che cos'è la plasticità online?"
+  category: concept
+  relevant_note_ids:
+  - wiki/concepts/synaptic-plasticity
+  reviewed: false
+  rationale: Concetto correlato Hebbian
+- query: "Cos'è il conflict guard?"
+  category: concept
+  relevant_note_ids:
+  - wiki/concepts/conflict-guard
+  reviewed: false
+  rationale: Concetto interno
+- query: "Cos'è Hermes Agent?"
+  category: entity
+  relevant_note_ids:
+  - wiki/entities/hermes-agent
+  reviewed: false
+  rationale: Entità principale
+- query: "Che cos'è Privacy Guard?"
+  category: entity
+  relevant_note_ids:
+  - wiki/entities/privacy-guard
+  reviewed: false
+  rationale: Prodotto commerciale
+- query: "Cos'è Morning Signal?"
+  category: entity
+  relevant_note_ids:
+  - wiki/entities/morning-signal
+  reviewed: false
+  rationale: Progetto/prodotto
+- query: "Cos'è il Tinka?"
+  category: entity
+  relevant_note_ids:
+  - wiki/entities/tinka
+  reviewed: false
+  rationale: Team/prodotto
+- query: "Che cos'è Video Digest Factory?"
+  category: entity
+  relevant_note_ids:
+  - wiki/entities/video-digest-factory
+  reviewed: false
+  rationale: Pipeline video
+- query: "Cos'è Remotion Lab?"
+  category: entity
+  relevant_note_ids:
+  - wiki/entities/remotion-lab
+  reviewed: false
+  rationale: Tool/prodotto
+- query: "Che cos'è il BDH Graph Harness?"
+  category: entity
+  relevant_note_ids:
+  - bdh-graph-harness
+  reviewed: false
+  rationale: Repo/entità principale
+- query: "Cos'è GLM-5.2?"
+  category: entity
+  relevant_note_ids:
+  - wiki/entities/glm-5-2-full-mlx-colibri
+  reviewed: false
+  rationale: Modello/entità
+- query: "Cos'è MLX?"
+  category: entity
+  relevant_note_ids:
+  - wiki/concepts/mlx-out-of-core-inference
+  reviewed: false
+  rationale: Framework Apple
+- query: "Cos'è il progetto Hermes Avatar Widget?"
+  category: entity
+  relevant_note_ids:
+  - wiki/entities/hermes-avatar-widget
+  reviewed: false
+  rationale: Widget companion
+- query: "Cosa abbiamo fatto sul BDH il 20 luglio 2026?"
+  category: activity
+  relevant_note_ids:
+  - memory/learned/bdh-session-recovery-delta
+  reviewed: false
+  rationale: Attività recente
+- query: "Raccontami la sessione di benchmark del BDH"
+  category: activity
+  relevant_note_ids:
+  - wiki/queries/bdh-graph-harness-poc-benchmark
+  reviewed: false
+  rationale: Sessione di lavoro
+- query: "Cosa è successo con il gateway che girava come root?"
+  category: activity
+  relevant_note_ids:
+  - memory/learned/bdh-session-recovery-delta
+  reviewed: false
+  rationale: Incidente noto
+- query: "Come abbiamo risolto il problema del fullfsync?"
+  category: activity
+  relevant_note_ids:
+  - memory/learned/bdh-session-recovery-delta
+  reviewed: false
+  rationale: Fix locale
+- query: "Quali miglioramenti abbiamo fatto alla UI del grafo?"
+  category: activity
+  relevant_note_ids:
+  - wiki/concepts/edge-type-filters
+  - wiki/concepts/glow-halos
+  reviewed: false
+  rationale: Lavoro UI
+- query: "Cosa sappiamo del benchmark di GLM-5.2?"
+  category: activity
+  relevant_note_ids:
+  - wiki/queries/glm-5-2-mac-mini-64gb-assessment
+  reviewed: false
+  rationale: Valutazione modello
+- query: "Che lezione abbiamo imparato su BM25 in italiano?"
+  category: activity
+  relevant_note_ids:
+  - wiki/lessons/bm25-italian-failure
+  - wiki/lessons/hybrid-search-disabled
+  reviewed: false
+  rationale: Lezione appresa
+- query: "Cosa abbiamo deciso sulla neurogenesi?"
+  category: activity
+  relevant_note_ids:
+  - wiki/concepts/neurogenesis
+  reviewed: false
+  rationale: Decisione di design
+- query: "Quali appunti ci sono sui modelli locali?"
+  category: activity
+  relevant_note_ids:
+  - local-llm-coding-benchmarks
+  reviewed: false
+  rationale: Benchmark locali
+- query: "Cosa c'è nel README di Mission Control?"
+  category: activity
+  relevant_note_ids:
+  - projects/hermes-mission-control/README
+  reviewed: false
+  rationale: Progetto README
+- query: "Come si collega l'apprendimento Hebbiano ai grafi?"
+  category: crossref
+  relevant_note_ids:
+  - wiki/concepts/hebbian-edge-weight-threshold
+  - wiki/concepts/synaptic-plasticity
+  - wiki/concepts/bdh-attention-mechanism
+  reviewed: false
+  rationale: Collegamento concetti
+- query: "Qual è la relazione tra BDH e i modelli a grafo?"
+  category: crossref
+  relevant_note_ids:
+  - wiki/concepts/bdh-attention-mechanism
+  - wiki/concepts/domain-agnostic-knowledge-graph
+  reviewed: false
+  rationale: Cross-concetto
+- query: "Come si collega MLX all'inferenza out-of-core?"
+  category: crossref
+  relevant_note_ids:
+  - wiki/concepts/mlx-out-of-core-inference
+  - wiki/concepts/expert-aware-metal-streaming
+  reviewed: false
+  rationale: Collegamento MLX
+- query: "Che differenza c'è tra retrieval veloce e sintesi profonda?"
+  category: crossref
+  relevant_note_ids:
+  - wiki/concepts/fast-retrieval-vs-deep-synthesis
+  - wiki/concepts/bdh-attention-mechanism
+  reviewed: false
+  rationale: Confronto concetti
+- query: "Come si collega il gating al retrieval ibrido?"
+  category: crossref
+  relevant_note_ids:
+  - wiki/concepts/hybrid-retrieval-gate
+  - wiki/concepts/relevance-gate
+  reviewed: false
+  rationale: Collegamento gate
+- query: "Qual è il legame tra neurogenesi e filtri di segnale?"
+  category: crossref
+  relevant_note_ids:
+  - wiki/concepts/neurogenesis
+  - wiki/concepts/detection-of-novelty
+  reviewed: false
+  rationale: Collegamento neurogenesi
+- query: "Come si collega la soglia adattiva al retrieval ibrido?"
+  category: crossref
+  relevant_note_ids:
+  - wiki/concepts/hybrid-retrieval-gate
+  - wiki/concepts/hebbian-edge-weight-threshold
+  reviewed: false
+  rationale: Collegamento soglia e gate
+- query: "Cosa c'è di nuovo sull'intelligenza artificiale oggi?"
+  category: news
+  relevant_note_ids:
+  - tools-to-try
+  reviewed: false
+  rationale: News generica
+- query: "Quali strumenti AI consigliamo di provare?"
+  category: news
+  relevant_note_ids:
+  - tools-to-try
+  reviewed: false
+  rationale: Tool discovery
+- query: "Cosa è trending nel mondo AI?"
+  category: news
+  relevant_note_ids:
+  - tools-to-try
+  reviewed: false
+  rationale: Trend generico
+version: 2026-07-25-ita-draft
+review_status: pending
+auto_generated: true
+vault_path: /Users/albi/Documents/Hermes
+vault_size: 350
+coverage_warnings:
+- 'news: only 3 candidates available (target 8)'
+review_checklist:
+- Verify each query has a single clear answer in the vault.
+- Confirm relevant_note_ids are ordered by relevance where meaningful.
+- Add missing news/activity notes if the vault snapshot is incomplete.
+- Rewrite title-as-query entries into natural questions where needed.
+- Promote reviewed:false to reviewed:true only after running a sample query.
