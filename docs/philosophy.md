@@ -35,7 +35,7 @@ Hebbian learning is the oldest principle in computational neuroscience: *neurons
 1. A query arrives
 2. Vector search (embeddings) finds seed notes — optional BM25 hybrid mode available for multilingual vaults
 3. k-hop graph traversal spreads activation from seeds through wikilink connections
-4. An adaptive threshold filters noise — only nodes scoring above `max(Q75, mean+1σ, 0.15)` remain active
+4. An adaptive threshold filters noise — only nodes scoring above the dynamic threshold (median + 0.3*std, with a configurable floor and a minimum-activation guarantee) remain active
 5. **All pairs of co-activated notes strengthen their synaptic weight**
 6. Unused synapses decay by a factor of 0.95
 7. The LLM generates a response grounded in the activated subset
