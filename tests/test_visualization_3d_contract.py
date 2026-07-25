@@ -417,9 +417,15 @@ def test_retrieval_panel_exposes_grounding_status_and_next_actions():
     assert "function normalizeRetrievalTrace(" in websocket
     assert "function renderRetrievalTrace(" in websocket
     assert "function toggleRetrievalTrace(" in websocket
+    assert "trace-variants" in websocket
+    assert "trace-variant-row" in websocket
+    assert "trace-variant-count" in html
+    assert "trace-summary-grid" in html
     assert "#retrieval-status" in styles
     assert ".retrieval-trace" in styles
     assert ".trace-block" in styles
+    assert ".trace-variant-row" in styles
+    assert ".trace-summary-grid" in styles
 
 
 def test_multi_query_trace_shows_variant_text_and_opens_for_multiple_variants():

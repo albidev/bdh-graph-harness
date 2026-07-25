@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#0d1117">
 <title>BDH Graph Harness — 3D Knowledge Space</title>
-<link rel="stylesheet" href="/static/styles.css?v=3d-v67">
+<link rel="stylesheet" href="/static/styles.css?v=3d-v69">
 <script>
   window.__BDH_RUNTIME_ERRORS__ = [];
   window.addEventListener('error', event => {
@@ -268,11 +268,16 @@
           <button type="button" id="retrieval-trace-toggle" onclick="toggleRetrievalTrace()">Trace</button>
         </div>
         <div id="retrieval-trace" class="retrieval-trace" hidden>
-          <div class="trace-block"><small>Original query</small><p id="trace-query">—</p></div>
-          <div class="trace-block"><small>Variants accepted</small><p id="trace-variants">—</p></div>
-          <div class="trace-block"><small>Fusion method</small><p id="trace-fusion">—</p></div>
-          <div class="trace-block"><small>Notes per variant</small><p id="trace-per-variant">—</p></div>
-          <div class="trace-block"><small>Multi-variant notes</small><p id="trace-multi">—</p></div>
+          <div class="trace-query-card trace-block"><small>Original query</small><p id="trace-query">—</p></div>
+          <div class="trace-variants-block trace-block">
+            <div class="trace-heading"><small>Query variants</small><span id="trace-variant-count" class="trace-count">0</span></div>
+            <ol id="trace-variants" class="trace-variants-list"></ol>
+          </div>
+          <div class="trace-summary-grid">
+            <div class="trace-summary-item"><small>Fusion</small><strong id="trace-fusion">—</strong></div>
+            <div class="trace-summary-item"><small>Multi-variant notes</small><strong id="trace-multi">—</strong></div>
+          </div>
+          <div class="trace-block trace-breakdown-block"><small>Notes per variant</small><p id="trace-per-variant">—</p></div>
         </div>
       </div>
     </section>
@@ -329,12 +334,12 @@
       return bloom;
     });
 </script>
-<script src="/static/graph-3d-utils.js?v=3d-v67"></script>
-<script src="/static/graph-core.js?v=3d-v67"></script>
-<script src="/static/graph-init.js?v=3d-v67"></script>
-<script src="/static/activation.js?v=3d-v67"></script>
-<script src="/static/vault-selector.js?v=3d-v67"></script>
-<script src="/static/websocket.js?v=3d-v67"></script>
-<script src="/static/ui-controls.js?v=3d-v67"></script>
+<script src="/static/graph-3d-utils.js?v=3d-v69"></script>
+<script src="/static/graph-core.js?v=3d-v69"></script>
+<script src="/static/graph-init.js?v=3d-v69"></script>
+<script src="/static/activation.js?v=3d-v69"></script>
+<script src="/static/vault-selector.js?v=3d-v69"></script>
+<script src="/static/websocket.js?v=3d-v69"></script>
+<script src="/static/ui-controls.js?v=3d-v69"></script>
 </body>
 </html>
