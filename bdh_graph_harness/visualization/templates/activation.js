@@ -192,6 +192,8 @@ function handleActivation(event) {
   const listEl = document.getElementById('activated-list');
   const countEl = document.getElementById('activation-count');
   if (countEl) countEl.textContent = String(activated.length);
+  const evidenceBadge = document.getElementById('inspector-evidence-badge');
+  if (evidenceBadge) evidenceBadge.textContent = activated.length ? `${activated.length} notes` : '—';
   listEl.innerHTML = '';
   if (activated.length === 0) {
     listEl.innerHTML = '<div class="empty">No notes activated</div>';
@@ -363,7 +365,9 @@ function handleActivation(event) {
 
   if (event.queries_processed != null) {
     const qEl = document.getElementById('stat-queries');
+    const sessionHero = document.getElementById('session-hero-count');
     if (qEl) qEl.textContent = event.queries_processed;
+    if (sessionHero) sessionHero.textContent = event.queries_processed;
   }
 
   if (event.hebbian_synapses != null) {
