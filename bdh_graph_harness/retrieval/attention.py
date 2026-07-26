@@ -15,6 +15,19 @@ from bdh_graph_harness.retrieval.hybrid import hybrid_score
 from bdh_graph_harness.graph.builder import _resolve_target
 
 
+def _resolve_hebbian_node_id(node_id, valid_node_ids):
+    """Map persisted federated IDs to the canonical IDs of this graph view."""
+    if node_id in valid_node_ids:
+        return node_id
+    if not node_id.startswith("vault:"):
+        return None
+    relative = node_id.removeprefix("vault:")
+    for candidate in (relative, relative.removesuffix(".md")):
+        if candidate in valid_node_ids:
+            return candidate
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Adaptive Threshold (Phase 3.3)
 # ---------------------------------------------------------------------------
@@ -98,18 +111,24 @@ def _compute_hebbian_boost(candidate_id, hebbian_state, recently_active):
     max_boost = CONFIG.get('hebbian_boost_max', 0.5)
     weight_factor = CONFIG.get('hebbian_boost_weight_factor', 0.3)
 
+    # Persisted state can use federated ``vault:...md`` IDs while attention
+    # operates on canonical graph IDs. Resolve against this candidate/context.
+    valid_ids = set(recently_active) | {candidate_id}
+
     # Collect synapse weights from candidate to recently active notes
     weights = []
-    for other_id in recently_active:
-        if other_id == candidate_id:
+    for key, syn in synapses.items():
+        try:
+            left, right = key.split('|', 1)
+        except ValueError:
             continue
-        if candidate_id < other_id:
-            key = f"{candidate_id}|{other_id}"
-        else:
-            key = f"{other_id}|{candidate_id}"
-
-        syn = synapses.get(key)
-        if syn:
+        left = _resolve_hebbian_node_id(left, valid_ids)
+        right = _resolve_hebbian_node_id(right, valid_ids)
+        if left is None or right is None:
+            continue
+        if left == candidate_id and right in recently_active:
+            weights.append(syn.get('weight', 0.0))
+        elif right == candidate_id and left in recently_active:
             weights.append(syn.get('weight', 0.0))
 
     if not weights:
@@ -170,7 +189,10 @@ def _get_recently_active_notes(hebbian_state, valid_node_ids=None):
                     parts = key.split('|')
                     # Filter dead synapses if we have the valid node set
                     if valid_node_ids is not None:
-                        parts = [p for p in parts if p in valid_node_ids]
+                        parts = [
+                            resolved for p in parts
+                            if (resolved := _resolve_hebbian_node_id(p, valid_node_ids)) is not None
+                        ]
                         if not parts:
                             continue
                     recent_notes.update(parts)
@@ -202,7 +224,9 @@ def _build_hebbian_adjacency(hebbian_state, valid_node_ids):
             left, right = key.split("|", 1)
         except ValueError:
             continue
-        if left not in valid_node_ids or right not in valid_node_ids:
+        left = _resolve_hebbian_node_id(left, valid_node_ids)
+        right = _resolve_hebbian_node_id(right, valid_node_ids)
+        if left is None or right is None:
             continue
         adjacency[left].append((right, weight))
         adjacency[right].append((left, weight))
@@ -443,7 +467,7 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
 
             dynamic_weight = neighbor['hebbian_edge_weight']
             if neighbor['matched_by'] == 'hebbian_edge':
-                new_score *= dynamic_weight * CONFIG.get('hebbian_dynamic_gain', 1.0)
+                new_score *= (0.5 + dynamic_weight) * CONFIG.get('hebbian_dynamic_gain', 1.0)
             elif dynamic_weight > 0:
                 new_score *= 1.0 + dynamic_weight * CONFIG.get('hebbian_dynamic_gain', 1.0)
 
