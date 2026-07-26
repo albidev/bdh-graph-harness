@@ -1597,7 +1597,6 @@ body.inspector-view-session #side-panel .inspector-view-session {
 
 #response-section {
   min-height: 112px;
-  max-height: 280px;
   overflow: auto;
 }
 
@@ -2757,6 +2756,27 @@ body {
 
   body.panel-tab .inspector-section {
     padding: 18px 16px calc(22px + env(safe-area-inset-bottom));
+  }
+
+  body.panel-tab .section-heading h2 {
+    font-size: 14px;
+  }
+
+  body.panel-tab .eyebrow {
+    font-size: 11px;
+  }
+
+  body.panel-tab .section-heading > span:not(.eyebrow),
+  body.panel-tab .section-heading > button {
+    font-size: 10px;
+  }
+
+  body.panel-tab #query-input,
+  body.panel-tab #response-text,
+  body.panel-tab #activated-list,
+  body.panel-tab #new-concepts-list {
+    font-size: 14px;
+    line-height: 1.55;
   }
 
   body.panel-tab .panel-heading {
