@@ -1371,7 +1371,7 @@ body.panel-collapsed #expand-panel {
 #inspector-tabs {
   display: grid;
   flex: 0 0 auto;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 4px;
   padding: 8px 12px;
   border-bottom: 1px solid var(--line);
@@ -1422,15 +1422,44 @@ body.panel-collapsed #expand-panel {
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
 }
+#side-panel .inspector-tab span { font-size: 13px; }
+#side-panel .inspector-tab small { font-size: 11px; }
+#side-panel .section-heading h2 { font-size: 14px; }
+#side-panel .section-heading > span:not(.eyebrow),
+#side-panel .section-heading > button { font-size: 11px; }
+#side-panel #query-input,
+#side-panel #response-text,
+#side-panel #activated-list,
+#side-panel #new-concepts-list,
+#side-panel #selection-content {
+  font-size: 14px;
+  line-height: 1.55;
+}
+#side-panel .trace-query-card p,
+#side-panel .trace-variant-copy,
+#side-panel .trace-block p,
+#side-panel .activation-title,
+#side-panel .activation-path,
+#side-panel .activation-source {
+  font-size: 13px;
+  line-height: 1.5;
+}
+#side-panel #retrieval-status,
+#side-panel .retrieval-metrics,
+#side-panel .retrieval-block,
+#side-panel .retrieval-actions button {
+  font-size: 11px;
+}
+
 .inspector-section {
   display: none;
   padding: 18px 18px 20px;
   border-bottom: 1px solid rgba(240, 246, 252, 0.065);
 }
+
 body.inspector-view-query #side-panel .inspector-view-query,
 body.inspector-view-evidence #side-panel .inspector-view-evidence,
-body.inspector-view-inspect #side-panel .inspector-view-inspect,
-body.inspector-view-session #side-panel .inspector-view-session {
+body.inspector-view-inspect #side-panel .inspector-view-inspect {
   display: block;
 }
 .inspector-section[hidden] { display: none !important; }
@@ -1440,18 +1469,6 @@ body.inspector-view-session #side-panel .inspector-view-session {
   letter-spacing: 0.05em;
   text-transform: uppercase;
 }
-.session-hero {
-  display: grid;
-  gap: 4px;
-  margin: -2px -2px 22px;
-  padding: 18px;
-  border: 1px solid rgba(88, 166, 255, 0.18);
-  border-radius: 12px;
-  background: linear-gradient(135deg, rgba(88, 166, 255, 0.12), rgba(188, 140, 255, 0.05));
-}
-.session-hero strong { color: var(--text); font-size: 32px; letter-spacing: -0.06em; }
-.session-hero > span:last-child { color: var(--text-muted); font-size: 11px; }
-
 #side-panel > section {
   flex: 0 0 auto;
   padding: 16px 18px;
