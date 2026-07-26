@@ -29,6 +29,9 @@ def test_mobile_query_uses_one_scroll_container_and_never_truncates_response():
     assert "max-height: none;" in styles
     assert "overflow: visible;" in styles
     assert "max-height: 38dvh" not in styles
+    assert "max-height: 280px" not in styles
+    assert "body.panel-tab #response-text" in styles
+    assert "font-size: 14px;" in styles
 
 
 def test_mobile_query_response_fills_remaining_inspector_space():
@@ -89,4 +92,4 @@ def test_mobile_mode_and_cached_assets_share_the_mobile_breakpoint_and_revision(
     html = (ROOT / "bdh_graph_harness/visualization/templates/index.html").read_text()
 
     assert "return window.matchMedia('(max-width: 768px)').matches;" in core
-    assert "?v=3d-v72" in html
+    assert "?v=3d-v73" in html
