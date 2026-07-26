@@ -63,6 +63,12 @@ CONFIG = {
     'max_neighbors_per_hop': 10,
     'hop_decay': 0.5,  # score decay per hop (single application, not compound)
     'hebbian_gain': 0.0,  # multiplier on learned synapse weight during propagation; 0 = disabled
+    # Dynamic Hebbian adjacency: learned co-activations are traversable edges,
+    # independent of static wikilinks. Kept tightly capped to prevent drift.
+    'hebbian_dynamic_edges_enabled': True,
+    'hebbian_dynamic_min_weight': 0.15,
+    'hebbian_dynamic_top_n': 3,
+    'hebbian_dynamic_gain': 1.0,
     'alpha': 0.7,
     'beta': 0.3,
     'decay': 0.95,
