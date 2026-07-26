@@ -437,6 +437,23 @@ def test_multi_query_trace_shows_variant_text_and_opens_for_multiple_variants():
     assert "Fused ${trace.variants.length} variants" in websocket
 
 
+def test_inspector_uses_view_tabs_to_reduce_panel_density_on_desktop_and_mobile():
+    html = (ROOT / "bdh_graph_harness/visualization/templates/index.html").read_text()
+    styles = (ROOT / "bdh_graph_harness/visualization/templates/styles.css").read_text()
+    controls = (ROOT / "bdh_graph_harness/visualization/templates/ui-controls.js").read_text()
+
+    for view in ["query", "evidence", "inspect", "session"]:
+        assert f'data-inspector-view="{view}"' in html
+        assert f'inspector-view-{view}' in styles
+    assert 'id="inspector-content"' in html
+    assert 'id="trace-section"' in html
+    assert 'id="session-hero-count"' in html
+    assert 'function switchInspectorView(' in controls
+    assert 'function restoreInspectorView()' in controls
+    assert 'body.panel-tab #inspector-tabs' in styles
+    assert 'body.panel-tab .query-actions' in styles
+
+
 def test_query_lens_is_reversible_and_does_not_destroy_full_graph_state():
     controls = (ROOT / "bdh_graph_harness/visualization/templates/ui-controls.js").read_text()
     core = (ROOT / "bdh_graph_harness/visualization/templates/graph-core.js").read_text()
