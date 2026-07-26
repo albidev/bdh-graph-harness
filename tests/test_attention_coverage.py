@@ -92,3 +92,71 @@ def test_attention_single_pass_covers_missing_targets_and_threshold(monkeypatch)
     monkeypatch.setitem(config.CONFIG, "hop_decay", 0.5)
     active = attention.attention("q", nodes, edges, FakeCollection(), k=1, max_hop=1)
     assert set(active) == {"seed", "peer"}
+
+
+def test_attention_traverses_strong_hebbian_edge_without_static_wikilink(monkeypatch):
+    nodes = {
+        "seed": {"title": "Seed", "text": "seed"},
+        "learned": {"title": "Learned", "text": "learned"},
+    }
+    state = {
+        "synapses": {
+            "learned|seed": {"weight": 0.8, "last_coactivated": "2999-01-01T00:00:00+00:00"}
+        }
+    }
+    routing_meta = {}
+    monkeypatch.setattr(attention, "get_embeddings", lambda _queries: [[1.0]])
+    monkeypatch.setitem(config.CONFIG, "adaptive_threshold", False)
+    monkeypatch.setitem(config.CONFIG, "active_threshold", 0.01)
+    monkeypatch.setitem(config.CONFIG, "hop_decay", 0.5)
+    monkeypatch.setitem(config.CONFIG, "hebbian_dynamic_edges_enabled", True)
+    monkeypatch.setitem(config.CONFIG, "hebbian_dynamic_min_weight", 0.15)
+    monkeypatch.setitem(config.CONFIG, "hebbian_dynamic_top_n", 3)
+
+    active = attention.attention(
+        "q",
+        nodes,
+        {"seed": [], "learned": []},
+        FakeCollection(ids=("seed",)),
+        k=1,
+        max_hop=1,
+        hebbian_state=state,
+        routing_meta=routing_meta,
+    )
+
+    assert "learned" in active
+    learned = next(item for item in routing_meta["activation_details"] if item["id"] == "learned")
+    assert learned["role"] == "hebbian_neighbor"
+    assert learned["matched_by"] == "hebbian_edge"
+    assert learned["hebbian_edge_weight"] == 0.8
+
+
+def test_static_and_hebbian_edge_applies_learned_weight_once(monkeypatch):
+    nodes = {
+        "seed": {"title": "Seed", "text": "seed"},
+        "learned": {"title": "Learned", "text": "learned"},
+    }
+    state = {"synapses": {"learned|seed": {"weight": 0.8}}}
+    routing_meta = {}
+    monkeypatch.setattr(attention, "get_embeddings", lambda _queries: [[1.0]])
+    monkeypatch.setitem(config.CONFIG, "adaptive_threshold", False)
+    monkeypatch.setitem(config.CONFIG, "active_threshold", 0.01)
+    monkeypatch.setitem(config.CONFIG, "hop_decay", 0.5)
+    monkeypatch.setitem(config.CONFIG, "hebbian_dynamic_edges_enabled", True)
+    monkeypatch.setitem(config.CONFIG, "hebbian_dynamic_gain", 1.0)
+    monkeypatch.setitem(config.CONFIG, "hebbian_gain", 1.0)
+
+    active = attention.attention(
+        "q",
+        nodes,
+        {"seed": [{"target": "learned"}], "learned": []},
+        FakeCollection(ids=("seed",)),
+        k=1,
+        max_hop=1,
+        hebbian_state=state,
+        routing_meta=routing_meta,
+    )
+
+    assert active["learned"] == 0.9
+    learned = next(item for item in routing_meta["activation_details"] if item["id"] == "learned")
+    assert learned["matched_by"] == "static_and_hebbian_edge"

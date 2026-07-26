@@ -180,6 +180,39 @@ def _get_recently_active_notes(hebbian_state, valid_node_ids=None):
     return recent_notes
 
 
+def _build_hebbian_adjacency(hebbian_state, valid_node_ids):
+    """Build a bounded adjacency index from strong learned synapses.
+
+    Unlike ``_compute_hebbian_boost``, this makes an association traversable
+    even when its target did not survive the initial vector/BM25 candidate
+    pool. The index is scoped to one attention call and only retains the
+    strongest configured neighbors per source node.
+    """
+    if not hebbian_state or not CONFIG.get("hebbian_dynamic_edges_enabled", True):
+        return {}
+
+    min_weight = CONFIG.get("hebbian_dynamic_min_weight", 0.15)
+    top_n = CONFIG.get("hebbian_dynamic_top_n", 3)
+    adjacency = defaultdict(list)
+    for key, synapse in hebbian_state.get("synapses", {}).items():
+        weight = float(synapse.get("weight", 0.0))
+        if weight < min_weight:
+            continue
+        try:
+            left, right = key.split("|", 1)
+        except ValueError:
+            continue
+        if left not in valid_node_ids or right not in valid_node_ids:
+            continue
+        adjacency[left].append((right, weight))
+        adjacency[right].append((left, weight))
+
+    return {
+        node_id: sorted(neighbors, key=lambda item: -item[1])[:top_n]
+        for node_id, neighbors in adjacency.items()
+    }
+
+
 def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=None,
               hebbian_state=None, routing_meta=None):
     """
@@ -354,6 +387,7 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
 
     # Step 2: Graph traversal — expand from seeds via wikilinks
     active = dict(seeds)
+    hebbian_adjacency = _build_hebbian_adjacency(hebbian_state, set(nodes))
     queue = deque()
     for note_id, score in seeds:
         queue.append((note_id, score, 0, None))
@@ -371,24 +405,47 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
         if hop >= max_hop:
             continue
 
-        # Get neighbors — use ChromaDB to rank them by similarity to query
-        neighbors = []
+        # Static wikilinks and learned co-activations share the same bounded
+        # traversal queue, but retain their origin for scoring and provenance.
+        neighbors = {}
         for edge in edges.get(current_id, []):
             target = edge['target']
             target_id = _resolve_target(target, nodes)
             if target_id is None:
                 continue
-            # Get similarity from ChromaDB if available, else use 0.1
-            n_sim = scores.get(target_id, 0.1)
-            neighbors.append((target_id, n_sim))
+            neighbors[target_id] = {
+                'matched_by': 'static_edge',
+                'hebbian_edge_weight': 0.0,
+                'priority': scores.get(target_id, 0.1),
+            }
 
-        # Cap: only top max_neighbors_per_hop by similarity
-        neighbors.sort(key=lambda x: -x[1])
+        for target_id, weight in hebbian_adjacency.get(current_id, []):
+            existing = neighbors.get(target_id)
+            if existing:
+                existing['matched_by'] = 'static_and_hebbian_edge'
+                existing['hebbian_edge_weight'] = max(existing['hebbian_edge_weight'], weight)
+                existing['priority'] = max(existing['priority'], weight)
+            else:
+                neighbors[target_id] = {
+                    'matched_by': 'hebbian_edge',
+                    'hebbian_edge_weight': weight,
+                    'priority': max(scores.get(target_id, 0.0), weight),
+                }
+
+        # Cap static + dynamic expansion together, preserving strong learned
+        # associations even if vector/BM25 did not include their target.
+        neighbors = sorted(neighbors.items(), key=lambda item: -item[1]['priority'])
         neighbors = neighbors[:CONFIG['max_neighbors_per_hop']]
 
-        for target_id, n_sim in neighbors:
+        for target_id, neighbor in neighbors:
             # Decay score by hop distance (single decay per hop).
             new_score = score * CONFIG.get('hop_decay', 0.5)
+
+            dynamic_weight = neighbor['hebbian_edge_weight']
+            if neighbor['matched_by'] == 'hebbian_edge':
+                new_score *= dynamic_weight * CONFIG.get('hebbian_dynamic_gain', 1.0)
+            elif dynamic_weight > 0:
+                new_score *= 1.0 + dynamic_weight * CONFIG.get('hebbian_dynamic_gain', 1.0)
 
             # Hub dampening for the target
             if CONFIG['hub_dampening'] and degree.get(target_id, 0) > CONFIG['hub_degree_threshold']:
@@ -398,7 +455,7 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
             # Hebbian gain: learned synaptic weight between current_id and target_id
             # boosts propagation when the synapse exists. hebbian_gain=0 reproduces old behavior.
             hebbian_gain = CONFIG.get('hebbian_gain', 0.0)
-            if hebbian_gain > 0 and hebbian_state:
+            if hebbian_gain > 0 and hebbian_state and neighbor['matched_by'] == 'static_edge':
                 syn_key = (
                     f"{current_id}|{target_id}" if current_id < target_id
                     else f"{target_id}|{current_id}"
@@ -414,14 +471,18 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
                         activation_details[target_id].update({
                             'hop': hop + 1,
                             'parent_id': current_id,
+                            'matched_by': neighbor['matched_by'],
+                            'hebbian_edge_weight': round(dynamic_weight, 4),
                             'final_score': round(new_score, 4),
                         })
             elif new_score > traversal_threshold:
                 active[target_id] = new_score
                 activation_details[target_id] = {
-                    'role': 'graph_neighbor',
+                    'role': 'hebbian_neighbor' if neighbor['matched_by'] == 'hebbian_edge' else 'graph_neighbor',
                     'hop': hop + 1,
                     'parent_id': current_id,
+                    'matched_by': neighbor['matched_by'],
+                    'hebbian_edge_weight': round(dynamic_weight, 4),
                     'vector_score': round(raw_vector_scores.get(target_id, 0.0), 4),
                     'bm25_score': round(bm25_scores.get(target_id, 0.0), 4),
                     'hybrid_score': round(retrieval_scores.get(target_id, 0.0), 4),
