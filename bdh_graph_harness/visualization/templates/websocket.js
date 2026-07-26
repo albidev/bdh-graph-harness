@@ -137,6 +137,10 @@ function renderRetrievalDiagnostics(payload = {}) {
   status.dataset.state = state;
   found.textContent = notes.length ? `${notes.length} notes · top ${topScore.toFixed(3)}` : '0 notes activated';
   confidence.textContent = notes.length ? `${Math.round(topScore * 100)}% retrieval score` : '—';
+  const queryBadge = document.getElementById('inspector-query-badge');
+  const evidenceBadge = document.getElementById('inspector-evidence-badge');
+  if (queryBadge) queryBadge.textContent = notes.length ? `${notes.length} notes` : 'No result';
+  if (evidenceBadge) evidenceBadge.textContent = notes.length ? `${notes.length} notes` : '—';
 
   const missingItems = [];
   const normalizedQuery = query.toLowerCase();
@@ -205,8 +209,10 @@ function renderRetrievalTrace(trace, options = {}) {
   const multiEl = document.getElementById('trace-multi');
   if (!container || !queryEl || !variantsEl || !fusionEl || !perVariantEl || !multiEl) return;
 
+  const traceSection = document.getElementById('trace-section');
   if (!trace) {
     container.hidden = true;
+    if (traceSection) traceSection.hidden = true;
     return;
   }
 
@@ -235,22 +241,21 @@ function renderRetrievalTrace(trace, options = {}) {
   // behind a click. Open the trace automatically when variants are present.
   const hasMultipleVariants = trace.variants && trace.variants.length > 1;
   container.hidden = !hasMultipleVariants;
+  if (traceSection) traceSection.hidden = !hasMultipleVariants;
 
-  // Show the toggle button whenever the backend provided variant metadata.
+  // Keep the query tab calm; the evidence tab carries the full provenance trail.
   const toggleBtn = document.getElementById('retrieval-trace-toggle');
   if (toggleBtn) {
-    toggleBtn.hidden = !(trace.variants && trace.variants.length);
-    toggleBtn.textContent = hasMultipleVariants ? 'Hide trace' : 'Trace';
+    toggleBtn.hidden = !hasMultipleVariants;
+    toggleBtn.textContent = hasMultipleVariants ? 'View evidence' : 'Evidence';
   }
 }
 
 function toggleRetrievalTrace() {
   const container = document.getElementById('retrieval-trace');
-  const button = document.getElementById('retrieval-trace-toggle');
   if (!container) return;
-  const showing = !container.hidden;
-  container.hidden = showing;
-  if (button) button.textContent = showing ? 'Trace' : 'Hide trace';
+  if (typeof switchInspectorView === 'function') switchInspectorView('evidence');
+  container.hidden = false;
 }
 
 function focusRetrievalEvidence() {
