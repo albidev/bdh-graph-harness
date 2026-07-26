@@ -70,6 +70,24 @@ def rank(target, active):
         return None
 
 
+def _static_neighbors(source_id, edges, nodes, exclude, limit=2):
+    candidates = []
+    for edge in edges.get(source_id, []):
+        target = _resolve_target(edge.get('target', ''), nodes)
+        if target and target not in exclude and target not in candidates:
+            candidates.append(target)
+        if len(candidates) >= limit:
+            break
+    return candidates
+
+
+def _embedding_neighbors(query, collection, exclude, limit=2):
+    embedding = attention.__globals__['get_embeddings']([query])[0]
+    result = collection.query(query_embeddings=[embedding], n_results=min(collection.count(), 25), include=['metadatas', 'distances'])
+    ids = result.get('ids', [[]])[0]
+    return [note_id for note_id in ids if note_id not in exclude][:limit]
+
+
 def metrics(ranks):
     count = len(ranks)
     return {
@@ -112,6 +130,8 @@ with config_overlay({"chroma_path": str(ROOT / "benchmarks" / ".bdh-chroma-edge-
         if {item["id"]: item for item in static_details.get("activation_details", [])}.get(source, {}).get("role") != "seed":
             continue
         dynamic_active, dynamic_details = route(query, nodes, edges, collection, bm25, state, True)
+        primary_ids = set(dynamic_active)
+        associative_context = dynamic_details.get("associative_context", [])
         records.append({
             "source_id": source,
             "target_id": target,
@@ -121,7 +141,9 @@ with config_overlay({"chroma_path": str(ROOT / "benchmarks" / ".bdh-chroma-edge-
             "target_static_rank": rank(target, static_active),
             "target_dynamic_rank": rank(target, dynamic_active),
             "target_dynamic_provenance": {item["id"]: item for item in dynamic_details.get("activation_details", [])}.get(target, {}).get("matched_by"),
-            "associative_context": dynamic_details.get("associative_context", []),
+            "associative_context": associative_context,
+            "static_neighbor_control": _static_neighbors(source, edges, nodes, primary_ids),
+            "embedding_neighbor_control": _embedding_neighbors(query, collection, primary_ids),
         })
 
 static_ranks = [record["target_static_rank"] for record in records]
