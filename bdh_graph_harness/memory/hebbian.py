@@ -93,8 +93,8 @@ def hebbian_update(active_notes, state, nodes=None, source=None):
     if not strong:
         return state, set(), 0
 
-    # Seeds: the top-k strongest notes. Use config seed_count, capped to available.
-    seed_count = CONFIG.get('seed_count', 5)
+    # Learning uses its own conservative seed budget; retrieval can overfetch safely.
+    seed_count = CONFIG.get('hebbian_learning_seed_count', CONFIG.get('seed_count', 5))
     seeds = [nid for nid, _ in sorted(strong.items(), key=lambda x: -x[1])[:seed_count]]
 
     alpha = CONFIG.get('alpha', 0.7)

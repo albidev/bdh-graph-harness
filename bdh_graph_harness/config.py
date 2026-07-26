@@ -56,6 +56,7 @@ CONFIG = {
     'chroma_path': '.bdh-chroma',
     'chroma_collection': 'notes',
     'seed_count': 5,
+    'hebbian_learning_seed_count': 2,  # conservative write budget; separate from retrieval seeds
     'max_hop': 2,
     'active_threshold': 0.25,
     'hub_dampening': True,

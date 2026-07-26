@@ -375,10 +375,17 @@ async def _run_attention_and_plasticity_unlocked(
     updated_keys = set()
     pruned_count = 0
     if learn and config.get('online_plasticity', True) and active:
+        # Learn only from direct retrieval seeds. Graph-propagated neighbors are read
+        # context, not evidence that two notes should form a durable association.
+        learning_active = {
+            item['id']: active[item['id']]
+            for item in routing.get('activation_details', [])
+            if item.get('role') == 'seed' and item['id'] in active
+        }
         # Acquire lock, then run hebbian_update + save_state in a thread
         async with ctx.state_lock:
             ctx.state, updated_keys, pruned_count = await asyncio.to_thread(
-                hebbian_update, active, ctx.state, n, source
+                hebbian_update, learning_active, ctx.state, n, source
             )
             await asyncio.to_thread(
                 save_state, ctx.config.path, ctx.state
