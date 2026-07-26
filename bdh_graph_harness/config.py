@@ -70,6 +70,9 @@ CONFIG = {
     'hebbian_dynamic_top_n': 3,
     'hebbian_dynamic_gain': 1.5,
     'hebbian_dynamic_hop_decay': 0.6,
+    'hebbian_associative_context_enabled': False,
+    'hebbian_associative_context_max_items': 2,
+    'hebbian_associative_context_max_per_seed': 1,
     # Dynamic associations need query-local semantic evidence before they may
     # compete with declared wikilinks in retrieval.
     'hebbian_dynamic_query_relevance_floor': 0.35,

@@ -352,6 +352,17 @@ async def _run_attention_and_plasticity_unlocked(
                 note_payload['source_id'] = node.get('source_id', 'vault')
             activated_notes.append(note_payload)
 
+    associative_context = []
+    for item in routing.get('associative_context', []):
+        node = n.get(item['id'])
+        associative_context.append({
+            **item,
+            'title': node['title'] if node else item['id'],
+            **({'path': node['path']} if node and node.get('path') else {}),
+        })
+    if associative_context:
+        routing['associative_context'] = associative_context
+
     if config.get('hebbian_dynamic_shadow_enabled', True):
         dynamic_shadow = build_dynamic_shadow(query, routing)
         routing['hebbian_dynamic_shadow'] = dynamic_shadow
