@@ -68,6 +68,27 @@ __all__ = [
 # Vault resolution helpers
 # ---------------------------------------------------------------------------
 
+def _hebbian_state_status(settings: dict, state: dict) -> dict:
+    """Expose the learning state honestly without leaking edge content."""
+    state_file = settings.get('hebbian_state_file', '.bdh-state.json')
+    basename = os.path.basename(state_file)
+    if basename == '.bdh-state.json':
+        mode = 'legacy_active'
+    elif 'primary-seeds-v2' in basename:
+        mode = 'clean_room_shadow'
+    elif 'legacy-curated' in basename:
+        mode = 'curated_experimental'
+    else:
+        mode = 'custom'
+    return {
+        'mode': mode,
+        'state_file': basename,
+        'synapses': len(state.get('synapses', {})),
+        'associative_context_enabled': bool(settings.get('hebbian_associative_context_enabled', False)),
+        'primary_ranking_affected': False,
+    }
+
+
 def _resolve_vault_ctx(app_state: dict, vault_id: str | None = None):
     """Resolve the target :class:`~bdh_graph_harness.vaults.VaultContext`.
 
@@ -152,6 +173,7 @@ async def api_stats(request, app_state: dict) -> web.Response:
         'synapses': sum(len(links) for links in e.values()),
         'avg_degree': sum(len(links) for links in e.values()) / max(len(e), 1),
         'hebbian_synapses': len(s['synapses']),
+        'hebbian_state': _hebbian_state_status(ctx.config.settings, s),
         'queries_processed': s.get('queries', 0),
         'dormant_neurons': len(dormant),
         'active_neurons': len(n) - len(dormant),
@@ -247,6 +269,7 @@ async def api_graph(request, app_state: dict) -> web.Response:
             'neurons': len(n),
             'synapses': sum(len(links) for links in e.values()),
             'hebbian_synapses': len(s['synapses']),
+            'hebbian_state': _hebbian_state_status(ctx.config.settings, s),
             'dormant_neurons': len(s.get('dormant_nodes', [])),
             'phantom_links': len(phantom_list),
         },
