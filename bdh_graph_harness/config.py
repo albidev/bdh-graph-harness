@@ -70,6 +70,13 @@ CONFIG = {
     'hebbian_dynamic_top_n': 3,
     'hebbian_dynamic_gain': 1.5,
     'hebbian_dynamic_hop_decay': 0.6,
+    # Confidence gate for learned-only traversal; static wikilinks ignore these.
+    'hebbian_dynamic_frequency_saturation': 2.0,
+    'hebbian_dynamic_unconsolidated_trust': 0.6,
+    'hebbian_dynamic_recency_days': 30.0,
+    'hebbian_dynamic_recency_floor': 0.4,
+    'hebbian_dynamic_trust_floor': 0.25,
+    'hebbian_dynamic_shadow_enabled': True,
     'alpha': 0.7,
     'beta': 0.3,
     'decay': 0.95,

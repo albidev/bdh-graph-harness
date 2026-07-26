@@ -18,6 +18,7 @@ from aiohttp import web
 from bdh_graph_harness.config import CONFIG, logger
 from bdh_graph_harness.visualization import render_viz_html, get_template_path
 from bdh_graph_harness.retrieval.attention import attention
+from bdh_graph_harness.retrieval.shadow import append_dynamic_shadow, build_dynamic_shadow
 from bdh_graph_harness.memory import hebbian_update, save_state
 from bdh_graph_harness.memory.state_store import reconcile_state_to_nodes
 from bdh_graph_harness.memory.consolidation import (
@@ -350,6 +351,14 @@ async def _run_attention_and_plasticity_unlocked(
             if node and node.get('source_id'):
                 note_payload['source_id'] = node.get('source_id', 'vault')
             activated_notes.append(note_payload)
+
+    if config.get('hebbian_dynamic_shadow_enabled', True):
+        dynamic_shadow = build_dynamic_shadow(query, routing)
+        routing['hebbian_dynamic_shadow'] = dynamic_shadow
+        if dynamic_shadow['dynamic_only_count']:
+            await asyncio.to_thread(
+                append_dynamic_shadow, config['vault_path'], dynamic_shadow
+            )
 
     # Online plasticity: Hebbian update immediately after attention
     updated_keys = set()
