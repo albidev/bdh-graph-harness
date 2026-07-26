@@ -13,8 +13,10 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 import tempfile
 import time
+import unicodedata
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -89,6 +91,38 @@ def _load_golden_set(path: Path | str | None = None) -> list[dict]:
     return load_dataset()
 
 
+def _normalized_text(value: str) -> str:
+    """Normalize text for case- and punctuation-insensitive title checks."""
+    value = unicodedata.normalize("NFKD", value).casefold()
+    value = "".join(char for char in value if not unicodedata.combining(char))
+    return re.sub(r"[^\w]+", " ", value).strip()
+
+
+def validate_golden_set(queries: list[dict], nodes: dict) -> None:
+    """Fail fast when benchmark ground truth cannot be evaluated honestly."""
+    errors = []
+    for index, entry in enumerate(queries, start=1):
+        query = entry.get("query", "")
+        relevant_ids = entry.get("relevant_note_ids")
+        if not isinstance(query, str) or not query.strip():
+            errors.append(f"query {index}: query must be a non-empty string")
+            continue
+        if not isinstance(relevant_ids, list) or not 1 <= len(relevant_ids) <= 4:
+            errors.append(f"query {index}: relevant_note_ids must contain 1-4 IDs")
+            continue
+        normalized_query = _normalized_text(query)
+        for note_id in relevant_ids:
+            node = nodes.get(note_id)
+            if node is None:
+                errors.append(f"query {index}: relevant_note_id does not exist in graph: {note_id}")
+                continue
+            title = _normalized_text(str(node.get("title", "")))
+            if title and title in normalized_query:
+                errors.append(f"query {index}: title leakage for target {note_id}: {node.get('title', '')}")
+    if errors:
+        raise ValueError("Invalid golden set:\n- " + "\n- ".join(errors))
+
+
 def _run_single_query(
     query: str,
     expected: set[str],
@@ -103,7 +137,16 @@ def _run_single_query(
 ) -> tuple[dict, dict]:
     """Run one query under current CONFIG and return (metrics, metadata)."""
     t0 = time.perf_counter()
-    active = attention(query, nodes, edges, collection, bm25_index=bm25_index, hebbian_state=state)
+    routing_meta = {} if collect_hops else None
+    active = attention(
+        query,
+        nodes,
+        edges,
+        collection,
+        bm25_index=bm25_index,
+        hebbian_state=state,
+        routing_meta=routing_meta,
+    )
     latency_ms = (time.perf_counter() - t0) * 1000
 
     activated_ids = [nid for nid, _ in sorted(active.items(), key=lambda x: -x[1])]
@@ -120,13 +163,8 @@ def _run_single_query(
         state, _updated_keys, _pruned = hebbian_update(active, state)
 
     if collect_hops:
-        # Re-run attention once more to collect hop-level metadata cheaply.
-        # The first run already produced the answer; this call is instrumented
-        # via routing_meta without changing the result because CONFIG is stable.
-        routing_meta = {}
-        attention(query, nodes, edges, collection, bm25_index=bm25_index, hebbian_state=state, routing_meta=routing_meta)
         hop_counts = defaultdict(int)
-        for detail in routing_meta.get("activation_details", []):
+        for detail in (routing_meta or {}).get("activation_details", []):
             hop = detail.get("hop", 0)
             hop_counts[hop] += 1
         metadata["hop_histogram"] = dict(sorted(hop_counts.items()))
@@ -165,6 +203,7 @@ def run_eval(
 
     # Ensure CONFIG reflects the caller's on-disk config before we overlay.
     load_config(config_path)
+    resolved_config_path = str(Path(config_path).resolve()) if config_path else None
 
     # Ablations must not mutate the production ChromaDB or state files.
     # Use a dedicated, reusable embedding cache under benchmarks/.
@@ -175,12 +214,14 @@ def run_eval(
 
     with config_overlay(overrides):
         nodes, edges, _state_path = _build_materialized_graph()
+        validate_golden_set(queries, nodes)
         collection = compute_all_embeddings(nodes, CONFIG["vault_path"])
         bm25_index = BM25Index(nodes)
 
         results: dict[str, Any] = {
             "config_overrides": config_overrides,
             "config_hash": _config_hash(config_overrides),
+            "config_path": resolved_config_path,
             "vault_size": len(nodes),
             "query_count": len(queries),
             "query_version": _query_version(queries),
@@ -190,7 +231,7 @@ def run_eval(
         cold_state = _fresh_state()
         if cold:
             cold_metrics, cold_meta = _run_pass(
-                queries, nodes, edges, collection, bm25_index, cold_state, collect_hops=collect_hops
+                queries, nodes, edges, collection, bm25_index, cold_state, cold=True, collect_hops=collect_hops
             )
             results["cold"] = cold_metrics
             results["cold_hop_histogram"] = cold_meta["hop_histogram"]
@@ -199,7 +240,7 @@ def run_eval(
         if warm:
             warm_state = cold_state
             warm_metrics, warm_meta = _run_pass(
-                queries, nodes, edges, collection, bm25_index, warm_state, collect_hops=collect_hops
+                queries, nodes, edges, collection, bm25_index, warm_state, cold=False, collect_hops=collect_hops
             )
             results["warm"] = warm_metrics
             results["warm_hop_histogram"] = warm_meta["hop_histogram"]
@@ -215,7 +256,7 @@ def _build_materialized_graph():
     return nodes, edges, None
 
 
-def _run_pass(queries, nodes, edges, collection, bm25_index, state, collect_hops: bool):
+def _run_pass(queries, nodes, edges, collection, bm25_index, state, *, cold: bool, collect_hops: bool):
     per_query = []
     aggregated_meta = {"hop_histogram": defaultdict(int), "latencies": [], "synapse_counts": []}
 
@@ -229,7 +270,7 @@ def _run_pass(queries, nodes, edges, collection, bm25_index, state, collect_hops
             bm25_index=bm25_index,
             state=state,
             category=entry.get("category", "unknown"),
-            cold=False,
+            cold=cold,
             collect_hops=collect_hops,
         )
         per_query.append(metrics)
@@ -252,6 +293,59 @@ def _run_pass(queries, nodes, edges, collection, bm25_index, state, collect_hops
         synapse_counts=aggregated_meta["synapse_counts"],
     )
     return metrics, aggregated_meta
+
+
+def _evaluate_hebbian_trajectory(
+    train_queries: list[dict],
+    holdout_queries: list[dict],
+    *,
+    nodes: dict,
+    edges: list,
+    collection,
+    bm25_index,
+    collect_hops: bool,
+) -> dict:
+    """Measure holdout ranking before and after a separate Hebbian trajectory."""
+    baseline_state = _fresh_state()
+    cold_metrics, _ = _run_pass(
+        holdout_queries,
+        nodes,
+        edges,
+        collection,
+        bm25_index,
+        baseline_state,
+        cold=True,
+        collect_hops=collect_hops,
+    )
+
+    trained_state = _fresh_state()
+    train_metrics, _ = _run_pass(
+        train_queries,
+        nodes,
+        edges,
+        collection,
+        bm25_index,
+        trained_state,
+        cold=False,
+        collect_hops=collect_hops,
+    )
+    after_training_metrics, _ = _run_pass(
+        holdout_queries,
+        nodes,
+        edges,
+        collection,
+        bm25_index,
+        trained_state,
+        cold=True,
+        collect_hops=collect_hops,
+    )
+    return {
+        "cold": cold_metrics,
+        "train": train_metrics,
+        "after_training": after_training_metrics,
+        "cold_final_synapses": len(baseline_state["synapses"]),
+        "trained_final_synapses": len(trained_state["synapses"]),
+    }
 
 
 def _query_version(queries: list[dict]) -> str:

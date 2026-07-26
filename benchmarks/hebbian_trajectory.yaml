@@ -1,0 +1,63 @@
+version: 2026-07-26-v1
+purpose: Measure whether Hebbian updates from related prior queries improve held-out paraphrases.
+validation_rules:
+  - Training and holdout queries must not contain target titles verbatim.
+  - All target IDs must exist in the materialized graph.
+  - Holdout wording must differ from its training prompt.
+train_queries:
+  - id: associative-attention-train
+    query: "Come si collegano il rafforzamento delle co-attivazioni e l'attenzione contestuale in una rete neurale?"
+    category: crossref
+    relevant_note_ids:
+      - wiki/concepts/hebbian-learning
+      - wiki/concepts/transformer-architecture
+
+  - id: memory-creation-train
+    query: "Come usa un sistema di memoria a grafo le lacune di conoscenza per creare concetti aggiuntivi?"
+    category: crossref
+    relevant_note_ids:
+      - wiki/concepts/bdh-graph-harness
+      - wiki/concepts/neurogenesis
+
+  - id: gateway-reload-train
+    query: "Perché una modifica a un bridge richiede di riavviare il processo che gestisce le integrazioni?"
+    category: activity
+    relevant_note_ids:
+      - wiki/concepts/hermes-gateway
+      - wiki/concepts/plugin-changes-require-gateway-restart
+
+  - id: lexical-italian-train
+    query: "Cosa ha evidenziato la valutazione della ricerca per termini esatti su una base di note italiana?"
+    category: crossref
+    relevant_note_ids:
+      - wiki/queries/bm25-benchmark-comparison
+      - wiki/lessons/bm25-italian-failure
+
+holdout_queries:
+  - id: associative-attention-holdout
+    query: "In cosa differiscono, e dove si completano, una memoria associativa e il peso dinamico fra token?"
+    category: crossref
+    relevant_note_ids:
+      - wiki/concepts/hebbian-learning
+      - wiki/concepts/transformer-architecture
+
+  - id: memory-creation-holdout
+    query: "Quale componente trasforma un vuoto semantico individuato durante il retrieval in nuova conoscenza collegata?"
+    category: crossref
+    relevant_note_ids:
+      - wiki/concepts/bdh-graph-harness
+      - wiki/concepts/neurogenesis
+
+  - id: gateway-reload-holdout
+    query: "Quale ciclo operativo rende effettive le modifiche a un'estensione del sistema dopo il deploy?"
+    category: activity
+    relevant_note_ids:
+      - wiki/concepts/hermes-gateway
+      - wiki/concepts/plugin-changes-require-gateway-restart
+
+  - id: lexical-italian-holdout
+    query: "Per quale ragione il matching lessicale può diventare poco utile quando le note sono scritte in italiano?"
+    category: crossref
+    relevant_note_ids:
+      - wiki/queries/bm25-benchmark-comparison
+      - wiki/lessons/bm25-italian-failure
