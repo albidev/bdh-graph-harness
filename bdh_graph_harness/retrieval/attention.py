@@ -7,12 +7,62 @@ Includes adaptive threshold, hybrid search support, and Integrate-and-Fire model
 import math
 import statistics
 from collections import defaultdict, deque
+from datetime import datetime
 
 from bdh_graph_harness.config import CONFIG, logger
 from bdh_graph_harness.retrieval.embeddings import get_embeddings
 from bdh_graph_harness.retrieval.bm25 import BM25Index
 from bdh_graph_harness.retrieval.hybrid import hybrid_score
 from bdh_graph_harness.graph.builder import _resolve_target
+
+
+def _resolve_hebbian_node_id(node_id, valid_node_ids):
+    """Map persisted federated IDs to the canonical IDs of this graph view."""
+    if node_id in valid_node_ids:
+        return node_id
+    if not node_id.startswith("vault:"):
+        return None
+    relative = node_id.removeprefix("vault:")
+    for candidate in (relative, relative.removesuffix(".md")):
+        if candidate in valid_node_ids:
+            return candidate
+    return None
+
+
+def _hebbian_dynamic_trust(synapse, now=None):
+    """Return a bounded confidence factor for a learned dynamic edge.
+
+    Weight expresses association strength. Trust expresses whether that strength
+    has repeated, consolidated, and remained current enough to traverse.
+    """
+    frequency = max(0.0, float(synapse.get("frequency", 0.0)))
+    saturation = max(0.01, float(CONFIG.get("hebbian_dynamic_frequency_saturation", 2.0)))
+    frequency_factor = min(1.0, frequency / saturation)
+
+    cycles = max(0, int(synapse.get("consolidation_candidate_cycles", 0)))
+    consolidation_factor = 1.0 if cycles else float(
+        CONFIG.get("hebbian_dynamic_unconsolidated_trust", 0.6)
+    )
+
+    recency_factor = 1.0
+    timestamp = synapse.get("last_coactivated")
+    if timestamp:
+        try:
+            reference = now or datetime.now()
+            last_coactivated = datetime.fromisoformat(timestamp)
+            if last_coactivated.tzinfo is not None and reference.tzinfo is None:
+                reference = reference.replace(tzinfo=last_coactivated.tzinfo)
+            elif last_coactivated.tzinfo is None and reference.tzinfo is not None:
+                last_coactivated = last_coactivated.replace(tzinfo=reference.tzinfo)
+            age_days = max(0.0, (reference - last_coactivated).total_seconds() / 86400)
+            horizon = max(1.0, float(CONFIG.get("hebbian_dynamic_recency_days", 30.0)))
+            recency_floor = float(CONFIG.get("hebbian_dynamic_recency_floor", 0.4))
+            recency_factor = max(recency_floor, 1.0 - age_days / horizon * (1.0 - recency_floor))
+        except (TypeError, ValueError):
+            recency_factor = float(CONFIG.get("hebbian_dynamic_recency_floor", 0.4))
+
+    floor = float(CONFIG.get("hebbian_dynamic_trust_floor", 0.25))
+    return min(1.0, max(floor, frequency_factor * consolidation_factor * recency_factor))
 
 
 # ---------------------------------------------------------------------------
@@ -98,18 +148,24 @@ def _compute_hebbian_boost(candidate_id, hebbian_state, recently_active):
     max_boost = CONFIG.get('hebbian_boost_max', 0.5)
     weight_factor = CONFIG.get('hebbian_boost_weight_factor', 0.3)
 
+    # Persisted state can use federated ``vault:...md`` IDs while attention
+    # operates on canonical graph IDs. Resolve against this candidate/context.
+    valid_ids = set(recently_active) | {candidate_id}
+
     # Collect synapse weights from candidate to recently active notes
     weights = []
-    for other_id in recently_active:
-        if other_id == candidate_id:
+    for key, syn in synapses.items():
+        try:
+            left, right = key.split('|', 1)
+        except ValueError:
             continue
-        if candidate_id < other_id:
-            key = f"{candidate_id}|{other_id}"
-        else:
-            key = f"{other_id}|{candidate_id}"
-
-        syn = synapses.get(key)
-        if syn:
+        left = _resolve_hebbian_node_id(left, valid_ids)
+        right = _resolve_hebbian_node_id(right, valid_ids)
+        if left is None or right is None:
+            continue
+        if left == candidate_id and right in recently_active:
+            weights.append(syn.get('weight', 0.0))
+        elif right == candidate_id and left in recently_active:
             weights.append(syn.get('weight', 0.0))
 
     if not weights:
@@ -170,7 +226,10 @@ def _get_recently_active_notes(hebbian_state, valid_node_ids=None):
                     parts = key.split('|')
                     # Filter dead synapses if we have the valid node set
                     if valid_node_ids is not None:
-                        parts = [p for p in parts if p in valid_node_ids]
+                        parts = [
+                            resolved for p in parts
+                            if (resolved := _resolve_hebbian_node_id(p, valid_node_ids)) is not None
+                        ]
                         if not parts:
                             continue
                     recent_notes.update(parts)
@@ -178,6 +237,42 @@ def _get_recently_active_notes(hebbian_state, valid_node_ids=None):
                 pass
 
     return recent_notes
+
+
+def _build_hebbian_adjacency(hebbian_state, valid_node_ids):
+    """Build a bounded adjacency index from strong learned synapses.
+
+    Unlike ``_compute_hebbian_boost``, this makes an association traversable
+    even when its target did not survive the initial vector/BM25 candidate
+    pool. The index is scoped to one attention call and only retains the
+    strongest configured neighbors per source node.
+    """
+    if not hebbian_state or not CONFIG.get("hebbian_dynamic_edges_enabled", True):
+        return {}
+
+    min_weight = CONFIG.get("hebbian_dynamic_min_weight", 0.15)
+    top_n = CONFIG.get("hebbian_dynamic_top_n", 3)
+    adjacency = defaultdict(list)
+    for key, synapse in hebbian_state.get("synapses", {}).items():
+        weight = float(synapse.get("weight", 0.0))
+        if weight < min_weight:
+            continue
+        try:
+            left, right = key.split("|", 1)
+        except ValueError:
+            continue
+        left = _resolve_hebbian_node_id(left, valid_node_ids)
+        right = _resolve_hebbian_node_id(right, valid_node_ids)
+        if left is None or right is None:
+            continue
+        trust = _hebbian_dynamic_trust(synapse)
+        adjacency[left].append((right, weight, trust))
+        adjacency[right].append((left, weight, trust))
+
+    return {
+        node_id: sorted(neighbors, key=lambda item: -(item[1] * item[2]))[:top_n]
+        for node_id, neighbors in adjacency.items()
+    }
 
 
 def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=None,
@@ -354,6 +449,7 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
 
     # Step 2: Graph traversal — expand from seeds via wikilinks
     active = dict(seeds)
+    hebbian_adjacency = _build_hebbian_adjacency(hebbian_state, set(nodes))
     queue = deque()
     for note_id, score in seeds:
         queue.append((note_id, score, 0, None))
@@ -371,24 +467,57 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
         if hop >= max_hop:
             continue
 
-        # Get neighbors — use ChromaDB to rank them by similarity to query
-        neighbors = []
+        # Static wikilinks and learned co-activations share the same bounded
+        # traversal queue, but retain their origin for scoring and provenance.
+        neighbors = {}
         for edge in edges.get(current_id, []):
             target = edge['target']
             target_id = _resolve_target(target, nodes)
             if target_id is None:
                 continue
-            # Get similarity from ChromaDB if available, else use 0.1
-            n_sim = scores.get(target_id, 0.1)
-            neighbors.append((target_id, n_sim))
+            neighbors[target_id] = {
+                'matched_by': 'static_edge',
+                'hebbian_edge_weight': 0.0,
+                'hebbian_edge_trust': 0.0,
+                'priority': scores.get(target_id, 0.1),
+            }
 
-        # Cap: only top max_neighbors_per_hop by similarity
-        neighbors.sort(key=lambda x: -x[1])
+        for target_id, weight, trust in hebbian_adjacency.get(current_id, []):
+            existing = neighbors.get(target_id)
+            if existing:
+                existing['matched_by'] = 'static_and_hebbian_edge'
+                existing['hebbian_edge_weight'] = max(existing['hebbian_edge_weight'], weight)
+                existing['hebbian_edge_trust'] = max(existing['hebbian_edge_trust'], trust)
+                existing['priority'] = max(existing['priority'], weight)
+            else:
+                neighbors[target_id] = {
+                    'matched_by': 'hebbian_edge',
+                    'hebbian_edge_weight': weight,
+                    'hebbian_edge_trust': trust,
+                    'priority': max(scores.get(target_id, 0.0), weight * trust),
+                }
+
+        # Cap static + dynamic expansion together, preserving strong learned
+        # associations even if vector/BM25 did not include their target.
+        neighbors = sorted(neighbors.items(), key=lambda item: -item[1]['priority'])
         neighbors = neighbors[:CONFIG['max_neighbors_per_hop']]
 
-        for target_id, n_sim in neighbors:
-            # Decay score by hop distance (single decay per hop).
-            new_score = score * CONFIG.get('hop_decay', 0.5)
+        for target_id, neighbor in neighbors:
+            dynamic_weight = neighbor['hebbian_edge_weight']
+            dynamic_trust = neighbor['hebbian_edge_trust']
+            # Dynamic edges get an independently tunable decay. Static and
+            # mixed edges preserve the existing graph traversal behavior.
+            decay = (
+                CONFIG.get('hebbian_dynamic_hop_decay', CONFIG.get('hop_decay', 0.5))
+                if neighbor['matched_by'] == 'hebbian_edge'
+                else CONFIG.get('hop_decay', 0.5)
+            )
+            new_score = score * decay
+            if neighbor['matched_by'] == 'hebbian_edge':
+                new_score *= ((0.5 + dynamic_weight) * CONFIG.get('hebbian_dynamic_gain', 1.0)
+                              * dynamic_trust)
+            elif dynamic_weight > 0:
+                new_score *= 1.0 + dynamic_weight * CONFIG.get('hebbian_dynamic_gain', 1.0)
 
             # Hub dampening for the target
             if CONFIG['hub_dampening'] and degree.get(target_id, 0) > CONFIG['hub_degree_threshold']:
@@ -398,7 +527,7 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
             # Hebbian gain: learned synaptic weight between current_id and target_id
             # boosts propagation when the synapse exists. hebbian_gain=0 reproduces old behavior.
             hebbian_gain = CONFIG.get('hebbian_gain', 0.0)
-            if hebbian_gain > 0 and hebbian_state:
+            if hebbian_gain > 0 and hebbian_state and neighbor['matched_by'] == 'static_edge':
                 syn_key = (
                     f"{current_id}|{target_id}" if current_id < target_id
                     else f"{target_id}|{current_id}"
@@ -414,14 +543,20 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
                         activation_details[target_id].update({
                             'hop': hop + 1,
                             'parent_id': current_id,
+                            'matched_by': neighbor['matched_by'],
+                            'hebbian_edge_weight': round(dynamic_weight, 4),
+                            'hebbian_edge_trust': round(dynamic_trust, 4),
                             'final_score': round(new_score, 4),
                         })
             elif new_score > traversal_threshold:
                 active[target_id] = new_score
                 activation_details[target_id] = {
-                    'role': 'graph_neighbor',
+                    'role': 'hebbian_neighbor' if neighbor['matched_by'] == 'hebbian_edge' else 'graph_neighbor',
                     'hop': hop + 1,
                     'parent_id': current_id,
+                    'matched_by': neighbor['matched_by'],
+                    'hebbian_edge_weight': round(dynamic_weight, 4),
+                    'hebbian_edge_trust': round(dynamic_trust, 4),
                     'vector_score': round(raw_vector_scores.get(target_id, 0.0), 4),
                     'bm25_score': round(bm25_scores.get(target_id, 0.0), 4),
                     'hybrid_score': round(retrieval_scores.get(target_id, 0.0), 4),
