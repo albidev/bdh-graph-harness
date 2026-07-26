@@ -93,7 +93,6 @@ function sendQuery() {
 function renderRemoteQueryResponse(event) {
   const queryInput = document.getElementById('query-input');
   const responseText = document.getElementById('response-text');
-  const lastQuery = document.getElementById('stat-last');
   if (queryInput) {
     queryInput.value = event.query || '';
     queryInput.scrollTop = 0;
@@ -103,7 +102,6 @@ function renderRemoteQueryResponse(event) {
     responseText.textContent = event.response || 'No response returned for this query.';
     responseText.scrollTop = 0;
   }
-  if (lastQuery) lastQuery.textContent = event.query || '—';
   setResponseState(event.error ? 'Error' : 'Complete');
   renderRetrievalDiagnostics(event);
 }

@@ -314,7 +314,6 @@ let neurogenesisNodes = {};
 let nodeDataMap = {};
 let edgeInfoMap = {};
 let nodeTagColorMap = {};
-let totalConcepts = 0;
 let edgeLengthMultiplier = 10;
 let spacingValue = 50;
 let restoredZoom = null;
