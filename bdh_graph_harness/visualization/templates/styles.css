@@ -1898,7 +1898,6 @@ body.retrieval-lens-active #camera-mode {
 }
 
 #selection-section {
-  max-height: 250px;
   overflow: auto;
 }
 
