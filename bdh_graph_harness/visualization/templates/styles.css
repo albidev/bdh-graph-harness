@@ -2733,9 +2733,26 @@ body {
   }
 
   body.panel-tab #inspector-content {
+    display: flex;
+    flex-direction: column;
     min-height: 0;
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
+  }
+
+  body.panel-tab.inspector-view-query #query-section {
+    flex: 0 0 auto;
+  }
+
+  body.panel-tab.inspector-view-query #response-section {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  body.panel-tab.inspector-view-query #retrieval-diagnostics {
+    margin-top: auto;
   }
 
   body.panel-tab .inspector-section {
