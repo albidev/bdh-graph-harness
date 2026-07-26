@@ -70,6 +70,9 @@ CONFIG = {
     'hebbian_dynamic_top_n': 3,
     'hebbian_dynamic_gain': 1.5,
     'hebbian_dynamic_hop_decay': 0.6,
+    # Dynamic associations need query-local semantic evidence before they may
+    # compete with declared wikilinks in retrieval.
+    'hebbian_dynamic_query_relevance_floor': 0.35,
     # Confidence gate for learned-only traversal; static wikilinks ignore these.
     'hebbian_dynamic_frequency_saturation': 2.0,
     'hebbian_dynamic_unconsolidated_trust': 0.6,

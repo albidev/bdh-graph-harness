@@ -16,6 +16,25 @@ from bdh_graph_harness.retrieval.hybrid import hybrid_score
 from bdh_graph_harness.graph.builder import _resolve_target
 
 
+def _dynamic_query_relevance(query_embedding, collection, node_ids):
+    """Cosine relevance of dynamic-edge targets to the current query.
+
+    Historical Hebbian trust says an association persisted; it does not prove
+    that the association belongs in this retrieval. This gate supplies that
+    missing query-conditioned evidence without mutating learned state.
+    """
+    if not node_ids:
+        return {}
+    payload = collection.get(ids=list(node_ids), include=["embeddings"])
+    scores = {}
+    query_norm = math.sqrt(sum(value * value for value in query_embedding))
+    for node_id, embedding in zip(payload.get("ids", []), payload.get("embeddings", [])):
+        target_norm = math.sqrt(sum(value * value for value in embedding))
+        scores[node_id] = (sum(a * b for a, b in zip(query_embedding, embedding)) / (query_norm * target_norm)
+                           if query_norm and target_norm else 0.0)
+    return scores
+
+
 def _resolve_hebbian_node_id(node_id, valid_node_ids):
     """Map persisted federated IDs to the canonical IDs of this graph view."""
     if node_id in valid_node_ids:
@@ -450,6 +469,13 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
     # Step 2: Graph traversal — expand from seeds via wikilinks
     active = dict(seeds)
     hebbian_adjacency = _build_hebbian_adjacency(hebbian_state, set(nodes))
+    dynamic_targets = {
+        target_id
+        for dynamic_neighbors in hebbian_adjacency.values()
+        for target_id, _weight, _trust in dynamic_neighbors
+    }
+    dynamic_relevance = _dynamic_query_relevance(query_emb, collection, dynamic_targets)
+    dynamic_relevance_floor = CONFIG.get('hebbian_dynamic_query_relevance_floor', 0.0)
     queue = deque()
     for note_id, score in seeds:
         queue.append((note_id, score, 0, None))
@@ -483,6 +509,11 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
             }
 
         for target_id, weight, trust in hebbian_adjacency.get(current_id, []):
+            # Historical co-activation alone cannot displace declared graph
+            # knowledge. A learned-only edge also needs query-local semantic
+            # support before it enters this traversal.
+            if dynamic_relevance.get(target_id, 0.0) < dynamic_relevance_floor:
+                continue
             existing = neighbors.get(target_id)
             if existing:
                 existing['matched_by'] = 'static_and_hebbian_edge'

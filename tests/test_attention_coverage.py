@@ -16,6 +16,9 @@ class FakeCollection:
     def query(self, **_kwargs):
         return {"ids": [self.ids], "distances": [[0.0, 0.4][:len(self.ids)]]}
 
+    def get(self, ids, include):
+        return {"ids": list(ids), "embeddings": [[1.0] for _ in ids]}
+
 
 def test_hebbian_helpers_handle_empty_invalid_and_capped_scores(monkeypatch):
     assert attention.compute_adaptive_threshold([], floor=0.33) == 0.33
@@ -270,3 +273,16 @@ def test_static_and_hebbian_edge_applies_learned_weight_once(monkeypatch):
     assert active["learned"] == 0.9
     learned = next(item for item in routing_meta["activation_details"] if item["id"] == "learned")
     assert learned["matched_by"] == "static_and_hebbian_edge"
+
+
+def test_dynamic_query_relevance_rejects_semantically_unrelated_neighbor():
+    class Collection:
+        def get(self, ids, include):
+            return {
+                "ids": ids,
+                "embeddings": [[0.0, 1.0] if note_id == "noise" else [1.0, 0.0] for note_id in ids],
+            }
+
+    scores = attention._dynamic_query_relevance([1.0, 0.0], Collection(), {"relevant", "noise"})
+    assert scores["relevant"] == 1.0
+    assert scores["noise"] == 0.0
