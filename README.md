@@ -17,6 +17,7 @@ Turns an Obsidian vault into a living knowledge graph where:
 - **Notes → neurons** — each note embedded with `nomic-embed-text-v2-moe` (768d, via Ollama) and stored in ChromaDB with `OllamaEmbeddingFunction`
 - **Wikilinks → synapses** — graph edges from `[[wikilinks]]`
 - **Hebbian learning** — co-activated notes strengthen their synaptic weight over time (frequency + recency + activation correlation)
+- **Trusted dynamic Hebbian edges** — learned, non-static relations can extend retrieval with explicit provenance, recurrence/consolidation/recency trust, and privacy-safe shadow telemetry
 - **Vector + lexical retrieval** — semantic search via Chroma embeddings with optional BM25 Hybrid scoring (`hybrid_search: true`, α=0.7 / β=0.3)
 - **Adaptive thresholding** — dynamic threshold from the score distribution (`median + 0.3*std`, with a configurable floor and a minimum-activation guarantee) to filter noise adaptively
 - **Neurogenesis** — LLM extracts new concepts from queries and creates notes in the vault, filtered by a 3-layer signal system (prompt engineering + regex blocklist + semantic dedup) to prevent noise; generation provenance is kept in frontmatter so it does not pollute embeddings
@@ -29,6 +30,7 @@ Turns an Obsidian vault into a living knowledge graph where:
 - **Federated Markdown sources** — optional read-only `external_sources` merge selected Markdown trees into the primary graph with source-aware IDs, cross-source wikilinks, and configurable `include`/`exclude` globs
 
 For the theory behind these choices — why Hebbian plasticity, why Obsidian, why not just RAG — see [`docs/philosophy.md`](docs/philosophy.md).
+For the dynamic-edge retrieval contract, tuning guardrails, and evaluation limits, see [`docs/hebbian-dynamic-edges.md`](docs/hebbian-dynamic-edges.md).
 
 ## Neurogenesis Signal Filtering
 
@@ -233,6 +235,12 @@ See `bdh-config.yaml` for all parameters. Key ones:
 | `neurogenesis_source_edges_enabled` | `true` | Materialize validated `neurogenesis_source` generated edges from `activated_from_ids` frontmatter |
 | `multi_query_enabled` | `false` | Enable multi-query fan-out; when `false`, `query_variants` in requests are silently ignored |
 | `multi_query_max_variants` | 3 | Hard cap on evaluated variants per request (after dedup and empty-drop) |
+| `hebbian_dynamic_edges_enabled` | `true` | Traverse eligible learned-only relations alongside static adjacency |
+| `hebbian_dynamic_min_weight` | 0.15 | Ignore learned dynamic edges below this weight |
+| `hebbian_dynamic_top_n` | 3 | Maximum learned candidates considered per active note |
+| `hebbian_dynamic_gain` | 1.5 | Score multiplier for learned-only traversal |
+| `hebbian_dynamic_hop_decay` | 0.6 | Per-hop decay for learned-only traversal |
+| `hebbian_dynamic_shadow_enabled` | `true` | Emit privacy-safe telemetry when dynamic-only results are recovered |
 | `consolidation_dormant_persist_cycles` | 3 | Remove nodes dormant for N+ consolidation cycles |
 | `consolidation_prune_dormant_nodes` | `true` | Delete stale dormant nodes (not just hide) |
 
@@ -249,7 +257,7 @@ python -m pytest -q
 python -m pytest -q --cov=bdh_graph_harness --cov-branch --cov-report=term-missing
 ```
 
-The branch currently verifies **361 passing tests**. The `develop` baseline remains documented separately where relevant; this branch adds regression coverage for multi-query retrieval, API contracts, provenance, WebSocket ordering, and the retrieval inspector UI.
+`develop` currently verifies **377 passing tests**. The suite includes regression coverage for multi-query retrieval, API contracts, provenance, WebSocket ordering, the retrieval inspector UI, and trusted dynamic Hebbian traversal.
 
 See [`docs/testing.md`](docs/testing.md) for the coverage policy, exact commands, and multi-vault regression requirements. [`docs/coverage.md`](docs/coverage.md) records the current versioned baseline; GitHub Actions keeps the XML and JSON report for every later `develop` or `main` run.
 

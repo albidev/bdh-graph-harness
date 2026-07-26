@@ -117,6 +117,19 @@ beta: 0.3     # recency weight
 decay: 0.95   # decay factor per session for unused links
 hebbian_min_score: 0.15  # min activation score to create a synapse (prevents spurious connections)
 
+# Trusted dynamic Hebbian adjacency — learned-only edges; static wikilinks are unchanged.
+hebbian_dynamic_edges_enabled: true
+hebbian_dynamic_min_weight: 0.15
+hebbian_dynamic_top_n: 3
+hebbian_dynamic_gain: 1.5
+hebbian_dynamic_hop_decay: 0.6
+hebbian_dynamic_frequency_saturation: 2.0
+hebbian_dynamic_unconsolidated_trust: 0.6
+hebbian_dynamic_recency_days: 30.0
+hebbian_dynamic_recency_floor: 0.4
+hebbian_dynamic_trust_floor: 0.25
+hebbian_dynamic_shadow_enabled: true  # fingerprinted telemetry; never saves query text
+
 # Neurogenesis
 neurogenesis_dir: concepts
 neurogenesis_enabled: true
