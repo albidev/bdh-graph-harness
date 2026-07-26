@@ -372,6 +372,7 @@ function initNetwork(graphData, options = {}) {
     structural: graphEdges.length,
     wikilinks: graphEdges.filter(edge => (edge.type || 'wikilink') === 'wikilink').length,
     hebbian: graphHebbian.length,
+    hebbianState: graphStats.hebbian_state,
     dormant: graphStats.dormant_neurons || graphNodes.filter(node => node.dormant).length,
     phantom: graphStats.phantom_links || graphPhantom.length,
   });
@@ -877,6 +878,17 @@ function updateGraphStats(values) {
   setText('stat-synapses', values.structural);
   setText('stat-wikilinks', values.wikilinks);
   setText('stat-hebbian', values.hebbian);
+  const state = values.hebbianState;
+  if (state) {
+    const labels = {
+      clean_room_shadow: 'v2 shadow',
+      curated_experimental: 'curated experimental',
+      legacy_active: 'legacy active',
+      custom: 'custom state',
+    };
+    setText('hebbian-state-mode', labels[state.mode] || state.mode);
+    setText('hebbian-state-detail', state.associative_context_enabled ? 'associative context on' : 'primary unchanged');
+  }
   setText('stat-dormant-count', values.dormant);
   setText('stat-phantom-count', values.phantom);
   setText('view-stats', `${values.visibleNodes ?? values.nodes} nodes · ${values.visibleEdges ?? values.structural} edges visible`);
