@@ -192,6 +192,8 @@ function handleActivation(event) {
   const listEl = document.getElementById('activated-list');
   const countEl = document.getElementById('activation-count');
   if (countEl) countEl.textContent = String(activated.length);
+  const evidenceBadge = document.getElementById('inspector-evidence-badge');
+  if (evidenceBadge) evidenceBadge.textContent = activated.length ? `${activated.length} notes` : '—';
   listEl.innerHTML = '';
   if (activated.length === 0) {
     listEl.innerHTML = '<div class="empty">No notes activated</div>';
@@ -206,11 +208,16 @@ function handleActivation(event) {
       const label = note.display_label || note.title || note.id;
       const path = note.relative_path || note.path || '';
       const source = note.source_id || note.source_type || 'vault';
+      // Provenance badge: compact indicator of how many query variants matched this note.
+      const provenance = normalizeProvenance(note.matched_by);
+      const provenanceBadge = provenance.length
+        ? `<span class="provenance-badge" title="${escapeHtml(formatProvenanceTooltip(provenance))}">${provenance.length} variant${provenance.length === 1 ? '' : 's'}</span>`
+        : '';
       li.innerHTML = '<span class="activation-copy"><strong class="activation-role">' + escapeHtml(roleLabel) + '</strong> ' +
         '<strong class="activation-title">' + escapeHtml(label) + '</strong>' +
         (path ? '<small class="activation-path">' + escapeHtml(path) + '</small>' : '') +
         '<small class="activation-source">' + escapeHtml(source) + '</small></span>' +
-        '<span class="score" title="final ' + score + ' · hybrid ' + hybrid + '">' + score + '</span>';
+        '<span class="score-wrap">' + provenanceBadge + '<span class="score" title="final ' + score + ' · hybrid ' + hybrid + '">' + score + '</span></span>';
       li.addEventListener('mouseenter', (evt) => showActivatedTooltip(note, evt));
       li.addEventListener('mousemove', (evt) => positionTooltip(evt));
       li.addEventListener('mouseleave', () => hideTooltip());
@@ -269,7 +276,6 @@ function handleActivation(event) {
         nodeDataMap[nc.id] = ncNode;
         nodeTagColorMap[nc.id] = COLORS.neurogenesis;
         neurogenesisNodes[nc.id] = { title: nc.title || nc.id };
-        totalConcepts++;
 
         // Add node and edges to fresh graph (not live data)
         const birthDelay = ncIdx * 200;
@@ -325,15 +331,6 @@ function handleActivation(event) {
           nodeBirthScaleState.delete(nc.id);
           requestGraphRedraw();
         }, birthDelay + 600);
-
-        const cEl = document.getElementById('stat-concepts');
-        if (cEl) {
-          cEl.textContent = totalConcepts;
-          cEl.style.color = COLORS.neurogenesis;
-          setTimeout(() => {
-            if (isCurrent()) cEl.style.color = '';
-          }, 1500);
-        }
       }
     });
 
@@ -344,43 +341,8 @@ function handleActivation(event) {
     // and any subsequent activation/graph refresh.
   }
 
-  // Update stats
-  document.getElementById('stat-last').textContent = event.query || '—';
-
-  const nEl = document.getElementById('stat-neurons');
-  if (nEl) {
-    if (event.neuron_count != null) nEl.textContent = event.neuron_count;
-    else if (newConcepts.length > 0) nEl.textContent = parseInt(nEl.textContent) + newConcepts.length;
-  }
-
-  const sEl = document.getElementById('stat-synapses');
-  if (sEl && event.synapse_count != null) sEl.textContent = event.synapse_count;
-
-  if (event.queries_processed != null) {
-    const qEl = document.getElementById('stat-queries');
-    if (qEl) qEl.textContent = event.queries_processed;
-  }
-
-  if (event.hebbian_synapses != null) {
-    const hebbEl = document.getElementById('stat-hebbian');
-    if (hebbEl) {
-      const prev = parseInt(hebbEl.textContent) || 0;
-      hebbEl.textContent = event.hebbian_synapses;
-      if (event.hebbian_synapses > prev) {
-        hebbEl.style.color = COLORS.edgeHebbianPulse;
-        setTimeout(() => { hebbEl.style.color = ''; }, 1000);
-      }
-    }
-  }
-
-  if (event.dormant_count != null) {
-    const dormantEl = document.getElementById('stat-dormant');
-    const dormantCountEl = document.getElementById('stat-dormant-count');
-    if (dormantEl && dormantCountEl) {
-      dormantCountEl.textContent = event.dormant_count;
-      dormantEl.style.display = event.dormant_count > 0 ? '' : 'none';
-    }
-  }
+  // The Inspector keeps evidence and selection; runtime counters live in the
+  // global top bar instead of a redundant fourth view.
 
   // Show indicator pulse
   const ind = document.getElementById('status-indicator');

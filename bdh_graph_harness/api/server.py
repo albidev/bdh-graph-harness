@@ -299,6 +299,13 @@ def start_api_server(config, nodes, edges, collection, state):
 
     host = config['api_host']
     port = config['api_port']
+
+    if host == '0.0.0.0':
+        logger.warning(
+            "Server bound to 0.0.0.0 — exposed on all interfaces. "
+            "Use api_host: 127.0.0.1 unless LAN/Tailscale access is intentional."
+        )
+
     print(f"🌐 BDH Graph Harness API server starting on http://{host}:{port}")
 
     if watchers:

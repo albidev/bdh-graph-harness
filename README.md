@@ -18,7 +18,7 @@ Turns an Obsidian vault into a living knowledge graph where:
 - **Wikilinks → synapses** — graph edges from `[[wikilinks]]`
 - **Hebbian learning** — co-activated notes strengthen their synaptic weight over time (frequency + recency + activation correlation)
 - **Vector + lexical retrieval** — semantic search via Chroma embeddings with optional BM25 Hybrid scoring (`hybrid_search: true`, α=0.7 / β=0.3)
-- **Adaptive thresholding** — `max(Q75, mean+1std, 0.15)` to filter noise dynamically
+- **Adaptive thresholding** — dynamic threshold from the score distribution (`median + 0.3*std`, with a configurable floor and a minimum-activation guarantee) to filter noise adaptively
 - **Neurogenesis** — LLM extracts new concepts from queries and creates notes in the vault, filtered by a 3-layer signal system (prompt engineering + regex blocklist + semantic dedup) to prevent noise; generation provenance is kept in frontmatter so it does not pollute embeddings
 - **Node quality scoring** — composite score (strong edges + mean weight + frequency) auto-prunes dormant nodes from visualization; re-activates on strong re-encounter
 - **Sleep-cycle consolidation** — periodic synaptic downscaling (×0.9), structural pruning below weight floor, and stale dormant node removal — mirrors biological sleep consolidation
@@ -162,6 +162,34 @@ curl http://localhost:8643/api/vaults
 
 `vault_id` is also accepted by MCP tools such as `query(question="...", vault_id="research")`. Omitting it selects `default_vault` (or the first configured vault).
 
+### Multi-query retrieval
+
+When `multi_query_enabled: true` in config, clients can send `query_variants` alongside the primary query. The server retrieves seed candidates for each variant, merges them via reciprocal-rank fusion (RRF) or weighted-max, then performs one canonical graph expansion for the primary query. It returns canonical notes with per-note provenance (`matched_by`, `variant_hits`). This lets callers explore a query from multiple angles (e.g. Italian + English rewrites, paraphrases, keyword decompositions) in a single round-trip. The feature is opt-in; when disabled, supplied variants are ignored and the legacy single-query path is used.
+
+```bash
+# Multi-query: fan out across variant rewrites
+curl -X POST http://localhost:8643/api/query \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "query": "How does retrieval work?",
+    "query_variants": [
+      {"query": "How does retrieval work?", "language": "en"},
+      {"query": "Come funziona il retrieval?", "language": "it"}
+    ]
+  }'
+```
+
+The `routing` object in the response always includes these contract fields regardless of path:
+
+| Field | Description |
+|-------|-------------|
+| `multi_query_enabled` | Whether multi-query was active for this request |
+| `multi_query_variant_count` | Number of variants actually evaluated (1 when no variants) |
+| `query_variants` | Array of variant objects (`query`, `language`, `weight`) |
+| `multi_query_fusion` | Fusion strategy used (`'rrb'`, `'weighted'`, or `null`) |
+| `multi_query_unique_notes` | Count of distinct notes returned |
+| `multi_query_multivariant_hits` | Notes matched by 2+ variants (0 for single-query) |
+
 ### Running as a service (macOS)
 
 ```bash
@@ -170,7 +198,7 @@ cp ai.bdh.graph-harness.plist ~/Library/LaunchAgents/
 launchctl load ~/Library/LaunchAgents/ai.bdh.graph-harness.plist
 ```
 
-The service auto-restarts on crash (`KeepAlive: true`). Logs at `~/.hermes/logs/bdh-server.log`. The `start-server.sh` wrapper exports `OPENROUTER_API_KEY` from `~/.hermes/.env` before launching.
+The service auto-restarts on crash (`KeepAlive: true`). Logs at `~/.hermes/logs/bdh-server.log`. The `start-server.sh` wrapper loads the configured provider credential from the environment (`OLLAMA_API_KEY`, `OPENROUTER_API_KEY`, or `OPENCODE_ZEN_API_KEY`) before launching.
 
 ## Config
 
@@ -187,8 +215,10 @@ See `bdh-config.yaml` for all parameters. Key ones:
 | `hybrid_search` | `false` | Enable BM25 hybrid mode (disabled by default for Italian vaults) |
 | `hybrid_alpha` | 0.7 | Vector search weight (only when `hybrid_search: true`) |
 | `hybrid_beta` | 0.3 | BM25 search weight (only when `hybrid_search: true`) |
-| `llm_provider` | `openrouter` | `openrouter` (any OpenAI-compatible endpoint) or `ollama` (local) |
-| `llm_model` | `openrouter/free` | Model name for chosen provider |
+| `llm_provider` | `ollama` | `ollama` (local), `ollama-cloud`, or `openrouter` (OpenAI-compatible endpoints) |
+| `llm_model` | `gemma4:12b-mlx` | Model name for chosen provider |
+| `llm_base_url` | — | OpenAI-compatible base URL for `ollama-cloud` |
+| `llm_api_key` | — | Environment-expanded credential for the selected provider |
 | `api_port` | 8643 | Server port |
 | `quality_threshold` | 0.25 | Quality score below this → node marked dormant |
 | `quality_reactivation_score` | 0.50 | Activation score to re-awaken a dormant node |
@@ -201,6 +231,8 @@ See `bdh-config.yaml` for all parameters. Key ones:
 | `consolidation_weak_max_frequency` | 1.0 | Stale weak traces above this frequency survive |
 | `consolidation_weak_min_age_hours` | 48 | Fresh weak traces get a grace period before pruning |
 | `neurogenesis_source_edges_enabled` | `true` | Materialize validated `neurogenesis_source` generated edges from `activated_from_ids` frontmatter |
+| `multi_query_enabled` | `false` | Enable multi-query fan-out; when `false`, `query_variants` in requests are silently ignored |
+| `multi_query_max_variants` | 3 | Hard cap on evaluated variants per request (after dedup and empty-drop) |
 | `consolidation_dormant_persist_cycles` | 3 | Remove nodes dormant for N+ consolidation cycles |
 | `consolidation_prune_dormant_nodes` | `true` | Delete stale dormant nodes (not just hide) |
 
@@ -217,7 +249,7 @@ python -m pytest -q
 python -m pytest -q --cov=bdh_graph_harness --cov-branch --cov-report=term-missing
 ```
 
-The current `develop` baseline is **214 passing tests** and **50% package branch coverage**. The mobile/provenance branch has been verified with **222 passing tests**. The target is 100%, without excluding application modules just to manufacture a prettier number. Regression coverage is already complete for state persistence, consolidation, node quality, BM25, mobile visualization layout, and neurogenesis provenance; the remaining work focuses on API/WebSocket, CLI/MCP, graph/cache, embeddings, and provider failure paths.
+The branch currently verifies **361 passing tests**. The `develop` baseline remains documented separately where relevant; this branch adds regression coverage for multi-query retrieval, API contracts, provenance, WebSocket ordering, and the retrieval inspector UI.
 
 See [`docs/testing.md`](docs/testing.md) for the coverage policy, exact commands, and multi-vault regression requirements. [`docs/coverage.md`](docs/coverage.md) records the current versioned baseline; GitHub Actions keeps the XML and JSON report for every later `develop` or `main` run.
 

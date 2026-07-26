@@ -128,6 +128,7 @@ class TestStaleWeakSynapse:
             'consolidation_weak_weight_threshold': 0.15,
             'consolidation_weak_max_frequency': 1.0,
             'consolidation_weak_min_age_hours': 48,
+            'consolidation_prune_confirm_cycles': 1,
         }
 
     def test_fresh_weak_synapse_survives(self, weak_config):
@@ -262,13 +263,23 @@ class TestConsolidate:
         consolidate(sample_state, sample_nodes)
         assert sample_state['consolidation_cycles'] == 1
 
-    def test_synapses_pruned_after_consolidation(self, sample_state, sample_nodes):
-        """After consolidation, weak synapses should be pruned."""
-        before = len(sample_state['synapses'])
-        results = consolidate(sample_state, sample_nodes)
-        assert results['synapses_before'] == before
-        assert results['synapses_after'] < before
-        assert results['synapses_pruned'] > 0
+    def test_mass_prune_is_quarantined(self, sample_state, sample_nodes):
+        """A candidate set above the safety ratio must not be committed."""
+        consolidate(
+            sample_state,
+            sample_nodes,
+            config={'consolidation_prune_dormant_nodes': False},
+        )
+        before = deepcopy(sample_state)
+        results = consolidate(
+            sample_state,
+            sample_nodes,
+            config={'consolidation_prune_dormant_nodes': False},
+        )
+        assert results['synapses_before'] == len(before['synapses'])
+        assert results['aborted'] is True
+        assert results['abort_reason'] == 'candidate_prune_ratio_exceeded'
+        assert sample_state == before
 
     def test_strong_synapses_survive_full_cycle(self, sample_state, sample_nodes):
         """Strong synapses should survive a full consolidation cycle."""

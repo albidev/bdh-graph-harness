@@ -1,0 +1,215 @@
+version: 2026-07-25-issue19-draft
+review_status: pending
+auto_generated: false
+description: >-
+  Mixed-language and contract-audit golden set for Issue #19.
+  Each entry exercises one compatibility or multi-query contract aspect
+  without changing core retrieval semantics.
+coverage_warnings: []
+review_checklist:
+- Verify the original query is preserved as the write-path signal.
+- Verify variants are semantically equivalent and do not contradict the original query.
+- Confirm bounds: no more than 4 variants per entry.
+- Confirm mixed-language queries have at least one Italian and one English term.
+- Confirm code-identifier queries contain real technical identifiers from the vault.
+- Run the Issue #19 audit script after any contract change.
+queries:
+# ── Single-query legacy compatibility (must behave identically to current API) ──
+- query: Hebbian edge weight threshold
+  category: compatibility-legacy
+  relevant_note_ids:
+  - wiki/concepts/hebbian-edge-weight-threshold
+  reviewed: false
+  rationale: Legacy single-query form with no variants; must remain the default path.
+
+- query: BDH attention mechanism
+  category: compatibility-legacy
+  relevant_note_ids:
+  - wiki/concepts/bdh-attention-mechanism
+  reviewed: false
+  rationale: English-only title-as-query legacy fallback.
+
+# ── Original-query write semantics (original must drive neurogenesis/Hebbian) ──
+- query: "Come funziona l'Hebbian learning nel BDH?"
+  category: write-semantics
+  relevant_note_ids:
+  - wiki/concepts/hebbian-edge-weight-threshold
+  - wiki/concepts/bdh-attention-mechanism
+  reviewed: false
+  rationale: Italian question with English technical term; original query must be kept for write path.
+  variants:
+  - query: "Hebbian learning BDH mechanism"
+    language: en
+    weight: 1.0
+  - query: "apprendimento Hebbiano nel grafo BDH"
+    language: it
+    weight: 1.0
+
+- query: Explain the signal filter in neurogenesis
+  category: write-semantics
+  relevant_note_ids:
+  - wiki/concepts/neurogenesis
+  - wiki/concepts/detection-of-novelty
+  reviewed: false
+  rationale: English prompt with Italian concept; original text is the authoritative write signal.
+  variants:
+  - query: "neurogenesis signal filter noise"
+    language: en
+    weight: 1.0
+  - query: "filtro segnale neurogenesi rumore"
+    language: it
+    weight: 1.0
+
+# ── Mixed-language queries (Italian + English technical terms) ──
+- query: "Cos'è il gating nel retrieval ibrido?"
+  category: mixed-language
+  relevant_note_ids:
+  - wiki/concepts/hybrid-retrieval-gate
+  - wiki/concepts/relevance-gate
+  reviewed: false
+  rationale: Italian frame with English technical noun "gating".
+
+- query: "Come funziona la sparse activation nel BDH?"
+  category: mixed-language
+  relevant_note_ids:
+  - wiki/concepts/sparse-activation
+  - wiki/concepts/bdh-attention-mechanism
+  reviewed: false
+  rationale: Italian syntax with English technical term "sparse activation".
+
+- query: What is the soglia adattiva in the graph?
+  category: mixed-language
+  relevant_note_ids:
+  - wiki/concepts/hebbian-edge-weight-threshold
+  reviewed: false
+  rationale: English frame with Italian technical term "soglia adattiva".
+
+- query: Il modello Baby Dragon Hatchling spiegato in inglese
+  category: mixed-language
+  relevant_note_ids:
+  - wiki/concepts/baby-dragon-hatchling
+  reviewed: false
+  rationale: Italian instruction referring to an English-named model.
+
+- query: BDH vs Transformer comparison in italiano
+  category: mixed-language
+  relevant_note_ids:
+  - wiki/comparisons/bdh-vs-transformer
+  - wiki/concepts/baby-dragon-hatchling
+  - hebbian-learning
+  reviewed: false
+  rationale: Mixed code/entity names with Italian qualifier.
+
+# ── Bounds and normalization (variant deduplication / over-limit handling) ──
+- query: Hermes Agent overview
+  category: bounds
+  relevant_note_ids:
+  - wiki/entities/hermes-agent
+  reviewed: false
+  rationale: Tests that empty and exact-duplicate variants are removed before retrieval.
+  variants:
+  - query: Hermes Agent overview
+    language: en
+    weight: 1.0
+  - query: ""
+    language: en
+    weight: 1.0
+  - query: Hermes Agent overview
+    language: en
+    weight: 1.0
+
+- query: Privacy Guard project
+  category: bounds
+  relevant_note_ids:
+  - wiki/entities/privacy-guard
+  reviewed: false
+  rationale: Tests max-variant bound. Only the first N distinct variants should be accepted.
+  variants:
+  - query: Privacy Guard project
+    language: en
+    weight: 1.0
+  - query: progetto Privacy Guard
+    language: it
+    weight: 1.0
+  - query: privacy-guard repository
+    language: en
+    weight: 1.0
+  - query: Privacy Guard app macOS
+    language: en
+    weight: 1.0
+  - query: Privacy Guard roadmap
+    language: en
+    weight: 1.0
+
+# ── Fusion provenance (notes matched by multiple variants) ──
+- query: "Retrieval ibrido e BM25 nel BDH"
+  category: fusion-provenance
+  relevant_note_ids:
+  - wiki/lessons/bm25-italian-failure
+  - wiki/lessons/hybrid-search-disabled
+  reviewed: false
+  rationale: Two variants should converge on the same note IDs; provenance must list matched variants.
+  variants:
+  - query: BDH hybrid retrieval BM25
+    language: en
+    weight: 1.0
+  - query: retrieval ibrido BM25 italiano
+    language: it
+    weight: 1.0
+
+- query: Local LLM benchmarks and MLX
+  category: fusion-provenance
+  relevant_note_ids:
+  - local-llm-coding-benchmarks
+  - wiki/concepts/mlx-out-of-core-inference
+  reviewed: false
+  rationale: Variant pair with partial overlap; provenance should show which variant matched which note.
+  variants:
+  - query: local LLM coding benchmarks
+    language: en
+    weight: 1.0
+  - query: MLX out of core inference
+    language: en
+    weight: 1.0
+
+# ── Code identifiers and technical terms (must survive rewrite/filtering) ──
+- query: fullfsync WAL SQLite issue
+  category: code-identifier
+  relevant_note_ids:
+  - memory/learned/bdh-session-recovery-delta
+  reviewed: false
+  rationale: Contains the technical identifier "fullfsync" and SQLite/WAL jargon.
+
+- query: "issue #19 multi-query contract"
+  category: code-identifier
+  relevant_note_ids:
+  - bdh-graph-harness
+  reviewed: false
+  rationale: Issue number and contract term must not be stripped by generic rewrite.
+
+- query: GLM-5.2 Mac mini 64GB assessment
+  category: code-identifier
+  relevant_note_ids:
+  - wiki/queries/glm-5-2-mac-mini-64gb-assessment
+  - wiki/entities/glm-5-2-full-mlx-colibri
+  reviewed: false
+  rationale: Model identifier and hardware spec must remain intact.
+
+# ── Event ordering and rollback (read-only retrieval path) ──
+- query: "Cosa sappiamo del benchmark di GLM-5.2?"
+  category: event-ordering
+  relevant_note_ids:
+  - wiki/queries/glm-5-2-mac-mini-64gb-assessment
+  reviewed: false
+  rationale: Read-only retrieval with learn=false must not mutate state or emit neurogenesis events.
+  variants:
+  - query: GLM-5.2 benchmark results
+    language: en
+    weight: 1.0
+
+- query: tools-to-try AI trending
+  category: rollback
+  relevant_note_ids:
+  - tools-to-try
+  reviewed: false
+  rationale: Disabling rewrite / omitting variants must fall back to single-query behavior and produce no regression.
