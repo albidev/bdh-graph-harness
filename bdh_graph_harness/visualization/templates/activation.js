@@ -276,7 +276,6 @@ function handleActivation(event) {
         nodeDataMap[nc.id] = ncNode;
         nodeTagColorMap[nc.id] = COLORS.neurogenesis;
         neurogenesisNodes[nc.id] = { title: nc.title || nc.id };
-        totalConcepts++;
 
         // Add node and edges to fresh graph (not live data)
         const birthDelay = ncIdx * 200;
@@ -332,15 +331,6 @@ function handleActivation(event) {
           nodeBirthScaleState.delete(nc.id);
           requestGraphRedraw();
         }, birthDelay + 600);
-
-        const cEl = document.getElementById('stat-concepts');
-        if (cEl) {
-          cEl.textContent = totalConcepts;
-          cEl.style.color = COLORS.neurogenesis;
-          setTimeout(() => {
-            if (isCurrent()) cEl.style.color = '';
-          }, 1500);
-        }
       }
     });
 
@@ -351,45 +341,8 @@ function handleActivation(event) {
     // and any subsequent activation/graph refresh.
   }
 
-  // Update stats
-  document.getElementById('stat-last').textContent = event.query || '—';
-
-  const nEl = document.getElementById('stat-neurons');
-  if (nEl) {
-    if (event.neuron_count != null) nEl.textContent = event.neuron_count;
-    else if (newConcepts.length > 0) nEl.textContent = parseInt(nEl.textContent) + newConcepts.length;
-  }
-
-  const sEl = document.getElementById('stat-synapses');
-  if (sEl && event.synapse_count != null) sEl.textContent = event.synapse_count;
-
-  if (event.queries_processed != null) {
-    const qEl = document.getElementById('stat-queries');
-    const sessionHero = document.getElementById('session-hero-count');
-    if (qEl) qEl.textContent = event.queries_processed;
-    if (sessionHero) sessionHero.textContent = event.queries_processed;
-  }
-
-  if (event.hebbian_synapses != null) {
-    const hebbEl = document.getElementById('stat-hebbian');
-    if (hebbEl) {
-      const prev = parseInt(hebbEl.textContent) || 0;
-      hebbEl.textContent = event.hebbian_synapses;
-      if (event.hebbian_synapses > prev) {
-        hebbEl.style.color = COLORS.edgeHebbianPulse;
-        setTimeout(() => { hebbEl.style.color = ''; }, 1000);
-      }
-    }
-  }
-
-  if (event.dormant_count != null) {
-    const dormantEl = document.getElementById('stat-dormant');
-    const dormantCountEl = document.getElementById('stat-dormant-count');
-    if (dormantEl && dormantCountEl) {
-      dormantCountEl.textContent = event.dormant_count;
-      dormantEl.style.display = event.dormant_count > 0 ? '' : 'none';
-    }
-  }
+  // The Inspector keeps evidence and selection; runtime counters live in the
+  // global top bar instead of a redundant fourth view.
 
   // Show indicator pulse
   const ind = document.getElementById('status-indicator');

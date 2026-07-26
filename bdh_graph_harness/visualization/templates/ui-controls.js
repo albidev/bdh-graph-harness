@@ -16,7 +16,7 @@ function switchTab(tabClass) {
 }
 
 function switchInspectorView(view = 'query') {
-  const allowed = ['query', 'evidence', 'inspect', 'session'];
+  const allowed = ['query', 'evidence', 'inspect'];
   const next = allowed.includes(view) ? view : 'query';
   document.body.classList.remove(...allowed.map(name => `inspector-view-${name}`));
   document.body.classList.add(`inspector-view-${next}`);

@@ -442,12 +442,13 @@ def test_inspector_uses_view_tabs_to_reduce_panel_density_on_desktop_and_mobile(
     styles = (ROOT / "bdh_graph_harness/visualization/templates/styles.css").read_text()
     controls = (ROOT / "bdh_graph_harness/visualization/templates/ui-controls.js").read_text()
 
-    for view in ["query", "evidence", "inspect", "session"]:
+    for view in ["query", "evidence", "inspect"]:
         assert f'data-inspector-view="{view}"' in html
         assert f'inspector-view-{view}' in styles
+    assert 'data-inspector-view="session"' not in html
+    assert 'inspector-view-session' not in styles
     assert 'id="inspector-content"' in html
     assert 'id="trace-section"' in html
-    assert 'id="session-hero-count"' in html
     assert 'function switchInspectorView(' in controls
     assert 'function restoreInspectorView()' in controls
     assert 'body.panel-tab #inspector-tabs' in styles
