@@ -1,308 +1,119 @@
-version: 2026-07-25-v1-draft
-review_status: pending
-auto_generated: true
+version: 2026-07-26-v2-reviewed-core
+review_status: reviewed-core
+source: hand-curated recovery of the original 15-question dataset
 vault_path: /Users/albi/Documents/Hermes
-vault_size: 353
-coverage_warnings: []
-review_checklist:
-- Verify each query has a single clear answer in the vault.
-- Confirm relevant_note_ids are ordered by relevance where meaningful.
-- Add missing news/activity notes if the vault snapshot is incomplete.
-- Rewrite title-as-query entries into natural questions where needed.
-- Promote reviewed:false to reviewed:true only after running a sample query.
+validation_rules:
+  - Query must not contain a relevant note title verbatim after normalization.
+  - Each relevant_note_id must exist in the materialized graph.
+  - Each query has 1-4 relevant notes; use multiple targets only for genuine multi-note answers.
 queries:
-- query: '"Hebbian edge weight threshold"'
-  category: concept
-  relevant_note_ids:
-  - wiki/concepts/hebbian-edge-weight-threshold
-  reviewed: false
-  source_note_id: wiki/concepts/hebbian-edge-weight-threshold
-  rationale: Sampled note title as query; needs human review
-- query: Hermes Gateway
-  category: concept
-  relevant_note_ids:
-  - wiki/concepts/hermes-gateway
-  reviewed: false
-  source_note_id: wiki/concepts/hermes-gateway
-  rationale: Sampled note title as query; needs human review
-- query: '"Connection-Level Settings Invisible to Monitoring"'
-  category: concept
-  relevant_note_ids:
-  - wiki/concepts/connection-level-settings-invisible-to-monitoring
-  reviewed: false
-  source_note_id: wiki/concepts/connection-level-settings-invisible-to-monitoring
-  rationale: Sampled note title as query; needs human review
-- query: '"name-based deletion with wrong owner"'
-  category: concept
-  relevant_note_ids:
-  - wiki/concepts/name-based-deletion-with-wrong-owner
-  reviewed: false
-  source_note_id: wiki/concepts/name-based-deletion-with-wrong-owner
-  rationale: Sampled note title as query; needs human review
-- query: BDH attention mechanism
-  category: concept
-  relevant_note_ids:
-  - wiki/concepts/bdh-attention-mechanism
-  reviewed: false
-  source_note_id: wiki/concepts/bdh-attention-mechanism
-  rationale: Sampled note title as query; needs human review
-- query: Cross-Hook State Bridging
-  category: concept
-  relevant_note_ids:
-  - wiki/concepts/cross-hook-state-bridging
-  reviewed: false
-  source_note_id: wiki/concepts/cross-hook-state-bridging
-  rationale: Sampled note title as query; needs human review
-- query: '"Hub dampening"'
-  category: concept
-  relevant_note_ids:
-  - wiki/concepts/hub-dampening
-  reviewed: false
-  source_note_id: wiki/concepts/hub-dampening
-  rationale: Sampled note title as query; needs human review
-- query: '"Knowledge-context confusion"'
-  category: concept
-  relevant_note_ids:
-  - wiki/concepts/knowledge-context-confusion
-  reviewed: false
-  source_note_id: wiki/concepts/knowledge-context-confusion
-  rationale: Sampled note title as query; needs human review
-- query: '"Shortest Reliable Path"'
-  category: concept
-  relevant_note_ids:
-  - wiki/concepts/shortest-reliable-path
-  reviewed: false
-  source_note_id: wiki/concepts/shortest-reliable-path
-  rationale: Sampled note title as query; needs human review
-- query: '"Spatial grid collision optimization"'
-  category: concept
-  relevant_note_ids:
-  - wiki/concepts/spatial-grid-collision-optimization
-  reviewed: false
-  source_note_id: wiki/concepts/spatial-grid-collision-optimization
-  rationale: Sampled note title as query; needs human review
-- query: '"Morning Signal"'
-  category: entity
-  relevant_note_ids:
-  - wiki/entities/morning-signal
-  reviewed: false
-  source_note_id: wiki/entities/morning-signal
-  rationale: Sampled note title as query; needs human review
-- query: Video Digest Factory
-  category: entity
-  relevant_note_ids:
-  - wiki/entities/video-digest-factory
-  reviewed: false
-  source_note_id: wiki/entities/video-digest-factory
-  rationale: Sampled note title as query; needs human review
-- query: '"Hermes Agent"'
-  category: entity
-  relevant_note_ids:
-  - wiki/entities/hermes-agent
-  reviewed: false
-  source_note_id: wiki/entities/hermes-agent
-  rationale: Sampled note title as query; needs human review
-- query: '"Hermes Sync"'
-  category: entity
-  relevant_note_ids:
-  - wiki/entities/hermes-sync
-  reviewed: false
-  source_note_id: wiki/entities/hermes-sync
-  rationale: Sampled note title as query; needs human review
-- query: Hermes Avatar Widget
-  category: entity
-  relevant_note_ids:
-  - wiki/entities/hermes-avatar-widget
-  reviewed: false
-  source_note_id: wiki/entities/hermes-avatar-widget
-  rationale: Sampled note title as query; needs human review
-- query: '"Tinka"'
-  category: entity
-  relevant_note_ids:
-  - wiki/entities/tinka
-  reviewed: false
-  source_note_id: wiki/entities/tinka
-  rationale: Sampled note title as query; needs human review
-- query: '"Flipbook Browser"'
-  category: entity
-  relevant_note_ids:
-  - wiki/entities/flipbook-browser
-  reviewed: false
-  source_note_id: wiki/entities/flipbook-browser
-  rationale: Sampled note title as query; needs human review
-- query: agent-email-niche
-  category: entity
-  relevant_note_ids:
-  - knowledge/agent-email-niche
-  reviewed: false
-  source_note_id: knowledge/agent-email-niche
-  rationale: Sampled note title as query; needs human review
-- query: '"Privacy Guard"'
-  category: entity
-  relevant_note_ids:
-  - wiki/entities/privacy-guard
-  reviewed: false
-  source_note_id: wiki/entities/privacy-guard
-  rationale: Sampled note title as query; needs human review
-- query: '"Hermes Mission Control"'
-  category: entity
-  relevant_note_ids:
-  - wiki/entities/mission-control
-  reviewed: false
-  source_note_id: wiki/entities/mission-control
-  rationale: Sampled note title as query; needs human review
-- query: two-tier-memory-honcho-bdh
-  category: news
-  relevant_note_ids:
-  - wiki/plans/two-tier-memory-honcho-bdh
-  reviewed: false
-  source_note_id: wiki/plans/two-tier-memory-honcho-bdh
-  rationale: Sampled note title as query; needs human review
-- query: SCHEMA
-  category: news
-  relevant_note_ids:
-  - wiki/SCHEMA
-  reviewed: false
-  source_note_id: wiki/SCHEMA
-  rationale: Sampled note title as query; needs human review
-- query: tools-to-try
-  category: news
-  relevant_note_ids:
-  - tools-to-try
-  reviewed: false
-  source_note_id: tools-to-try
-  rationale: Sampled note title as query; needs human review
-- query: sessions
-  category: activity
-  relevant_note_ids:
-  - projects/hermes-mission-control/sections/sessions
-  reviewed: false
-  source_note_id: projects/hermes-mission-control/sections/sessions
-  rationale: Sampled note title as query; needs human review
-- query: issue-10-ambient-particle-field
-  category: activity
-  relevant_note_ids:
-  - projects/hermes-avatar-widget/bugs/issue-10-ambient-particle-field
-  reviewed: false
-  source_note_id: projects/hermes-avatar-widget/bugs/issue-10-ambient-particle-field
-  rationale: Sampled note title as query; needs human review
-- query: knowledge
-  category: activity
-  relevant_note_ids:
-  - projects/hermes-mission-control/sections/knowledge
-  reviewed: false
-  source_note_id: projects/hermes-mission-control/sections/knowledge
-  rationale: Sampled note title as query; needs human review
-- query: README
-  category: activity
-  relevant_note_ids:
-  - projects/privacy-guard/README
-  reviewed: false
-  source_note_id: projects/privacy-guard/README
-  rationale: Sampled note title as query; needs human review
-- query: editorial-plan
-  category: activity
-  relevant_note_ids:
-  - projects/theseus-x/editorial-plan
-  reviewed: false
-  source_note_id: projects/theseus-x/editorial-plan
-  rationale: Sampled note title as query; needs human review
-- query: '"Shipd Olympus Submission Workflow"'
-  category: activity
-  relevant_note_ids:
-  - works/shipd/olympus-submission-workflow
-  reviewed: false
-  source_note_id: works/shipd/olympus-submission-workflow
-  rationale: Sampled note title as query; needs human review
-- query: README
-  category: activity
-  relevant_note_ids:
-  - projects/hermes-avatar-widget/README
-  reviewed: false
-  source_note_id: projects/hermes-avatar-widget/README
-  rationale: Sampled note title as query; needs human review
-- query: config
-  category: activity
-  relevant_note_ids:
-  - projects/hermes-mission-control/sections/config
-  reviewed: false
-  source_note_id: projects/hermes-mission-control/sections/config
-  rationale: Sampled note title as query; needs human review
-- query: README
-  category: activity
-  relevant_note_ids:
-  - projects/hydroponic-vertical-garden/README
-  reviewed: false
-  source_note_id: projects/hydroponic-vertical-garden/README
-  rationale: Sampled note title as query; needs human review
-- query: README
-  category: activity
-  relevant_note_ids:
-  - projects/hermes-mission-control/README
-  reviewed: false
-  source_note_id: projects/hermes-mission-control/README
-  rationale: Sampled note title as query; needs human review
-- query: Come si collega "Electron vs Tauri" agli altri concetti?
-  category: crossref
-  relevant_note_ids:
-  - wiki/comparisons/electron-vs-tauri
-  - privacy-guard
-  - tauri-architecture
-  reviewed: false
-  source_note_id: wiki/comparisons/electron-vs-tauri
-  rationale: LLM-style cross-reference; needs human review
-- query: Come si collega "BDH Graph Harness — PoC Benchmark v3 (ChromaDB + Full Vault)"
-    agli altri concetti?
-  category: crossref
-  relevant_note_ids:
-  - wiki/queries/bdh-graph-harness-poc-benchmark
-  - concepts/bdh-graph-harness
-  - concepts/baby-dragon-hatchling
-  reviewed: false
-  source_note_id: wiki/queries/bdh-graph-harness-poc-benchmark
-  rationale: LLM-style cross-reference; needs human review
-- query: Come si collega "BM25 Does Not Help Italian Vaults" agli altri concetti?
-  category: crossref
-  relevant_note_ids:
-  - wiki/lessons/bm25-italian-failure
-  - bdh-graph-harness
-  - hebbian-learning
-  reviewed: false
-  source_note_id: wiki/lessons/bm25-italian-failure
-  rationale: LLM-style cross-reference; needs human review
-- query: Come si collega "BM25 Benchmark Comparison" agli altri concetti?
-  category: crossref
-  relevant_note_ids:
-  - wiki/queries/bm25-benchmark-comparison
-  - lessons/bm25-italian-failure
-  - lessons/hybrid-search-disabled
-  reviewed: false
-  source_note_id: wiki/queries/bm25-benchmark-comparison
-  rationale: LLM-style cross-reference; needs human review
-- query: Come si collega BDH vs Transformer agli altri concetti?
-  category: crossref
-  relevant_note_ids:
-  - wiki/comparisons/bdh-vs-transformer
-  - hebbian-learning
-  - baby-dragon-hatchling
-  reviewed: false
-  source_note_id: wiki/comparisons/bdh-vs-transformer
-  rationale: LLM-style cross-reference; needs human review
-- query: Come si collega GLM-5.2 Full on Mac mini 64GB — Assessment agli altri concetti?
-  category: crossref
-  relevant_note_ids:
-  - wiki/queries/glm-5-2-mac-mini-64gb-assessment
-  - entities/glm-5-2-full-mlx-colibri
-  - concepts/mlx-out-of-core-inference
-  reviewed: false
-  source_note_id: wiki/queries/glm-5-2-mac-mini-64gb-assessment
-  rationale: LLM-style cross-reference; needs human review
-- query: Come si collega "Hybrid Search Disabled by Default" agli altri concetti?
-  category: crossref
-  relevant_note_ids:
-  - wiki/lessons/hybrid-search-disabled
-  - lessons/bm25-italian-failure
-  - lessons/bm25-italian-failure
-  reviewed: false
-  source_note_id: wiki/lessons/hybrid-search-disabled
-  rationale: LLM-style cross-reference; needs human review
+  - query: "Quale regola rafforza le connessioni tra unità che si attivano insieme?"
+    category: concept
+    relevant_note_ids:
+      - wiki/concepts/hebbian-learning
+    reviewed: true
+    rationale: Semantic paraphrase of the learning rule.
+
+  - query: "Quale architettura unisce memoria a grafo, dinamiche sinaptiche e retrieval contestuale?"
+    category: concept
+    relevant_note_ids:
+      - wiki/concepts/baby-dragon-hatchling
+    reviewed: true
+    rationale: Semantic description of the system architecture.
+
+  - query: "Come usa l'attenzione una rete neurale per pesare le relazioni fra token?"
+    category: concept
+    relevant_note_ids:
+      - wiki/concepts/transformer-architecture
+    reviewed: true
+    rationale: Natural-language question about self-attention architecture.
+
+  - query: "Come vengono recuperate informazioni da note Markdown collegate in una memoria strutturata?"
+    category: concept
+    relevant_note_ids:
+      - wiki/concepts/bdh-graph-harness
+      - wiki/concepts/core-vault
+    reviewed: true
+    rationale: Multi-note question about graph retrieval and its primary knowledge store.
+
+  - query: "Come vengono create nuove note concettuali quando emerge una lacuna semantica?"
+    category: concept
+    relevant_note_ids:
+      - wiki/concepts/neurogenesis
+    reviewed: true
+    rationale: Semantic description of autonomous concept creation.
+
+  - query: "Quali precauzioni operative servono per recuperare lo stato dopo una corruzione del database locale?"
+    category: activity
+    relevant_note_ids:
+      - memory/learned/bdh-session-recovery-delta
+    reviewed: true
+    rationale: Replaces vanished daily activity note with the retained recovery lesson.
+
+  - query: "Qual è lo scopo e lo stack documentato dell'applicazione assess-chat?"
+    category: activity
+    relevant_note_ids:
+      - projects/assess-chat/README
+    reviewed: true
+    rationale: Replaces vanished session note with the surviving project source.
+
+  - query: "Dopo una modifica al plugin bridge, quale servizio va riavviato e quale rischio evita?"
+    category: activity
+    relevant_note_ids:
+      - wiki/concepts/hermes-gateway
+      - wiki/concepts/plugin-changes-require-gateway-restart
+    reviewed: true
+    rationale: Genuine operational cross-reference.
+
+  - query: "Quale sistema trasforma gli sviluppi quotidiani in un briefing e in un formato video breve?"
+    category: news
+    relevant_note_ids:
+      - wiki/entities/morning-signal
+      - wiki/entities/video-digest-factory
+    reviewed: true
+    rationale: Replaces removed dated news notes with current product-level sources.
+
+  - query: "Che cosa hanno mostrato gli esperimenti sul contributo della ricerca lessicale in un vault italiano?"
+    category: news
+    relevant_note_ids:
+      - wiki/queries/bm25-benchmark-comparison
+      - wiki/lessons/bm25-italian-failure
+    reviewed: true
+    rationale: Benchmark evidence paired with its documented lesson.
+
+  - query: "Quali risultati sono emersi dalle prove sui modelli di coding eseguiti in locale?"
+    category: news
+    relevant_note_ids:
+      - local-llm-coding-benchmarks
+    reviewed: true
+    rationale: Replaces unavailable dated headline with an extant benchmark record.
+
+  - query: "Quale componente desktop visualizza in tempo reale lo stato dell'assistente?"
+    category: entity
+    relevant_note_ids:
+      - wiki/entities/hermes-avatar-widget
+    reviewed: true
+    rationale: Entity identified by function, not by title.
+
+  - query: "Quale prodotto desktop è progettato per proteggere i dati personali dell'utente?"
+    category: entity
+    relevant_note_ids:
+      - wiki/entities/privacy-guard
+    reviewed: true
+    rationale: Entity identified by product purpose, not by name.
+
+  - query: "In che modo il rafforzamento di connessioni co-attive si rapporta all'attenzione fra token?"
+    category: crossref
+    relevant_note_ids:
+      - wiki/concepts/hebbian-learning
+      - wiki/concepts/transformer-architecture
+    reviewed: true
+    rationale: Preserves the original cross-reference without target-title leakage.
+
+  - query: "Come si innesta la creazione autonoma di concetti in un sistema di memoria a grafo?"
+    category: crossref
+    relevant_note_ids:
+      - wiki/concepts/baby-dragon-hatchling
+      - wiki/concepts/neurogenesis
+    reviewed: true
+    rationale: Preserves the original architecture-to-concept cross-reference.
