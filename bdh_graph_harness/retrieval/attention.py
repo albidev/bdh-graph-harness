@@ -462,10 +462,15 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
         neighbors = neighbors[:CONFIG['max_neighbors_per_hop']]
 
         for target_id, neighbor in neighbors:
-            # Decay score by hop distance (single decay per hop).
-            new_score = score * CONFIG.get('hop_decay', 0.5)
-
             dynamic_weight = neighbor['hebbian_edge_weight']
+            # Dynamic edges get an independently tunable decay. Static and
+            # mixed edges preserve the existing graph traversal behavior.
+            decay = (
+                CONFIG.get('hebbian_dynamic_hop_decay', CONFIG.get('hop_decay', 0.5))
+                if neighbor['matched_by'] == 'hebbian_edge'
+                else CONFIG.get('hop_decay', 0.5)
+            )
+            new_score = score * decay
             if neighbor['matched_by'] == 'hebbian_edge':
                 new_score *= (0.5 + dynamic_weight) * CONFIG.get('hebbian_dynamic_gain', 1.0)
             elif dynamic_weight > 0:
