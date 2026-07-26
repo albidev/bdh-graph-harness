@@ -295,6 +295,59 @@ def _run_pass(queries, nodes, edges, collection, bm25_index, state, *, cold: boo
     return metrics, aggregated_meta
 
 
+def _evaluate_hebbian_trajectory(
+    train_queries: list[dict],
+    holdout_queries: list[dict],
+    *,
+    nodes: dict,
+    edges: list,
+    collection,
+    bm25_index,
+    collect_hops: bool,
+) -> dict:
+    """Measure holdout ranking before and after a separate Hebbian trajectory."""
+    baseline_state = _fresh_state()
+    cold_metrics, _ = _run_pass(
+        holdout_queries,
+        nodes,
+        edges,
+        collection,
+        bm25_index,
+        baseline_state,
+        cold=True,
+        collect_hops=collect_hops,
+    )
+
+    trained_state = _fresh_state()
+    train_metrics, _ = _run_pass(
+        train_queries,
+        nodes,
+        edges,
+        collection,
+        bm25_index,
+        trained_state,
+        cold=False,
+        collect_hops=collect_hops,
+    )
+    after_training_metrics, _ = _run_pass(
+        holdout_queries,
+        nodes,
+        edges,
+        collection,
+        bm25_index,
+        trained_state,
+        cold=True,
+        collect_hops=collect_hops,
+    )
+    return {
+        "cold": cold_metrics,
+        "train": train_metrics,
+        "after_training": after_training_metrics,
+        "cold_final_synapses": len(baseline_state["synapses"]),
+        "trained_final_synapses": len(trained_state["synapses"]),
+    }
+
+
 def _query_version(queries: list[dict]) -> str:
     import hashlib
 

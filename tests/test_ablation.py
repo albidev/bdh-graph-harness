@@ -89,3 +89,35 @@ def test_golden_set_validator_accepts_multiple_existing_semantic_targets():
             "traversal": {"title": "Graph Traversal"},
         },
     )
+
+
+def test_hebbian_trajectory_trains_only_on_training_queries(monkeypatch):
+    train = [{"query": "train", "relevant_note_ids": ["a"]}]
+    holdout = [{"query": "holdout", "relevant_note_ids": ["a"]}]
+    calls = []
+
+    def fake_run_pass(queries, _nodes, _edges, _collection, _bm25, state, *, cold, collect_hops):
+        calls.append((queries, cold))
+        if queries is train:
+            assert cold is False
+            state["synapses"]["a|b"] = {"weight": 0.2}
+            return ablation.Metrics(mrr=0.1), {}
+        assert cold is True
+        return ablation.Metrics(mrr=0.3 if state["synapses"] else 0.2), {}
+
+    monkeypatch.setattr(ablation, "_run_pass", fake_run_pass)
+
+    result = ablation._evaluate_hebbian_trajectory(
+        train,
+        holdout,
+        nodes={},
+        edges=[],
+        collection=None,
+        bm25_index=None,
+        collect_hops=False,
+    )
+
+    assert calls == [(holdout, True), (train, False), (holdout, True)]
+    assert result["cold"].mrr == 0.2
+    assert result["after_training"].mrr == 0.3
+    assert result["trained_final_synapses"] == 1
