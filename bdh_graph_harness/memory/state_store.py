@@ -5,7 +5,12 @@ import json
 import fcntl
 from datetime import datetime
 
-from bdh_graph_harness.config import STATE_FILE, LOCK_FILE
+from bdh_graph_harness.config import CONFIG, STATE_FILE, LOCK_FILE
+
+
+def _state_path(vault_root):
+    """Return the configured state file, preserving the legacy default."""
+    return os.path.join(vault_root, CONFIG.get('hebbian_state_file', STATE_FILE))
 
 
 def _empty_state():
@@ -33,7 +38,7 @@ def _read_state_unlocked(state_path):
 
 def load_state(vault_root):
     """Load persisted BDH state while holding the vault file lock."""
-    state_path = os.path.join(vault_root, STATE_FILE)
+    state_path = _state_path(vault_root)
     lock_path = os.path.join(vault_root, LOCK_FILE)
     with open(lock_path, 'w') as lock_f:
         fcntl.flock(lock_f, fcntl.LOCK_EX)
@@ -150,7 +155,7 @@ def save_state(vault_root, state, *, valid_node_ids=None):
     swaps it into place — a crash during write cannot leave a corrupt file.
     """
     state['updated'] = datetime.now().isoformat()
-    state_path = os.path.join(vault_root, STATE_FILE)
+    state_path = _state_path(vault_root)
     lock_path = os.path.join(vault_root, LOCK_FILE)
     tmp_path = state_path + '.tmp'
 

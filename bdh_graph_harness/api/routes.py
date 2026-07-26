@@ -352,6 +352,17 @@ async def _run_attention_and_plasticity_unlocked(
                 note_payload['source_id'] = node.get('source_id', 'vault')
             activated_notes.append(note_payload)
 
+    associative_context = []
+    for item in routing.get('associative_context', []):
+        node = n.get(item['id'])
+        associative_context.append({
+            **item,
+            'title': node['title'] if node else item['id'],
+            **({'path': node['path']} if node and node.get('path') else {}),
+        })
+    if associative_context:
+        routing['associative_context'] = associative_context
+
     if config.get('hebbian_dynamic_shadow_enabled', True):
         dynamic_shadow = build_dynamic_shadow(query, routing)
         routing['hebbian_dynamic_shadow'] = dynamic_shadow
@@ -364,10 +375,17 @@ async def _run_attention_and_plasticity_unlocked(
     updated_keys = set()
     pruned_count = 0
     if learn and config.get('online_plasticity', True) and active:
+        # Learn only from direct retrieval seeds. Graph-propagated neighbors are read
+        # context, not evidence that two notes should form a durable association.
+        learning_active = {
+            item['id']: active[item['id']]
+            for item in routing.get('activation_details', [])
+            if item.get('role') == 'seed' and item['id'] in active
+        }
         # Acquire lock, then run hebbian_update + save_state in a thread
         async with ctx.state_lock:
             ctx.state, updated_keys, pruned_count = await asyncio.to_thread(
-                hebbian_update, active, ctx.state, n, source
+                hebbian_update, learning_active, ctx.state, n, source
             )
             await asyncio.to_thread(
                 save_state, ctx.config.path, ctx.state

@@ -33,6 +33,8 @@ DEFAULT_CONFIG_PATHS = [
 
 CONFIG = {
     'vault_path': os.path.expanduser('~/Documents/Hermes'),
+    # Optional alternate state file for reversible clean-room learning runs.
+    'hebbian_state_file': STATE_FILE,
     # Optional read-only Markdown sources merged into the primary vault graph.
     # Each entry supports id, path, include, exclude, and writable (false by default).
     'external_sources': [],
@@ -56,6 +58,7 @@ CONFIG = {
     'chroma_path': '.bdh-chroma',
     'chroma_collection': 'notes',
     'seed_count': 5,
+    'hebbian_learning_seed_count': 2,  # conservative write budget; separate from retrieval seeds
     'max_hop': 2,
     'active_threshold': 0.25,
     'hub_dampening': True,
@@ -70,6 +73,12 @@ CONFIG = {
     'hebbian_dynamic_top_n': 3,
     'hebbian_dynamic_gain': 1.5,
     'hebbian_dynamic_hop_decay': 0.6,
+    'hebbian_associative_context_enabled': False,
+    'hebbian_associative_context_max_items': 2,
+    'hebbian_associative_context_max_per_seed': 1,
+    # Dynamic associations need query-local semantic evidence before they may
+    # compete with declared wikilinks in retrieval.
+    'hebbian_dynamic_query_relevance_floor': 0.35,
     # Confidence gate for learned-only traversal; static wikilinks ignore these.
     'hebbian_dynamic_frequency_saturation': 2.0,
     'hebbian_dynamic_unconsolidated_trust': 0.6,
