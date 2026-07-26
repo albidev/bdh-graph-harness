@@ -365,6 +365,7 @@ def test_ui_groups_controls_around_a_graph_first_scene_and_mobile_tabs():
         assert f">{label}<" in html
     assert 'id="control-dock"' in html
     assert 'id="selection-section"' in html
+    assert "#selection-section {\n  max-height:" not in styles
     assert 'id="focus-hud"' in html
     assert 'data-tab="controls-tab"' in html
     assert styles.count("@media (max-width: 768px)") == 1
