@@ -30,11 +30,25 @@ def fresh_state():
 def test_load_state_creates_default(temp_vault):
     """load_state on empty vault returns default state structure."""
     state = harness.load_state(temp_vault)
-    assert 'synapses' in state
     assert state['synapses'] == {}
     assert 'created' in state
     assert 'updated' in state
     assert state['queries'] == 0
+
+
+def test_clean_room_state_file_does_not_touch_legacy_state(temp_vault, fresh_state, monkeypatch):
+    """A configured clean-room file isolates new learning from legacy state."""
+    legacy_path = os.path.join(temp_vault, harness.STATE_FILE)
+    with open(legacy_path, 'w') as f:
+        json.dump({'synapses': {'legacy|edge': {}}, 'queries': 99}, f)
+
+    monkeypatch.setitem(harness.CONFIG, 'hebbian_state_file', '.bdh-state-primary-seeds-v2.json')
+    fresh_state['synapses'] = {'new|edge': {'weight': 0.5}}
+    harness.save_state(temp_vault, fresh_state)
+
+    with open(legacy_path) as f:
+        assert json.load(f)['queries'] == 99
+    assert harness.load_state(temp_vault)['synapses'] == {'new|edge': {'weight': 0.5}}
 
 
 def test_load_state_existing(temp_vault, fresh_state):
@@ -85,17 +99,15 @@ def test_save_state_lock_file_created(temp_vault, fresh_state):
 # hebbian_update
 # ---------------------------------------------------------------------------
 
-def test_hebbian_update_creates_synapses(temp_vault, fresh_state):
-    """3 active notes with scores above threshold create seed→target edges."""
+def test_hebbian_update_respects_conservative_learning_seed_budget(temp_vault, fresh_state):
+    """Learning uses only its own top-2 budget, not all retrieval seeds."""
     active = {'a': 0.8, 'b': 0.6, 'c': 0.4}
     state, _, _ = harness.hebbian_update(active, fresh_state)
 
-    # Seeds = top seed_count (default 5, so all 3). Edges are directed seed→target.
-    # For 3 seeds ordered by score: a, b, c → pairs (a,b), (a,c), (b,c)
-    assert len(state['synapses']) == 3
+    assert len(state['synapses']) == 1
     assert 'a|b' in state['synapses']
-    assert 'a|c' in state['synapses']
-    assert 'b|c' in state['synapses']
+    assert 'a|c' not in state['synapses']
+    assert 'b|c' not in state['synapses']
 
 
 def test_hebbian_update_weight_formula(temp_vault, fresh_state):
@@ -135,10 +147,10 @@ def test_hebbian_update_frequency_increment(fresh_state):
 
 def test_hebbian_update_decay(fresh_state):
     """Test that synapses between non-active notes decay."""
-    # First: activate A, B, C → creates synapses a|b, a|c, b|c
+    # Conservative write budget creates only the top pair.
     active1 = {'a': 0.8, 'b': 0.6, 'c': 0.4}
     state, _, _ = harness.hebbian_update(active1, fresh_state)
-    assert len(state['synapses']) == 3
+    assert len(state['synapses']) == 1
 
     original_weight = state['synapses']['a|b']['weight']
 

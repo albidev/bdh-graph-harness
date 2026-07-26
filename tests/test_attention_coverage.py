@@ -16,6 +16,9 @@ class FakeCollection:
     def query(self, **_kwargs):
         return {"ids": [self.ids], "distances": [[0.0, 0.4][:len(self.ids)]]}
 
+    def get(self, ids, include):
+        return {"ids": list(ids), "embeddings": [[1.0] for _ in ids]}
+
 
 def test_hebbian_helpers_handle_empty_invalid_and_capped_scores(monkeypatch):
     assert attention.compute_adaptive_threshold([], floor=0.33) == 0.33
@@ -270,3 +273,42 @@ def test_static_and_hebbian_edge_applies_learned_weight_once(monkeypatch):
     assert active["learned"] == 0.9
     learned = next(item for item in routing_meta["activation_details"] if item["id"] == "learned")
     assert learned["matched_by"] == "static_and_hebbian_edge"
+
+
+def test_dynamic_query_relevance_rejects_semantically_unrelated_neighbor():
+    class Collection:
+        def get(self, ids, include):
+            return {
+                "ids": ids,
+                "embeddings": [[0.0, 1.0] if note_id == "noise" else [1.0, 0.0] for note_id in ids],
+            }
+
+    scores = attention._dynamic_query_relevance([1.0, 0.0], Collection(), {"relevant", "noise"})
+    assert scores["relevant"] == 1.0
+    assert scores["noise"] == 0.0
+
+
+def test_associative_context_never_contaminates_primary_and_respects_budget(monkeypatch):
+    monkeypatch.setitem(config.CONFIG, "hebbian_associative_context_max_items", 1)
+    context = attention._build_associative_context(
+        seeds=[("seed", 1.0)],
+        adjacency={"seed": [("primary", 0.9, 1.0), ("context", 0.8, 1.0)]},
+        primary_ids={"seed", "primary"},
+    )
+    assert [item["id"] for item in context] == ["context"]
+    assert context[0]["matched_by"] == "hebbian_edge"
+    assert context[0]["source_seed_id"] == "seed"
+
+
+def test_associative_lane_preserves_primary_results(monkeypatch):
+    nodes = {"seed": {"title": "Seed", "text": "seed"}, "learned": {"title": "Learned", "text": "learned"}}
+    state = {"synapses": {"learned|seed": {"weight": 0.8, "frequency": 2.0, "consolidation_candidate_cycles": 1}}}
+    monkeypatch.setattr(attention, "get_embeddings", lambda _queries: [[1.0]])
+    monkeypatch.setitem(config.CONFIG, "adaptive_threshold", False)
+    monkeypatch.setitem(config.CONFIG, "active_threshold", 0.01)
+    monkeypatch.setitem(config.CONFIG, "hebbian_dynamic_edges_enabled", True)
+    monkeypatch.setitem(config.CONFIG, "hebbian_associative_context_enabled", True)
+    routing = {}
+    primary = attention.attention("q", nodes, {"seed": [], "learned": []}, FakeCollection(ids=("seed",)), k=1, max_hop=1, hebbian_state=state, routing_meta=routing)
+    assert list(primary) == ["seed"]
+    assert routing["associative_context"][0]["id"] == "learned"
