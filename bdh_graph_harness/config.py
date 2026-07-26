@@ -33,6 +33,8 @@ DEFAULT_CONFIG_PATHS = [
 
 CONFIG = {
     'vault_path': os.path.expanduser('~/Documents/Hermes'),
+    # Optional alternate state file for reversible clean-room learning runs.
+    'hebbian_state_file': STATE_FILE,
     # Optional read-only Markdown sources merged into the primary vault graph.
     # Each entry supports id, path, include, exclude, and writable (false by default).
     'external_sources': [],
