@@ -30,11 +30,25 @@ def fresh_state():
 def test_load_state_creates_default(temp_vault):
     """load_state on empty vault returns default state structure."""
     state = harness.load_state(temp_vault)
-    assert 'synapses' in state
     assert state['synapses'] == {}
     assert 'created' in state
     assert 'updated' in state
     assert state['queries'] == 0
+
+
+def test_clean_room_state_file_does_not_touch_legacy_state(temp_vault, fresh_state, monkeypatch):
+    """A configured clean-room file isolates new learning from legacy state."""
+    legacy_path = os.path.join(temp_vault, harness.STATE_FILE)
+    with open(legacy_path, 'w') as f:
+        json.dump({'synapses': {'legacy|edge': {}}, 'queries': 99}, f)
+
+    monkeypatch.setitem(harness.CONFIG, 'hebbian_state_file', '.bdh-state-primary-seeds-v2.json')
+    fresh_state['synapses'] = {'new|edge': {'weight': 0.5}}
+    harness.save_state(temp_vault, fresh_state)
+
+    with open(legacy_path) as f:
+        assert json.load(f)['queries'] == 99
+    assert harness.load_state(temp_vault)['synapses'] == {'new|edge': {'weight': 0.5}}
 
 
 def test_load_state_existing(temp_vault, fresh_state):
