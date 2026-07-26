@@ -7,6 +7,7 @@ Includes adaptive threshold, hybrid search support, and Integrate-and-Fire model
 import math
 import statistics
 from collections import defaultdict, deque
+from datetime import datetime
 
 from bdh_graph_harness.config import CONFIG, logger
 from bdh_graph_harness.retrieval.embeddings import get_embeddings
@@ -26,6 +27,42 @@ def _resolve_hebbian_node_id(node_id, valid_node_ids):
         if candidate in valid_node_ids:
             return candidate
     return None
+
+
+def _hebbian_dynamic_trust(synapse, now=None):
+    """Return a bounded confidence factor for a learned dynamic edge.
+
+    Weight expresses association strength. Trust expresses whether that strength
+    has repeated, consolidated, and remained current enough to traverse.
+    """
+    frequency = max(0.0, float(synapse.get("frequency", 0.0)))
+    saturation = max(0.01, float(CONFIG.get("hebbian_dynamic_frequency_saturation", 2.0)))
+    frequency_factor = min(1.0, frequency / saturation)
+
+    cycles = max(0, int(synapse.get("consolidation_candidate_cycles", 0)))
+    consolidation_factor = 1.0 if cycles else float(
+        CONFIG.get("hebbian_dynamic_unconsolidated_trust", 0.6)
+    )
+
+    recency_factor = 1.0
+    timestamp = synapse.get("last_coactivated")
+    if timestamp:
+        try:
+            reference = now or datetime.now()
+            last_coactivated = datetime.fromisoformat(timestamp)
+            if last_coactivated.tzinfo is not None and reference.tzinfo is None:
+                reference = reference.replace(tzinfo=last_coactivated.tzinfo)
+            elif last_coactivated.tzinfo is None and reference.tzinfo is not None:
+                last_coactivated = last_coactivated.replace(tzinfo=reference.tzinfo)
+            age_days = max(0.0, (reference - last_coactivated).total_seconds() / 86400)
+            horizon = max(1.0, float(CONFIG.get("hebbian_dynamic_recency_days", 30.0)))
+            recency_floor = float(CONFIG.get("hebbian_dynamic_recency_floor", 0.4))
+            recency_factor = max(recency_floor, 1.0 - age_days / horizon * (1.0 - recency_floor))
+        except (TypeError, ValueError):
+            recency_factor = float(CONFIG.get("hebbian_dynamic_recency_floor", 0.4))
+
+    floor = float(CONFIG.get("hebbian_dynamic_trust_floor", 0.25))
+    return min(1.0, max(floor, frequency_factor * consolidation_factor * recency_factor))
 
 
 # ---------------------------------------------------------------------------
@@ -228,11 +265,12 @@ def _build_hebbian_adjacency(hebbian_state, valid_node_ids):
         right = _resolve_hebbian_node_id(right, valid_node_ids)
         if left is None or right is None:
             continue
-        adjacency[left].append((right, weight))
-        adjacency[right].append((left, weight))
+        trust = _hebbian_dynamic_trust(synapse)
+        adjacency[left].append((right, weight, trust))
+        adjacency[right].append((left, weight, trust))
 
     return {
-        node_id: sorted(neighbors, key=lambda item: -item[1])[:top_n]
+        node_id: sorted(neighbors, key=lambda item: -(item[1] * item[2]))[:top_n]
         for node_id, neighbors in adjacency.items()
     }
 
@@ -440,20 +478,23 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
             neighbors[target_id] = {
                 'matched_by': 'static_edge',
                 'hebbian_edge_weight': 0.0,
+                'hebbian_edge_trust': 0.0,
                 'priority': scores.get(target_id, 0.1),
             }
 
-        for target_id, weight in hebbian_adjacency.get(current_id, []):
+        for target_id, weight, trust in hebbian_adjacency.get(current_id, []):
             existing = neighbors.get(target_id)
             if existing:
                 existing['matched_by'] = 'static_and_hebbian_edge'
                 existing['hebbian_edge_weight'] = max(existing['hebbian_edge_weight'], weight)
+                existing['hebbian_edge_trust'] = max(existing['hebbian_edge_trust'], trust)
                 existing['priority'] = max(existing['priority'], weight)
             else:
                 neighbors[target_id] = {
                     'matched_by': 'hebbian_edge',
                     'hebbian_edge_weight': weight,
-                    'priority': max(scores.get(target_id, 0.0), weight),
+                    'hebbian_edge_trust': trust,
+                    'priority': max(scores.get(target_id, 0.0), weight * trust),
                 }
 
         # Cap static + dynamic expansion together, preserving strong learned
@@ -463,6 +504,7 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
 
         for target_id, neighbor in neighbors:
             dynamic_weight = neighbor['hebbian_edge_weight']
+            dynamic_trust = neighbor['hebbian_edge_trust']
             # Dynamic edges get an independently tunable decay. Static and
             # mixed edges preserve the existing graph traversal behavior.
             decay = (
@@ -472,7 +514,8 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
             )
             new_score = score * decay
             if neighbor['matched_by'] == 'hebbian_edge':
-                new_score *= (0.5 + dynamic_weight) * CONFIG.get('hebbian_dynamic_gain', 1.0)
+                new_score *= ((0.5 + dynamic_weight) * CONFIG.get('hebbian_dynamic_gain', 1.0)
+                              * dynamic_trust)
             elif dynamic_weight > 0:
                 new_score *= 1.0 + dynamic_weight * CONFIG.get('hebbian_dynamic_gain', 1.0)
 
@@ -502,6 +545,7 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
                             'parent_id': current_id,
                             'matched_by': neighbor['matched_by'],
                             'hebbian_edge_weight': round(dynamic_weight, 4),
+                            'hebbian_edge_trust': round(dynamic_trust, 4),
                             'final_score': round(new_score, 4),
                         })
             elif new_score > traversal_threshold:
@@ -512,6 +556,7 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
                     'parent_id': current_id,
                     'matched_by': neighbor['matched_by'],
                     'hebbian_edge_weight': round(dynamic_weight, 4),
+                    'hebbian_edge_trust': round(dynamic_trust, 4),
                     'vector_score': round(raw_vector_scores.get(target_id, 0.0), 4),
                     'bm25_score': round(bm25_scores.get(target_id, 0.0), 4),
                     'hybrid_score': round(retrieval_scores.get(target_id, 0.0), 4),

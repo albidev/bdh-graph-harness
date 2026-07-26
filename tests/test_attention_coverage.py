@@ -54,6 +54,51 @@ def test_hebbian_helpers_handle_empty_invalid_and_capped_scores(monkeypatch):
     assert attention._get_recently_active_notes(None) == set()
 
 
+def test_dynamic_hebbian_trust_prefers_recurrent_consolidated_synapses():
+    now = datetime.now()
+    one_shot = {
+        "weight": 0.8,
+        "frequency": 0.3,
+        "consolidation_candidate_cycles": 0,
+        "last_coactivated": now.isoformat(),
+    }
+    recurrent = {
+        "weight": 0.8,
+        "frequency": 2.0,
+        "consolidation_candidate_cycles": 1,
+        "last_coactivated": now.isoformat(),
+    }
+
+    one_shot_trust = attention._hebbian_dynamic_trust(one_shot, now=now)
+    recurrent_trust = attention._hebbian_dynamic_trust(recurrent, now=now)
+
+    assert 0.0 < one_shot_trust < recurrent_trust <= 1.0
+
+
+def test_dynamic_hebbian_edge_score_is_attenuated_by_trust(monkeypatch):
+    nodes = {
+        "seed": {"title": "Seed", "text": "seed"},
+        "learned": {"title": "Learned", "text": "learned"},
+    }
+    state = {"synapses": {"learned|seed": {
+        "weight": 0.8,
+        "frequency": 0.3,
+        "consolidation_candidate_cycles": 0,
+    }}}
+    monkeypatch.setattr(attention, "get_embeddings", lambda _queries: [[1.0]])
+    monkeypatch.setitem(config.CONFIG, "adaptive_threshold", False)
+    monkeypatch.setitem(config.CONFIG, "active_threshold", 0.01)
+    monkeypatch.setitem(config.CONFIG, "hebbian_dynamic_gain", 1.0)
+    monkeypatch.setitem(config.CONFIG, "hebbian_dynamic_hop_decay", 0.5)
+
+    active = attention.attention(
+        "q", nodes, {"seed": [], "learned": []}, FakeCollection(ids=("seed",)),
+        k=1, max_hop=1, hebbian_state=state,
+    )
+
+    assert active["learned"] == 0.1625
+
+
 def test_attention_dispatches_to_iaf_and_formats_context(monkeypatch):
     nodes = {"seed": {"title": "Seed", "text": "body"}}
     monkeypatch.setitem(config.CONFIG, "experimental_integrate_fire", True)
@@ -101,7 +146,12 @@ def test_attention_traverses_strong_hebbian_edge_without_static_wikilink(monkeyp
     }
     state = {
         "synapses": {
-            "learned|seed": {"weight": 0.8, "last_coactivated": "2999-01-01T00:00:00+00:00"}
+            "learned|seed": {
+                "weight": 0.8,
+                "frequency": 2.0,
+                "consolidation_candidate_cycles": 1,
+                "last_coactivated": "2999-01-01T00:00:00+00:00",
+            }
         }
     }
     routing_meta = {}
@@ -138,7 +188,9 @@ def test_dynamic_hebbian_edge_uses_its_own_hop_decay(monkeypatch):
         "seed": {"title": "Seed", "text": "seed"},
         "learned": {"title": "Learned", "text": "learned"},
     }
-    state = {"synapses": {"learned|seed": {"weight": 0.8}}}
+    state = {"synapses": {"learned|seed": {
+        "weight": 0.8, "frequency": 2.0, "consolidation_candidate_cycles": 1,
+    }}}
     monkeypatch.setattr(attention, "get_embeddings", lambda _queries: [[1.0]])
     monkeypatch.setitem(config.CONFIG, "adaptive_threshold", False)
     monkeypatch.setitem(config.CONFIG, "active_threshold", 0.01)
@@ -161,7 +213,11 @@ def test_attention_resolves_federated_hebbian_ids_to_core_nodes(monkeypatch):
     }
     state = {
         "synapses": {
-            "vault:wiki/learned.md|vault:wiki/seed.md": {"weight": 0.8}
+            "vault:wiki/learned.md|vault:wiki/seed.md": {
+                "weight": 0.8,
+                "frequency": 2.0,
+                "consolidation_candidate_cycles": 1,
+            }
         }
     }
     monkeypatch.setattr(attention, "get_embeddings", lambda _queries: [[1.0]])
