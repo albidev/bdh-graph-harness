@@ -124,11 +124,40 @@ def test_attention_traverses_strong_hebbian_edge_without_static_wikilink(monkeyp
         routing_meta=routing_meta,
     )
 
-    assert "learned" in active
+    assert active["learned"] == 0.65
     learned = next(item for item in routing_meta["activation_details"] if item["id"] == "learned")
     assert learned["role"] == "hebbian_neighbor"
     assert learned["matched_by"] == "hebbian_edge"
     assert learned["hebbian_edge_weight"] == 0.8
+
+
+def test_attention_resolves_federated_hebbian_ids_to_core_nodes(monkeypatch):
+    nodes = {
+        "wiki/seed": {"title": "Seed", "text": "seed"},
+        "wiki/learned": {"title": "Learned", "text": "learned"},
+    }
+    state = {
+        "synapses": {
+            "vault:wiki/learned.md|vault:wiki/seed.md": {"weight": 0.8}
+        }
+    }
+    monkeypatch.setattr(attention, "get_embeddings", lambda _queries: [[1.0]])
+    monkeypatch.setitem(config.CONFIG, "adaptive_threshold", False)
+    monkeypatch.setitem(config.CONFIG, "active_threshold", 0.01)
+    monkeypatch.setitem(config.CONFIG, "hop_decay", 0.5)
+    monkeypatch.setitem(config.CONFIG, "hebbian_dynamic_edges_enabled", True)
+
+    active = attention.attention(
+        "q",
+        nodes,
+        {"wiki/seed": [], "wiki/learned": []},
+        FakeCollection(ids=("wiki/seed",)),
+        k=1,
+        max_hop=1,
+        hebbian_state=state,
+    )
+
+    assert active["wiki/learned"] == 0.65
 
 
 def test_static_and_hebbian_edge_applies_learned_weight_once(monkeypatch):
