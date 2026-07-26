@@ -39,14 +39,20 @@ CONFIG = {
     'ollama_url': 'http://127.0.0.1:11434',
     # Embedding (Ollama)
     'embedding_model': 'nomic-embed-text-v2-moe',
-    # LLM provider (ollama | openrouter)
+    # LLM provider (ollama | ollama-cloud | openrouter)
     'llm_provider': 'ollama',
     'llm_model': 'gemma4:12b-mlx',
+    # Canonical OpenAI-compatible settings (used by Ollama Cloud/OpenRouter).
+    'llm_base_url': '',
+    'llm_api_key': '',
+    'llm_provider_label': 'Ollama',
+    'llm_transport': 'ollama-native',
     'openrouter_url': 'https://openrouter.ai/api/v1/chat/completions',
-    'openrouter_key': '',  # set in config or env
+    'openrouter_key': '',  # legacy compatibility; prefer llm_api_key
     'llm_temperature': 0.3,
     'llm_max_ctx': 4096,
     'llm_timeout': 300,
+    'embed_timeout': 120,  # also used by ChromaDB Ollama embedding function
     'chroma_path': '.bdh-chroma',
     'chroma_collection': 'notes',
     'seed_count': 5,
@@ -56,10 +62,13 @@ CONFIG = {
     'hub_degree_threshold': 25,      # dampen only very high-degree hubs (e.g. wiki/index)
     'max_neighbors_per_hop': 10,
     'hop_decay': 0.5,  # score decay per hop (single application, not compound)
+    'hebbian_gain': 0.0,  # multiplier on learned synapse weight during propagation; 0 = disabled
     'alpha': 0.7,
     'beta': 0.3,
     'decay': 0.95,
     'hebbian_min_score': 0.15,  # min activation score to create Hebbian synapse
+    'hebbian_frequency_scale': 10.0,  # log1p scale for non-saturating frequency compression
+    'tau_recency_hours': 24.0,  # recency half-life in hours
     'neurogenesis_dir': 'wiki/concepts',
     'neurogenesis_enabled': True,
     'api_host': '127.0.0.1',
@@ -68,12 +77,14 @@ CONFIG = {
     'python_exec': sys.executable,
     # Hybrid search (Phase 3.1)
     'hybrid_search': True,
+    'hybrid_fusion': 'rrf',  # 'weighted' | 'rrf'
     'hybrid_alpha': 0.7,   # weight for vector similarity
     'hybrid_beta': 0.3,    # weight for BM25 keyword score
+    'rrf_k': 60,
     'bm25_k1': 1.5,
     'bm25_b': 0.75,
     # Adaptive threshold (Phase 3.3)
-    'adaptive_threshold': True,
+    'adaptive_threshold': False,
     'threshold_floor': 0.15,
     # Online plasticity (Phase 3.2)
     'online_plasticity': True,
@@ -84,6 +95,11 @@ CONFIG = {
     'hebbian_boost_weight_factor': 0.3,    # multiplier on summed weight
     'hebbian_boost_window_minutes': 10,    # recency window for "recently active"
     'hebbian_boost_min_weight': 0.15,      # min synapse weight to consider active
+    # Multi-query retrieval (issue #19)
+    'multi_query_enabled': False,
+    'multi_query_max_variants': 3,
+    'multi_query_fusion': 'rrb',  # 'rrb' | 'weighted'
+    'rrb_k': 60,
     # Node quality (Phase 3.5)
     'quality_threshold': 0.25,           # below this → dormant
     'quality_reactivation_score': 0.50,  # activation to re-awaken
@@ -94,6 +110,13 @@ CONFIG = {
     'consolidation_weak_weight_threshold': 0.15,
     'consolidation_weak_max_frequency': 1.0,
     'consolidation_weak_min_age_hours': 48,
+    # Safe consolidation guardrails. Candidates must survive confirmation before
+    # deletion; a cycle aborts instead of committing an anomalous mass prune.
+    'consolidation_prune_confirm_cycles': 2,
+    'consolidation_max_prune_ratio': 0.35,
+    'consolidation_max_prune_per_cycle': 0.15,
+    'consolidation_protect_backbone': True,
+    'consolidation_protect_recent_hours': 72,
     'consolidation_dormant_persist_cycles': 3, # remove nodes dormant for N+ consolidation cycles
     'consolidation_prune_dormant_nodes': True,  # actually delete stale dormant nodes
     # Interactive neurogenesis is conservative but can retain several independent durable concepts.
@@ -127,7 +150,7 @@ CONFIG = {
     'semantic_consolidation_source': 'nightly_semantic_consolidation',
     'semantic_consolidation_frequency_increment': 0.3,
     # Integrate-and-Fire attention model
-    'experimental_integrate_fire': False,  # IaF attention — enable via bdh-config.yaml
+    'experimental_integrate_fire': False,  # IaF is experimental and currently underperforming; keep off by default
     'iaf_tau_base': 0.15,       # base firing threshold
     'iaf_tau_k': 0.075,         # degree scaling factor: τ_j = base + k * log(1 + deg)
     'iaf_max_steps': 5,         # max integration steps
@@ -189,31 +212,87 @@ def load_config(config_path: str | None = None):
     # Expand vault path
     merged['vault_path'] = os.path.expanduser(merged['vault_path'])
 
-    # Expand ${ENV_VAR} in config values (e.g. openrouter_key: ${OPENROUTER_API_KEY})
+    # Expand ${ENV_VAR} in config values (e.g. llm_api_key: ${OLLAMA_API_KEY}).
     for key, val in merged.items():
         if isinstance(val, str) and val.startswith('${') and val.endswith('}'):
             env_var = val[2:-1]
             merged[key] = os.environ.get(env_var, '')
 
-    # Derived URLs — embeddings always from Ollama
+    # Derived URLs — embeddings always use local Ollama.
     OLLAMA_EMBED_URL = merged['ollama_url'].rstrip('/') + '/api/embed'
     OLLAMA_LLM_URL = merged['ollama_url'].rstrip('/') + '/api/chat'
 
-    # LLM endpoint depends on provider
-    if merged.get('llm_provider') == 'openrouter':
-        OLLAMA_LLM_URL = merged.get('openrouter_url', 'https://openrouter.ai/api/v1/chat/completions')
-        key = merged.get('openrouter_key', '')
-        if not key:
-            logger.warning("OpenRouter provider selected but no API key found!")
-        logger.info(f"LLM provider: OpenRouter ({merged.get('llm_model')})")
+    # LLM endpoint and diagnostics depend on the actual provider. The wire
+    # protocol is deliberately separate from provider identity: Ollama Cloud
+    # speaks the same Chat Completions contract as OpenRouter, but is not
+    # OpenRouter.
+    provider = merged.get('llm_provider', 'ollama')
+    if provider == 'ollama-cloud':
+        base_url = merged.get('llm_base_url', '').rstrip('/')
+        if not base_url:
+            raise ValueError('ollama-cloud requires llm_base_url')
+        OLLAMA_LLM_URL = base_url + '/chat/completions'
+        if not merged.get('llm_api_key'):
+            logger.warning('Ollama Cloud provider selected but no llm_api_key found!')
+        merged['llm_provider_label'] = 'Ollama Cloud'
+        merged['llm_transport'] = 'openai-compatible'
+        merged['llm_endpoint'] = OLLAMA_LLM_URL
+        logger.info(
+            'LLM provider: Ollama Cloud (%s) via OpenAI-compatible API',
+            merged.get('llm_model'),
+        )
+    elif provider == 'openrouter':
+        # Legacy provider configuration remains supported during migration.
+        OLLAMA_LLM_URL = merged.get(
+            'openrouter_url', 'https://openrouter.ai/api/v1/chat/completions',
+        )
+        if not merged.get('llm_api_key'):
+            merged['llm_api_key'] = merged.get('openrouter_key', '')
+        if not merged.get('llm_api_key'):
+            logger.warning('OpenRouter provider selected but no API key found!')
+        merged['llm_provider_label'] = 'OpenRouter'
+        merged['llm_transport'] = 'openai-compatible'
+        merged['llm_endpoint'] = OLLAMA_LLM_URL
+        logger.info('LLM provider: OpenRouter (%s)', merged.get('llm_model'))
     else:
-        logger.info(f"LLM provider: Ollama ({merged.get('llm_model')})")
+        merged['llm_provider_label'] = 'Ollama'
+        merged['llm_transport'] = 'ollama-native'
+        merged['llm_endpoint'] = OLLAMA_LLM_URL
+        logger.info('LLM provider: Ollama (%s)', merged.get('llm_model'))
 
     # Update CONFIG in-place so modules that did `from config import CONFIG`
     # see the merged values (reassigning CONFIG = merged would break those refs).
     CONFIG.clear()
     CONFIG.update(merged)
     return merged
+
+
+# ---------------------------------------------------------------------------
+# Config overlay — for parametric evaluation
+# ---------------------------------------------------------------------------
+
+from contextlib import contextmanager
+
+
+@contextmanager
+def config_overlay(overrides: dict):
+    """Temporarily override CONFIG keys inside a narrow scope.
+
+    Use this for parametric ablations and tests: changes are applied
+    in-process and reverted on exit. Does not touch the on-disk config
+    file or persisted Hebbian state.
+    """
+    original = {k: CONFIG[k] for k in overrides if k in CONFIG}
+    absent = [k for k in overrides if k not in CONFIG]
+    CONFIG.update(overrides)
+    try:
+        yield
+    finally:
+        for k in overrides:
+            if k in original:
+                CONFIG[k] = original[k]
+            elif k in absent:
+                CONFIG.pop(k, None)
 
 
 # ---------------------------------------------------------------------------

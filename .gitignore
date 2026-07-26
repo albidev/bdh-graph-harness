@@ -41,6 +41,10 @@ wiki/.bdh-chroma/
 chroma_db/
 .bdh-graph-cache.json
 
+# Benchmark-generated caches and artifacts
+benchmarks/.bdh-chroma-ablation/
+benchmarks/results/*.json
+
 # Node (Obsidian plugin)
 plugins/obsidian/node_modules/
 plugins/obsidian/coverage/

@@ -6,16 +6,29 @@ delegate to ollama.py or openrouter.py based on CONFIG['llm_provider'].
 
 import json
 import re
+import logging
 
 from bdh_graph_harness.config import retry_with_backoff
 import bdh_graph_harness.config as _config
 from bdh_graph_harness.llm.prompt import build_messages, format_context
 from bdh_graph_harness.llm.ollama import build_ollama_payload, parse_ollama_response
-from bdh_graph_harness.llm.openrouter import (
-    build_openrouter_payload,
-    parse_openrouter_response,
-    parse_openrouter_stream_token,
+from bdh_graph_harness.llm.openai_compatible import (
+    build_openai_compatible_payload,
+    parse_openai_compatible_response,
+    parse_openai_compatible_stream_token,
 )
+
+
+logger = logging.getLogger('bdh.llm')
+
+
+OPENAI_COMPATIBLE_PROVIDERS = frozenset({'openrouter', 'ollama-cloud'})
+
+
+def uses_openai_compatible_api(provider=None):
+    """Return whether *provider* speaks the Chat Completions contract."""
+    provider = provider or _config.CONFIG.get('llm_provider', 'ollama')
+    return provider in OPENAI_COMPATIBLE_PROVIDERS
 
 
 def _build_llm_payload(query, active_notes, nodes, stream=False):
@@ -26,24 +39,24 @@ def _build_llm_payload(query, active_notes, nodes, stream=False):
     messages = build_messages(query, active_notes, nodes)
     provider = _config.CONFIG.get('llm_provider', 'ollama')
 
-    if provider == 'openrouter':
-        return build_openrouter_payload(messages, stream, _config.CONFIG)
+    if uses_openai_compatible_api(provider):
+        return build_openai_compatible_payload(messages, stream, _config.CONFIG)
     else:
         return build_ollama_payload(messages, stream, _config.CONFIG)
 
 
 def _parse_llm_response(result, provider='ollama'):
     """Parse LLM response from either provider format."""
-    if provider == 'openrouter':
-        return parse_openrouter_response(result)
+    if uses_openai_compatible_api(provider):
+        return parse_openai_compatible_response(result)
     else:
         return parse_ollama_response(result)
 
 
 def _parse_llm_stream_token(obj, provider='ollama'):
     """Parse a single streaming chunk from either provider."""
-    if provider == 'openrouter':
-        return parse_openrouter_stream_token(obj)
+    if uses_openai_compatible_api(provider):
+        return parse_openai_compatible_stream_token(obj)
     else:
         # Ollama: message.content
         if obj.get('done', False):
@@ -60,7 +73,8 @@ def llm_respond(query, active_notes, nodes):
 
     def _llm_call():
         req = urllib.request.Request(_config.OLLAMA_LLM_URL, data=data, headers=headers)
-        with urllib.request.urlopen(req, timeout=_config.CONFIG.get('llm_timeout', 300)) as resp:
+        timeout = _config.CONFIG.get('llm_timeout', 300)
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
             result = json.loads(resp.read())
             return _parse_llm_response(result, provider)
 
@@ -80,13 +94,15 @@ def llm_respond(query, active_notes, nodes):
                 break
         return raw if raw else '[no response from LLM]'
     except Exception as e:
+        logger.error(f"LLM respond failed: {e}", exc_info=True)
         return f"[LLM error: {e}]"
 
 
 def llm_stream(query, active_notes, nodes):
     """Stream LLM response token-by-token.
 
-    Supports both Ollama (NDJSON stream) and OpenRouter (SSE format).
+    Supports Ollama native NDJSON and OpenAI-compatible SSE (Ollama Cloud
+    or OpenRouter).
     Yields token strings as they arrive from the LLM.
 
     Phase 3.2: Online plasticity — the caller can use the streamed tokens
@@ -100,7 +116,8 @@ def llm_stream(query, active_notes, nodes):
     req = urllib.request.Request(_config.OLLAMA_LLM_URL, data=data, headers=headers)
 
     try:
-        with urllib.request.urlopen(req, timeout=_config.CONFIG.get('llm_timeout', 300)) as resp:
+        timeout = _config.CONFIG.get('llm_timeout', 300)
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
             buffer = b''
             for chunk in iter(lambda: resp.read(1), b''):
                 buffer += chunk
@@ -110,8 +127,8 @@ def llm_stream(query, active_notes, nodes):
                     if not line:
                         continue
 
-                    if provider == 'openrouter':
-                        # OpenRouter SSE: lines start with "data: "
+                    if uses_openai_compatible_api(provider):
+                        # OpenAI-compatible SSE: lines start with "data: "
                         if line.startswith(b'data: '):
                             line = line[6:]
                         if line == b'[DONE]':
@@ -135,4 +152,5 @@ def llm_stream(query, active_notes, nodes):
                         except json.JSONDecodeError:
                             continue
     except Exception as e:
+        logger.error(f"LLM stream failed: {e}", exc_info=True)
         yield f"[LLM stream error: {e}]"

@@ -15,6 +15,25 @@ function switchTab(tabClass) {
   hideTooltip();
 }
 
+function switchInspectorView(view = 'query') {
+  const allowed = ['query', 'evidence', 'inspect'];
+  const next = allowed.includes(view) ? view : 'query';
+  document.body.classList.remove(...allowed.map(name => `inspector-view-${name}`));
+  document.body.classList.add(`inspector-view-${next}`);
+  document.querySelectorAll('#inspector-tabs .inspector-tab').forEach(tab => {
+    const active = tab.dataset.inspectorView === next;
+    tab.classList.toggle('active', active);
+    tab.setAttribute('aria-selected', String(active));
+  });
+  localStorage.setItem('bdh-inspector-view-v1', next);
+  const content = document.getElementById('inspector-content');
+  if (content) content.scrollTop = 0;
+}
+
+function restoreInspectorView() {
+  switchInspectorView(localStorage.getItem('bdh-inspector-view-v1') || 'query');
+}
+
 function setConnectionStatus(state, label) {
   const indicator = document.getElementById('status-indicator');
   const text = document.getElementById('status-text');
@@ -804,4 +823,6 @@ async function startVisualization() {
   fetchGraphSnapshot({ reason: 'renderer-ready', preserveView: false, force: true });
 }
 
+restoreInspectorView();
+restorePanelState();
 startVisualization();

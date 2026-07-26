@@ -6,6 +6,7 @@ Ollama-based text embeddings and cosine similarity.
 
 import sys
 import json
+import logging
 
 from bdh_graph_harness.config import CONFIG, logger, retry_with_backoff
 import bdh_graph_harness.config as _config
@@ -28,7 +29,7 @@ def get_embeddings(texts, batch_size=32):
             }).encode()
             req = urllib.request.Request(_config.OLLAMA_EMBED_URL, data=data,
                                          headers={'Content-Type': 'application/json'})
-            with urllib.request.urlopen(req, timeout=120) as resp:
+            with urllib.request.urlopen(req, timeout=CONFIG.get('embed_timeout', 120)) as resp:
                 result = json.loads(resp.read())
                 return result.get('embeddings', [])
 
@@ -37,6 +38,7 @@ def get_embeddings(texts, batch_size=32):
             all_embeddings.extend(batch_embs)
             print(f"  ... {min(i+batch_size, len(texts))}/{len(texts)} embedded")
         except Exception as e:
+            logger.error(f"Batch embedding failed at offset {i}: {e}", exc_info=True)
             print(f"  ⚠ Batch error at {i}: {e}", file=sys.stderr)
             # Fallback: embed one by one with delay
             _time.sleep(1)
@@ -51,10 +53,11 @@ def get_embeddings(texts, batch_size=32):
                     headers={'Content-Type': 'application/json'},
                 )
                 try:
-                    with urllib.request.urlopen(single_req, timeout=60) as resp:
+                    with urllib.request.urlopen(single_req, timeout=CONFIG.get('embed_timeout', 60)) as resp:
                         result = json.loads(resp.read())
                         all_embeddings.append(result.get('embedding', []))
                 except Exception:
+                    logger.warning("Single embedding fallback failed, appending empty vector")
                     all_embeddings.append([])
                 _time.sleep(0.1)
 

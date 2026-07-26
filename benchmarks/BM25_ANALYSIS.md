@@ -1,94 +1,49 @@
-# BM25 Analysis: Why Hybrid Search Doesn't Help Italian Vaults
+# BM25 Analysis: Hybrid Search in BDH Graph Harness
 
 ## TL;DR
 
-BM25 (Best Matching 25) is a lexical ranking algorithm that scores documents based on exact keyword overlap with the query. For Italian-language vaults, **BM25 actively hurts retrieval quality** — vector-only search outperforms all hybrid configurations by 2× on every metric. Italian Snowball stemming does not change this outcome.
+Earlier analysis concluded that BM25 did not help the Italian Hermes vault.
+That conclusion was contaminated by a bug: `BM25Index.score_batch()`
+max-normalized every query so the top document always scored exactly 1.0,
+while vector similarities occupied a narrow band (~0.45–0.65). The weighted
+fusion `0.3 * 1.0` dominated the vector signal, so all hybrid variants
+returned the BM25 ranking.
 
-**Default: `hybrid_search: false`** — vector-only retrieval.
+After switching to **Reciprocal Rank Fusion (RRF)** over a shared candidate
+pool, hybrid search now beats vector-only on this vault.
+
+**Default: `hybrid_search: true`, `hybrid_fusion: rrf`**.
 
 ---
 
 ## Benchmark Results
 
-Comparative benchmark run on 2026-07-05 against the Hermes Obsidian vault (377 notes, 15 hand-curated queries across 5 categories: concept, activity, news, entity, crossref).
+Comparative benchmark run on 2026-07-25 against the Hermes vault (353 notes,
+35 draft queries across 5 categories). The golden set is still under review
+(`reviewed: false`), so these numbers are directional, not final.
 
 ### Summary Table
 
-| Method                   |    MRR | Recall@5 | Precision@5 | NDCG@5 | Latency |
-|--------------------------|--------|----------|-------------|--------|---------|
-| **vector-only**          | 0.4556 |   0.5333 |      0.1200 | 0.4654 |  123ms |
-| bm25-plain               | 0.2004 |   0.2333 |      0.0533 | 0.1912 |  120ms |
-| bm25-stemmed             | 0.2004 |   0.2333 |      0.0533 | 0.1912 |  120ms |
-| hybrid-plain-70/30       | 0.2004 |   0.2333 |      0.0533 | 0.1912 |  122ms |
-| hybrid-stemmed-70/30     | 0.2004 |   0.2333 |      0.0533 | 0.1912 |  122ms |
-| hybrid-plain-85/15       | 0.2004 |   0.2333 |      0.0533 | 0.1912 |  121ms |
-| hybrid-stemmed-85/15     | 0.2004 |   0.2333 |      0.0533 | 0.1912 |  121ms |
+| Method            |    MRR | Recall@5 | Precision@5 | NDCG@5 | Δ vs vector |
+|-------------------|--------|----------|-------------|--------|-------------|
+| **vector-only**   | 0.6143 |   0.6095 |      0.1429 | 0.5672 | — |
+| bm25-only         | 0.7151 |   0.7143 |      0.1714 | 0.6462 | +0.1008 |
+| weighted-70/30    | 0.7390 |   0.7143 |      0.1714 | 0.6605 | +0.1247 |
+| **rrf**           | 0.7248 |   0.7714 |      0.1829 | 0.6823 | +0.1105 |
 
 ### Key Findings
 
-1. **Vector-only wins on every metric.** MRR 0.456 vs 0.200 (+128%), Recall@5 0.533 vs 0.233 (+129%), NDCG@5 0.465 vs 0.191 (+144%).
-
-2. **Stemming changes nothing.** BM25-plain and BM25-stemmed produce identical scores. The Italian stopword list already filters the problematic terms; remaining terms either match lexically or don't.
-
-3. **Alpha/beta tuning doesn't help.** 70/30, 85/15 — same result. The damage from BM25 is structural, not parametric.
-
-4. **All BM25 variants perform identically** (MRR = 0.2004 across all 6 BM25 configurations).
-
----
-
-## Why BM25 Fails for Italian
-
-### 1. Stopword Pollution
-
-Italian queries follow predictable patterns: **"Che cos'è X?"**, **"Come funziona X?"**, **"Quali notizie X?"**. The words "che", "cos'", "è", "come" are extremely high-frequency. Even with stopword filtering, the filtered query often retains few discriminative terms.
-
-**Example:**
-- Query: `"Che cos'è il neurogenesis nel contesto dei grafi?"`
-- After stopword removal: `"neurogenesis"`, `"grafi"`
-- BM25 scores any document containing "neurogenesis" — but the vault note uses different terminology, so the score is low.
-
-### 2. Morphological Richness
-
-Italian has rich inflectional morphology. A single concept can appear as:
-- `architettura`, `architetture`, `architetturale`, `architettonico`
-- `ricerca`, `ricerche`, `ricercare`, `ricercato`
-- `concetto`, `concetti`, `concettuale`
-
-BM25 requires **exact lexical match** — `architettura` ≠ `architetture`. Snowball stemming helps (both → `architettur`) but doesn't fix the fundamental problem: the query terms often don't appear verbatim in the document.
-
-### 3. Semantic Gap
-
-Vector embeddings capture **meaning**, not **words**. When a user asks about "architettura Transformer", the embedding model knows this relates to transformer architecture, attention mechanisms, and neural networks — even if the document uses different terminology.
-
-BM25 can't bridge this gap. It needs the exact word "architettura" or "transformer" to appear in the document.
-
-### 4. Vocabulary Mismatch
-
-Real vault notes use diverse terminology:
-- Note title: "baby-dragon-hatchling"
-- Query: "Cos'è il modello Baby Dragon Hatchling?"
-- BM25 matches on "baby", "dragon", "hatchling" — but these are rare English words in an Italian vault, so IDF is high and the score is decent.
-- However: `"Cos'è il modello Baby Dragon Hatchling?"` → BM25 finds the note, but ranks it at position 12 (out of 14 activated) because other documents happen to share more common terms.
-
-### 5. Concrete Failure Examples
-
-| Query | Vector MRR | BM25 MRR | What Happened |
-|-------|-----------|----------|---------------|
-| "Cos'è il modello Baby Dragon Hatchling?" | 0.50 (pos 2) | 0.08 (pos 12) | BM25 pushes correct result down |
-| "Come funziona l'architettura Transformer?" | 1.00 (pos 1) | 0.17 (pos 6) | BM25 ranks irrelevant docs higher |
-| "Che cos'è il Privacy Guard?" | 0.25 (pos 4) | 0.00 ❌ | BM25 completely misses the note |
-
----
-
-## When BM25 *Could* Help
-
-BM25 is valuable for:
-- **English-heavy vaults** where vocabulary is smaller and keyword overlap is higher
-- **Exact term matching** — product names, error codes, UUIDs, API endpoints
-- **Multilingual vaults** where you need to match both English and Italian terms
-- **Hybrid RAG pipelines** with cross-encoder re-ranking that can correct BM25's ranking errors
-
-For a **pure Italian conceptual vault** like Hermes, vector-only is the correct choice.
+1. **RRF improves over vector-only.** Recall@5 +26% (0.6095 → 0.7714) and
+   NDCG@5 +20% (0.5672 → 0.6823). MRR is slightly below weighted-sum but
+   still +11% over vector-only.
+2. **BM25 alone is already competitive.** With proper normalization it is
+   not the 0.2004 failure reported earlier.
+3. **The old "all identical MRR" result was a bug.** Max-normalized BM25
+   scores always hit 1.0 for the top document, drowning the vector signal.
+4. **Weighted-sum still edges RRF on MRR** in this run, but RRF wins on
+   recall and NDCG. The two fusion methods are close; we keep both under
+   `hybrid_fusion` for now and will pick one after the golden set is
+   finalized.
 
 ---
 
@@ -96,31 +51,30 @@ For a **pure Italian conceptual vault** like Hermes, vector-only is the correct 
 
 - **Vector model:** `nomic-embed-text-v2-moe` via Ollama (local)
 - **BM25:** Custom in-memory implementation with BM25+ IDF variant
-- **Stopwords:** 70+ Italian stopwords (articles, prepositions, conjunctions, pronouns, auxiliary verbs, adverbs)
-- **Stemming:** Snowball Italian stemmer via PyStemmer
-- **Threshold:** Adaptive (max of Q75, mean+1σ, floor=0.05)
-- **Dataset:** 15 queries, 5 categories, hand-curated ground truth
-- **Vault:** 377 Obsidian notes in Italian
+- **Fusion:** Reciprocal Rank Fusion with `k = 60`, min-max normalized to
+  keep scores comparable to the vector branch.
+- **Threshold:** Adaptive (`median + 0.3*std`, floor=0.05)
+- **Dataset:** 35 draft queries (review pending), 5 categories
+- **Vault:** 353 Obsidian notes (Italian + English technical terms)
 
 ---
 
 ## Configuration
 
-To enable BM25 (if needed for a different vault):
-
 ```yaml
 # bdh-config.yaml
 hybrid_search: true
-hybrid_alpha: 0.7   # vector weight
-hybrid_beta: 0.3    # BM25 weight
+hybrid_fusion: rrf   # or 'weighted'
+rrf_k: 60
 ```
 
 To run the comparative benchmark:
 
 ```bash
-python -m benchmarks.bm25_comparison
+python scripts/run_tranche2_rrf.py
 ```
 
 ---
 
-*Analysis conducted 2026-07-05 on the Hermes vault (377 notes, 15 queries). Results are vault-specific — different content or language may yield different outcomes.*
+*Analysis updated 2026-07-25. Prior conclusions from 2026-07-05 were
+invalidated by a normalization bug in the BM25 batch scorer.*

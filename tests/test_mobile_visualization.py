@@ -19,6 +19,32 @@ def test_mobile_layout_uses_one_viewport_grid_without_magic_height_splits():
     assert "body.panel-tab #side-panel" in styles
 
 
+def test_mobile_query_uses_one_scroll_container_and_never_truncates_response():
+    """Query view should grow into the viewport; only Inspector content may scroll."""
+    styles = STYLES.read_text()
+
+    assert "height: 100%;" in styles
+    assert "body.panel-tab #response-section" in styles
+    assert "body.panel-tab #response-text" in styles
+    assert "max-height: none;" in styles
+    assert "overflow: visible;" in styles
+    assert "max-height: 38dvh" not in styles
+    assert "max-height: 280px" not in styles
+    assert "body.panel-tab #response-text" in styles
+    assert "font-size: 14px;" in styles
+
+
+def test_mobile_query_response_fills_remaining_inspector_space():
+    """Query keeps its compact input while Response owns the remaining viewport."""
+    styles = STYLES.read_text()
+
+    assert "body.panel-tab #inspector-content" in styles
+    assert "body.panel-tab.inspector-view-query #query-section" in styles
+    assert "body.panel-tab.inspector-view-query #response-section" in styles
+    assert "flex: 1 1 auto;" in styles
+    assert "body.panel-tab.inspector-view-query #retrieval-diagnostics" in styles
+
+
 def test_mobile_inspector_clears_persisted_desktop_inline_width():
     """The Inspector tab must fill the viewport instead of inheriting a 31% desktop width."""
     controls = (ROOT / "bdh_graph_harness/visualization/templates/ui-controls.js").read_text()
@@ -66,4 +92,4 @@ def test_mobile_mode_and_cached_assets_share_the_mobile_breakpoint_and_revision(
     html = (ROOT / "bdh_graph_harness/visualization/templates/index.html").read_text()
 
     assert "return window.matchMedia('(max-width: 768px)').matches;" in core
-    assert "?v=3d-v66" in html
+    assert "?v=3d-v75" in html

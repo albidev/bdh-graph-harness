@@ -93,7 +93,6 @@ function sendQuery() {
 function renderRemoteQueryResponse(event) {
   const queryInput = document.getElementById('query-input');
   const responseText = document.getElementById('response-text');
-  const lastQuery = document.getElementById('stat-last');
   if (queryInput) {
     queryInput.value = event.query || '';
     queryInput.scrollTop = 0;
@@ -103,7 +102,6 @@ function renderRemoteQueryResponse(event) {
     responseText.textContent = event.response || 'No response returned for this query.';
     responseText.scrollTop = 0;
   }
-  if (lastQuery) lastQuery.textContent = event.query || '—';
   setResponseState(event.error ? 'Error' : 'Complete');
   renderRetrievalDiagnostics(event);
 }
@@ -137,6 +135,10 @@ function renderRetrievalDiagnostics(payload = {}) {
   status.dataset.state = state;
   found.textContent = notes.length ? `${notes.length} notes · top ${topScore.toFixed(3)}` : '0 notes activated';
   confidence.textContent = notes.length ? `${Math.round(topScore * 100)}% retrieval score` : '—';
+  const queryBadge = document.getElementById('inspector-query-badge');
+  const evidenceBadge = document.getElementById('inspector-evidence-badge');
+  if (queryBadge) queryBadge.textContent = notes.length ? `${notes.length} notes` : 'No result';
+  if (evidenceBadge) evidenceBadge.textContent = notes.length ? `${notes.length} notes` : '—';
 
   const missingItems = [];
   const normalizedQuery = query.toLowerCase();
@@ -146,6 +148,112 @@ function renderRetrievalDiagnostics(payload = {}) {
   if (normalizedQuery.includes('branch')) missingItems.push('branch name and checkout state');
   missing.textContent = missingItems.length ? missingItems.join(' · ') : 'No obvious evidence gap in the retrieved context.';
   if (focusButton) focusButton.disabled = !notes.length;
+
+  // Optional retrieval trace — tolerates missing fields so it never blocks rendering.
+  const trace = normalizeRetrievalTrace(payload);
+  renderRetrievalTrace(trace, { notes });
+}
+
+// Normalize optional multi-query provenance fields. Missing / legacy payloads produce
+// an empty trace; partial payloads still render whatever the backend provides.
+function normalizeRetrievalTrace(payload) {
+  if (!payload || typeof payload !== 'object') return null;
+  const routing = payload.routing && typeof payload.routing === 'object' ? payload.routing : {};
+  const isMultiQuery = Array.isArray(payload.query_variants) && payload.query_variants.length > 1;
+  const variants = Array.isArray(payload.query_variants) ? payload.query_variants
+    : (Array.isArray(routing.query_variants) ? routing.query_variants
+      : (payload.search_queries || payload.retrieval_variants || []));
+  const fusionMethod = payload.fusion_method || payload.fusion || payload.multi_query_fusion
+    || routing.multi_query_fusion || (isMultiQuery || variants.length > 1 ? 'rrf' : 'single');
+  const perVariant = {};
+  const noteVariantHits = {};
+  notesForTrace(payload).forEach(note => {
+    const provenance = normalizeProvenance(note.matched_by);
+    provenance.forEach(match => {
+      const variant = match.variant || 'variant-0';
+      perVariant[variant] = (perVariant[variant] || 0) + 1;
+      noteVariantHits[note.id] = (noteVariantHits[note.id] || 0) + 1;
+    });
+  });
+  const multiVariantCount = payload.multi_query_multivariant_hits
+    ?? routing.multi_query_multivariant_hits
+    ?? Object.values(noteVariantHits).filter(count => count > 1).length;
+  return {
+    query: payload.query || '',
+    variants: variants.map((variant, index) => ({
+      text: variant.query || variant.label || variant.language || `variant-${index}`,
+      label: variant.label || variant.language || `variant-${index}`,
+      language: variant.language || 'default',
+      weight: variant.weight != null ? Number(variant.weight).toFixed(2) : '1.00',
+    })),
+    fusionMethod,
+    perVariant,
+    multiVariantCount,
+  };
+}
+
+function notesForTrace(payload) {
+  if (Array.isArray(payload.activated_notes)) return payload.activated_notes;
+  if (Array.isArray(payload.notes)) return payload.notes;
+  return lastRetrievalNotes || [];
+}
+
+function renderRetrievalTrace(trace, options = {}) {
+  const container = document.getElementById('retrieval-trace');
+  const queryEl = document.getElementById('trace-query');
+  const variantsEl = document.getElementById('trace-variants');
+  const fusionEl = document.getElementById('trace-fusion');
+  const perVariantEl = document.getElementById('trace-per-variant');
+  const multiEl = document.getElementById('trace-multi');
+  if (!container || !queryEl || !variantsEl || !fusionEl || !perVariantEl || !multiEl) return;
+
+  const traceSection = document.getElementById('trace-section');
+  if (!trace) {
+    container.hidden = true;
+    if (traceSection) traceSection.hidden = true;
+    return;
+  }
+
+  queryEl.textContent = trace.query || '—';
+  const variantCount = document.getElementById('trace-variant-count');
+  if (variantCount) variantCount.textContent = trace.variants.length;
+  variantsEl.innerHTML = trace.variants && trace.variants.length
+    ? trace.variants.map((v, index) => `<li class="trace-variant-row"><span class="trace-variant-index">${index + 1}</span><span class="trace-variant-copy">${escapeHtml(v.text)}</span><span class="trace-variant-meta">${escapeHtml(v.language)} · w${v.weight}</span></li>`).join('')
+    : '<li class="trace-empty">single query</li>';
+  fusionEl.textContent = trace.variants.length > 1
+    ? `Fused ${trace.variants.length} variants via ${trace.fusionMethod || 'rrf'}`
+    : (trace.fusionMethod || 'single');
+
+  const perVariant = trace.perVariant || {};
+  const perVariantText = Object.keys(perVariant).length
+    ? Object.entries(perVariant).map(([variant, count]) => `${variant}: ${count}`).join(' · ')
+    : 'no variant breakdown';
+  perVariantEl.textContent = perVariantText;
+
+  const noteCount = options.notes ? options.notes.length : lastRetrievalNotes.length;
+  multiEl.textContent = trace.multiVariantCount > 0
+    ? `${trace.multiVariantCount} of ${noteCount} notes matched by multiple variants`
+    : 'no multi-variant matches';
+
+  // Multi-query provenance is important evidence, not an advanced detail hidden
+  // behind a click. Open the trace automatically when variants are present.
+  const hasMultipleVariants = trace.variants && trace.variants.length > 1;
+  container.hidden = !hasMultipleVariants;
+  if (traceSection) traceSection.hidden = !hasMultipleVariants;
+
+  // Keep the query tab calm; the evidence tab carries the full provenance trail.
+  const toggleBtn = document.getElementById('retrieval-trace-toggle');
+  if (toggleBtn) {
+    toggleBtn.hidden = !hasMultipleVariants;
+    toggleBtn.textContent = hasMultipleVariants ? 'View evidence' : 'Evidence';
+  }
+}
+
+function toggleRetrievalTrace() {
+  const container = document.getElementById('retrieval-trace');
+  if (!container) return;
+  if (typeof switchInspectorView === 'function') switchInspectorView('evidence');
+  container.hidden = false;
 }
 
 function focusRetrievalEvidence() {
