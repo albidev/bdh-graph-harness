@@ -362,6 +362,13 @@ def test_migrate_legacy_state_ids_to_federated_vault_ids():
 
     migrated = migrate_legacy_state_ids(state, nodes)
 
-    assert "vault:wiki/concepts/bdh.md|vault:wiki/concepts/other.md" in migrated["synapses"]
+    from bdh_graph_harness.memory.hebbian import encode_synapse_key
+
+    assert encode_synapse_key(
+        "vault:wiki/concepts/bdh.md", "vault:wiki/concepts/other.md",
+    ) in migrated["synapses"]
+    # Migration creates an in-memory federated view; historical state remains
+    # legacy until an explicit, audited migration is requested.
+    assert "wiki/concepts/bdh|wiki/concepts/other" in state["synapses"]
     assert "vault:wiki/concepts/bdh.md" in migrated["node_quality"]
     assert migrated["dormant_nodes"] == ["vault:wiki/concepts/other.md"]

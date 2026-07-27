@@ -85,10 +85,10 @@ function handleActivation(event) {
   const pendingHebbianLinks = [];
 
   hebbianUpdates.forEach((h, idx) => {
-    const parts = h.pair.split('|');
-    if (parts.length !== 2) return;
-    const [a, b] = parts;
-    hebbianMap[h.pair] = h.weight;
+    const { note_a: a, note_b: b } = h;
+    if (typeof a !== 'string' || typeof b !== 'string') return;
+    const pairKey = canonicalHebbianPairKey(a, b);
+    hebbianMap[pairKey] = h.weight;
 
     // Find the Hebbian link in current graph data
     const targetLink = currentData.links.find(l => {

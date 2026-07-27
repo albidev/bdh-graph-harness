@@ -54,6 +54,71 @@ def test_merge_queries_takes_max():
     assert merged['queries'] == 42
 
 
+def test_merge_states_preserves_v2_synapse_with_valid_node_ids():
+    """Filtering during atomic state merge must preserve canonical v2 keys."""
+    from bdh_graph_harness.memory.hebbian import encode_synapse_key
+
+    left, right = 'note|left', 'note|right'
+    key = encode_synapse_key(left, right)
+    disk = {'synapses': {key: {'weight': 0.5, 'frequency': 2}}, 'queries': 1}
+    mem = {'synapses': {}, 'queries': 1}
+
+    merged = bdh_state_store.merge_states(
+        disk,
+        mem,
+        valid_node_ids={left, right},
+    )
+
+    assert merged['synapses'] == disk['synapses']
+
+
+def test_reconcile_state_to_nodes_preserves_v2_synapse():
+    """Graph refresh must not discard valid v2 synapses before persisting state."""
+    from bdh_graph_harness.memory.hebbian import encode_synapse_key
+
+    left, right = 'note|left', 'note|right'
+    key = encode_synapse_key(left, right)
+    state = {
+        'synapses': {key: {'weight': 0.5, 'frequency': 2, 'last_coactivated': '2026-01-01'}},
+        'node_quality': {},
+        'dormant_nodes': [],
+        'phantom_links': [],
+    }
+
+    reconciled = bdh_state_store.reconcile_state_to_nodes(
+        state,
+        {left: {'title': left}, right: {'title': right}},
+    )
+
+    assert key in reconciled['synapses']
+
+
+def test_reconcile_preserves_ambiguous_legacy_synapse_as_opaque_state():
+    """Unrecoverable historical keys must survive refresh, not be silently erased."""
+    key = 'legacy|note|id'
+    state = {
+        'synapses': {key: {'weight': 0.5, 'frequency': 2}},
+        'node_quality': {},
+        'dormant_nodes': [],
+        'phantom_links': [],
+    }
+
+    reconciled = bdh_state_store.reconcile_state_to_nodes(state, {})
+
+    assert reconciled['synapses'][key]['weight'] == 0.5
+
+
+def test_merge_preserves_ambiguous_legacy_synapse_as_opaque_state():
+    """Atomic save must not delete opaque historical keys while filtering v2 keys."""
+    key = 'legacy|note|id'
+    disk = {'synapses': {key: {'weight': 0.5}}, 'queries': 1}
+    mem = {'synapses': {}, 'queries': 1}
+
+    merged = bdh_state_store.merge_states(disk, mem, valid_node_ids=set())
+
+    assert key in merged['synapses']
+
+
 def test_merge_other_keys_memory_wins():
     """Non-synapse, non-queries keys: memory version wins, disk-only keys preserved."""
     disk = {'synapses': {}, 'queries': 1, 'created': '2026-01-01', 'disk_only': 'disk_val'}

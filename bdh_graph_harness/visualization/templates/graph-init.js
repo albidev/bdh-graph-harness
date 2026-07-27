@@ -146,7 +146,7 @@ function initNetwork(graphData, options = {}) {
   // Hebbian degree increments with dedupe-by-pair (direction-insensitive).
   const hebbianDegreeSeen = new Set();
   graphHebbian.forEach(synapse => {
-    const key = [synapse.note_a, synapse.note_b].sort().join('|');
+    const key = canonicalHebbianPairKey(synapse.note_a, synapse.note_b);
     if (hebbianDegreeSeen.has(key)) return;
     hebbianDegreeSeen.add(key);
     hebbianMap[key] = synapse.weight;

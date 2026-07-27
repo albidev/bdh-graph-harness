@@ -21,6 +21,7 @@ from bdh_graph_harness.graph import build_graph, build_configured_graph, migrate
 from bdh_graph_harness.retrieval.attention import attention
 from bdh_graph_harness.retrieval import compute_all_embeddings, BM25Index
 from bdh_graph_harness.memory import load_state, save_state, hebbian_update
+from bdh_graph_harness.memory.hebbian import safe_decode_synapse_key
 from bdh_graph_harness.llm import llm_respond
 from bdh_graph_harness.neurogenesis import extract_new_concepts, create_note
 from bdh_graph_harness.api import start_api_server
@@ -57,7 +58,11 @@ def show_stats(nodes, edges, state):
         sorted_syn = sorted(state['synapses'].items(), key=lambda x: -x[1]['weight'])
         print(f"\n  Top Hebbian connections:")
         for key, syn in sorted_syn[:5]:
-            a, b = key.split('|')
+            pair = safe_decode_synapse_key(key)
+            if pair is None:
+                print("    [skipped malformed synapse key]")
+                continue
+            a, b = pair
             print(f"    {a} ↔ {b} (w={syn['weight']:.3f}, freq={syn['frequency']})")
 
 
@@ -70,7 +75,11 @@ def show_hebbian(state):
     print(f"\n🔌 Hebbian Synaptic State ({len(state['synapses'])} connections)")
     sorted_syn = sorted(state['synapses'].items(), key=lambda x: -x[1]['weight'])
     for key, syn in sorted_syn:
-        a, b = key.split('|')
+        pair = safe_decode_synapse_key(key)
+        if pair is None:
+            print("  [skipped malformed synapse key]")
+            continue
+        a, b = pair
         print(f"  {a} ↔ {b}")
         print(f"    weight: {syn['weight']:.3f} | freq: {syn['frequency']} | last: {syn['last_coactivated']}")
 
