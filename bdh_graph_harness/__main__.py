@@ -322,17 +322,24 @@ def main():
         unresolved = []
     print(f"   ✓ {len(nodes)} neurons, {sum(len(e) for e in edges.values())} synapses")
 
+    # Selected vaults need their resolved Chroma routing rather than global defaults.
+    embedding_kwargs = {}
+    if args.vault_id:
+        embedding_kwargs = {
+            'chroma_path': effective_config.get('chroma_path'),
+            'collection_name': effective_config.get('chroma_collection'),
+            'config': effective_config,
+        }
+
     # Compute embeddings
     if effective_config.get('external_sources'):
         collection = compute_all_embeddings(
             nodes,
             vault_root,
-            chroma_path=effective_config.get('chroma_path'),
-            collection_name=effective_config.get('chroma_collection'),
-            config=effective_config,
+            **embedding_kwargs,
         )
     else:
-        collection = compute_all_embeddings(nodes, vault_root)
+        collection = compute_all_embeddings(nodes, vault_root, **embedding_kwargs)
 
     # Build BM25 index for hybrid search (Phase 3.1)
     # Skip if --serve: the server builds its own index
@@ -369,7 +376,12 @@ def main():
 
     if args.refresh_embeddings:
         print("🔄 Force-refreshing all embeddings...")
-        collection = compute_all_embeddings(nodes, vault_root, force_refresh=True)
+        collection = compute_all_embeddings(
+            nodes,
+            vault_root,
+            force_refresh=True,
+            **embedding_kwargs,
+        )
         print(f"  ✓ Refreshed {collection.count()} embeddings")
         return
 
