@@ -171,3 +171,47 @@ def test_refresh_embeddings_forwards_resolved_chroma_routing(monkeypatch, tmp_pa
             "chroma_collection": "episodic_notes",
         },
     }
+
+
+def test_external_sources_preserve_global_chroma_routing(monkeypatch, tmp_path):
+    """External sources without --vault-id retain global Chroma routing."""
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    chroma_path = tmp_path / "global-chroma"
+    config = {
+        "vault_path": str(vault),
+        "chroma_path": str(chroma_path),
+        "chroma_collection": "global_notes",
+        "external_sources": [{"id": "projects", "path": str(tmp_path / "projects")}],
+        "hybrid_search": False,
+        "online_plasticity": False,
+    }
+    captured = {}
+
+    monkeypatch.setattr(sys, "argv", ["bdh", "--stats"])
+    monkeypatch.setattr(cli, "load_config", lambda _path: config)
+    monkeypatch.setattr(
+        cli,
+        "build_configured_graph",
+        lambda _config, use_cache: ({"note": {}}, {"note": []}, []),
+    )
+    monkeypatch.setattr(
+        cli,
+        "compute_all_embeddings",
+        lambda nodes, vault_root, **kwargs: captured.update(
+            nodes=nodes, vault_root=vault_root, **kwargs
+        ) or "collection",
+    )
+    monkeypatch.setattr(cli, "load_state", lambda _path: {"synapses": {}, "queries": 0})
+    monkeypatch.setattr(cli, "migrate_legacy_state_ids", lambda state, _nodes: state)
+    monkeypatch.setattr(cli, "show_stats", lambda *_args: None)
+
+    cli.main()
+
+    assert captured == {
+        "nodes": {"note": {}},
+        "vault_root": str(vault),
+        "chroma_path": str(chroma_path),
+        "collection_name": "global_notes",
+        "config": config,
+    }

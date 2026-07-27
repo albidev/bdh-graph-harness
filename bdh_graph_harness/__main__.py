@@ -322,9 +322,9 @@ def main():
         unresolved = []
     print(f"   ✓ {len(nodes)} neurons, {sum(len(e) for e in edges.values())} synapses")
 
-    # Selected vaults need their resolved Chroma routing rather than global defaults.
+    # Selected vaults and federated sources need explicit Chroma routing.
     embedding_kwargs = {}
-    if args.vault_id:
+    if args.vault_id or effective_config.get('external_sources'):
         embedding_kwargs = {
             'chroma_path': effective_config.get('chroma_path'),
             'collection_name': effective_config.get('chroma_collection'),
