@@ -537,3 +537,17 @@ def test_activation_does_not_replace_full_graph_data_for_ordinary_events():
     assert "setGraphDataPreservingView" in activation
     assert "graph.graphData(currentData)" not in activation
     assert "setGraphDataPreservingView(updated" not in activation
+
+
+def test_hebbian_visual_identity_is_collision_safe_for_pipe_containing_ids():
+    """Frontend pair keys must not reintroduce a pipe-delimited synapse format."""
+    core = (ROOT / "bdh_graph_harness/visualization/templates/graph-core.js").read_text()
+    graph_init = (ROOT / "bdh_graph_harness/visualization/templates/graph-init.js").read_text()
+    activation = (ROOT / "bdh_graph_harness/visualization/templates/activation.js").read_text()
+    websocket = (ROOT / "bdh_graph_harness/visualization/templates/websocket.js").read_text()
+
+    assert "function canonicalHebbianPairKey(noteA, noteB)" in core
+    assert "return JSON.stringify(sorted);" in core
+    for consumer in (graph_init, activation, websocket):
+        assert "canonicalHebbianPairKey(" in consumer
+        assert ".sort().join('|')" not in consumer

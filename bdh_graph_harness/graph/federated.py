@@ -8,6 +8,7 @@ attention, Hebbian learning, ChromaDB, and the existing API.
 
 from __future__ import annotations
 
+import copy
 import fnmatch
 import os
 from collections import defaultdict
@@ -29,6 +30,7 @@ from bdh_graph_harness.graph.sources import (
     counterpart_specs_from_config,
     sources_from_config,
 )
+from bdh_graph_harness.memory.hebbian import decode_synapse_key, encode_synapse_key
 
 
 def _without_md(path: str) -> str:
@@ -392,6 +394,77 @@ def build_federated_graph(
     return nodes, dict(edges), unresolved
 
 
+def _canonical_state_id(note_id: str, nodes: dict) -> str:
+    """Resolve a persisted vault-relative ID to its federated runtime ID."""
+    if note_id in nodes:
+        return note_id
+    candidate = f"vault:{_with_md(note_id)}"
+    return candidate if candidate in nodes else note_id
+
+
+def project_runtime_state_to_persisted(
+    persisted_state: dict, runtime_state: dict, nodes: dict,
+) -> dict:
+    """Project federated runtime updates back onto raw persisted identities.
+
+    Federated runtime state uses canonical IDs, while the on-disk state may
+    contain historical relative IDs.  Updating the runtime must therefore not
+    serialize it directly: that rewrites keys and can collapse distinct legacy
+    records.  This keeps each readable raw key, applies its canonical runtime
+    value, and adds only genuinely new canonical records.
+    """
+    projected = copy.deepcopy(persisted_state)
+    runtime_synapses = runtime_state.get("synapses", {})
+    raw_synapses = projected.setdefault("synapses", {})
+    represented_synapses: set[str] = set()
+
+    for raw_key, raw_synapse in list(raw_synapses.items()):
+        try:
+            note_a, note_b = decode_synapse_key(raw_key)
+        except ValueError:
+            # Ambiguous/opaque historical records are intentionally untouched.
+            continue
+        canonical_key = encode_synapse_key(
+            _canonical_state_id(note_a, nodes), _canonical_state_id(note_b, nodes),
+        )
+        represented_synapses.add(canonical_key)
+        runtime_synapse = runtime_synapses.get(canonical_key)
+        if runtime_synapse is not None:
+            raw_synapses[raw_key] = copy.deepcopy(runtime_synapse)
+
+    for canonical_key, runtime_synapse in runtime_synapses.items():
+        if canonical_key not in represented_synapses:
+            raw_synapses[canonical_key] = copy.deepcopy(runtime_synapse)
+
+    runtime_quality = runtime_state.get("node_quality", {})
+    if runtime_quality or projected.get("node_quality"):
+        raw_quality = projected.setdefault("node_quality", {})
+        represented_quality: set[str] = set()
+        for raw_id in list(raw_quality):
+            canonical_id = _canonical_state_id(raw_id, nodes)
+            represented_quality.add(canonical_id)
+            if canonical_id in runtime_quality:
+                raw_quality[raw_id] = copy.deepcopy(runtime_quality[canonical_id])
+        for canonical_id, quality in runtime_quality.items():
+            if canonical_id not in represented_quality:
+                raw_quality[canonical_id] = copy.deepcopy(quality)
+
+    if "dormant_nodes" in runtime_state:
+        runtime_dormant = set(runtime_state["dormant_nodes"])
+        raw_ids_by_canonical: dict[str, list[str]] = {}
+        for raw_id in projected.get("node_quality", {}):
+            raw_ids_by_canonical.setdefault(_canonical_state_id(raw_id, nodes), []).append(raw_id)
+        persisted_dormant = []
+        for canonical_id in sorted(runtime_dormant):
+            persisted_dormant.extend(raw_ids_by_canonical.get(canonical_id, [canonical_id]))
+        projected["dormant_nodes"] = sorted(set(persisted_dormant))
+
+    for field, value in runtime_state.items():
+        if field not in {"synapses", "node_quality", "dormant_nodes", "unresolved_links"}:
+            projected[field] = copy.deepcopy(value)
+    return projected
+
+
 def migrate_legacy_state_ids(state: dict, nodes: dict) -> dict:
     """Migrate legacy vault-relative IDs into canonical federated vault IDs.
 
@@ -399,6 +472,7 @@ def migrate_legacy_state_ids(state: dict, nodes: dict) -> dict:
     ``vault:wiki/foo.md``.  Existing Hebbian state must follow the notes or it
     becomes a pile of disconnected historical synapses.
     """
+    state = copy.deepcopy(state)
     if not nodes or not any(node_id.startswith("vault:") for node_id in nodes):
         return state
 
@@ -410,11 +484,14 @@ def migrate_legacy_state_ids(state: dict, nodes: dict) -> dict:
 
     migrated_synapses: dict = {}
     for key, synapse in state.get("synapses", {}).items():
-        parts = key.split("|", 1)
-        if len(parts) != 2:
+        try:
+            parts = decode_synapse_key(key)
+        except ValueError:
             migrated_synapses[key] = synapse
             continue
-        mapped_key = "|".join(sorted((canonical(parts[0]), canonical(parts[1]))))
+        mapped_key = encode_synapse_key(
+            canonical(parts[0]), canonical(parts[1])
+        )
         previous = migrated_synapses.get(mapped_key)
         if previous is None or synapse.get("weight", 0.0) > previous.get("weight", 0.0):
             migrated_synapses[mapped_key] = synapse
