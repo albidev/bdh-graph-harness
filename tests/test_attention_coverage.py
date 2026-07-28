@@ -142,6 +142,181 @@ def test_attention_single_pass_covers_missing_targets_and_threshold(monkeypatch)
     assert set(active) == {"seed", "peer"}
 
 
+def test_attention_relevance_batch_size_has_runtime_default():
+    assert config.CONFIG["attention_relevance_batch_size"] == 256
+
+
+def test_query_relevance_batches_collection_reads(monkeypatch):
+    class Collection:
+        def __init__(self):
+            self.get_calls = []
+
+        def get(self, ids, include):
+            self.get_calls.append(list(ids))
+            return {"ids": list(ids), "embeddings": [[1.0, 0.0] for _ in ids]}
+
+    monkeypatch.setitem(config.CONFIG, "attention_relevance_batch_size", 2)
+    collection = Collection()
+
+    scores = attention._query_relevance(
+        [1.0, 0.0], collection, ["one", "two", "three", "two"],
+    )
+
+    assert collection.get_calls == [["one", "two"], ["three"]]
+    assert scores == {"one": 1.0, "two": 1.0, "three": 1.0}
+
+
+def test_attention_preserves_structural_priority_when_neighbor_embedding_is_missing(monkeypatch):
+    class Collection:
+        def count(self):
+            return 3
+
+        def query(self, **_kwargs):
+            return {"ids": [["seed"]], "distances": [[0.0]]}
+
+        def get(self, ids, include):
+            # Chroma omits the stale/unembedded target instead of returning a vector.
+            return {"ids": ["low_relevance"], "embeddings": [[0.01, 1.0]]}
+
+    nodes = {
+        "seed": {"title": "Seed", "text": "seed"},
+        "missing_embedding": {"title": "Fallback", "text": "fallback"},
+        "low_relevance": {"title": "Weak", "text": "weak"},
+    }
+    edges = {"seed": [
+        {"target": "missing_embedding"},
+        {"target": "low_relevance"},
+    ]}
+    monkeypatch.setattr(attention, "get_embeddings", lambda _queries: [[1.0, 0.0]])
+    monkeypatch.setitem(config.CONFIG, "adaptive_threshold", False)
+    monkeypatch.setitem(config.CONFIG, "active_threshold", 0.01)
+    monkeypatch.setitem(config.CONFIG, "hop_decay", 0.5)
+    monkeypatch.setitem(config.CONFIG, "max_neighbors_per_hop", 1)
+
+    active = attention.attention("q", nodes, edges, Collection(), k=1, max_hop=1)
+
+    assert set(active) == {"seed", "missing_embedding"}
+
+
+def test_attention_batches_only_dynamic_targets_reachable_from_seed(monkeypatch):
+    class Collection:
+        def __init__(self):
+            self.get_calls = []
+
+        def count(self):
+            return 4
+
+        def query(self, **_kwargs):
+            return {"ids": [["seed"]], "distances": [[0.0]]}
+
+        def get(self, ids, include):
+            self.get_calls.append(list(ids))
+            embeddings = {"reachable": [1.0, 0.0]}
+            return {"ids": list(ids), "embeddings": [embeddings[node_id] for node_id in ids]}
+
+    nodes = {node_id: {"title": node_id, "text": node_id} for node_id in (
+        "seed", "reachable", "unreachable_source", "unreachable_target",
+    )}
+    state = {"synapses": {
+        attention.encode_synapse_key("unreachable_source", "unreachable_target"): {
+            "weight": 0.8, "frequency": 2.0, "consolidation_candidate_cycles": 1,
+        },
+    }}
+    collection = Collection()
+    monkeypatch.setattr(attention, "get_embeddings", lambda _queries: [[1.0, 0.0]])
+    monkeypatch.setitem(config.CONFIG, "adaptive_threshold", False)
+    monkeypatch.setitem(config.CONFIG, "active_threshold", 0.01)
+
+    attention.attention(
+        "q", nodes, {"seed": [{"target": "reachable"}]}, collection,
+        k=1, max_hop=1, hebbian_state=state,
+    )
+
+    assert collection.get_calls == [["reachable"]]
+
+
+def test_attention_does_not_let_mixed_edge_weight_override_static_semantic_rank(monkeypatch):
+    class Collection:
+        def count(self):
+            return 3
+
+        def query(self, **_kwargs):
+            return {"ids": [["seed"]], "distances": [[0.0]]}
+
+        def get(self, ids, include):
+            embeddings = {
+                "semantic_static": [1.0, 0.0],
+                "weak_mixed": [0.1, 1.0],
+            }
+            return {"ids": list(ids), "embeddings": [embeddings[node_id] for node_id in ids]}
+
+    nodes = {node_id: {"title": node_id, "text": node_id} for node_id in (
+        "seed", "semantic_static", "weak_mixed",
+    )}
+    state = {"synapses": {
+        attention.encode_synapse_key("seed", "weak_mixed"): {
+            "weight": 1.0, "frequency": 2.0, "consolidation_candidate_cycles": 1,
+        },
+    }}
+    monkeypatch.setattr(attention, "get_embeddings", lambda _queries: [[1.0, 0.0]])
+    monkeypatch.setitem(config.CONFIG, "adaptive_threshold", False)
+    monkeypatch.setitem(config.CONFIG, "active_threshold", 0.01)
+    monkeypatch.setitem(config.CONFIG, "max_neighbors_per_hop", 1)
+    monkeypatch.setitem(config.CONFIG, "hebbian_dynamic_query_relevance_floor", 0.0)
+
+    active = attention.attention(
+        "q", nodes,
+        {"seed": [{"target": "semantic_static"}, {"target": "weak_mixed"}]},
+        Collection(), k=1, max_hop=1, hebbian_state=state,
+    )
+
+    assert set(active) == {"seed", "semantic_static"}
+
+
+def test_attention_prefers_semantically_relevant_static_neighbor_in_batch(monkeypatch):
+    """Static expansion must not use insertion order when candidates exceed its cap."""
+    class Collection:
+        def __init__(self):
+            self.get_calls = []
+
+        def count(self):
+            return 3
+
+        def query(self, **_kwargs):
+            return {"ids": [["seed"]], "distances": [[0.0]]}
+
+        def get(self, ids, include):
+            self.get_calls.append(list(ids))
+            embeddings = {
+                "topologically_first": [0.0, 1.0],
+                "semantic_match": [1.0, 0.0],
+            }
+            return {"ids": list(ids), "embeddings": [embeddings[node_id] for node_id in ids]}
+
+    nodes = {
+        "seed": {"title": "Seed", "text": "seed"},
+        "topologically_first": {"title": "Weak", "text": "weak"},
+        "semantic_match": {"title": "Relevant", "text": "relevant"},
+        "unreachable": {"title": "Unreachable", "text": "unreachable"},
+        "off_path": {"title": "Off path", "text": "off path"},
+    }
+    edges = {"seed": [
+        {"target": "topologically_first"},
+        {"target": "semantic_match"},
+    ], "unreachable": [{"target": "off_path"}]}
+    collection = Collection()
+    monkeypatch.setattr(attention, "get_embeddings", lambda _queries: [[1.0, 0.0]])
+    monkeypatch.setitem(config.CONFIG, "adaptive_threshold", False)
+    monkeypatch.setitem(config.CONFIG, "active_threshold", 0.01)
+    monkeypatch.setitem(config.CONFIG, "hop_decay", 0.5)
+    monkeypatch.setitem(config.CONFIG, "max_neighbors_per_hop", 1)
+
+    active = attention.attention("q", nodes, edges, collection, k=1, max_hop=1)
+
+    assert set(active) == {"seed", "semantic_match"}
+    assert collection.get_calls == [["topologically_first", "semantic_match"]]
+
+
 def test_attention_traverses_strong_hebbian_edge_without_static_wikilink(monkeypatch):
     nodes = {
         "seed": {"title": "Seed", "text": "seed"},
