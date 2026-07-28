@@ -20,23 +20,36 @@ from bdh_graph_harness.retrieval.hybrid import hybrid_score
 from bdh_graph_harness.graph.builder import _resolve_target
 
 
-def _dynamic_query_relevance(query_embedding, collection, node_ids):
-    """Cosine relevance of dynamic-edge targets to the current query.
+def _query_relevance(query_embedding, collection, node_ids):
+    """Batch cosine relevance for traversal candidates against the query.
 
-    Historical Hebbian trust says an association persisted; it does not prove
-    that the association belongs in this retrieval. This gate supplies that
-    missing query-conditioned evidence without mutating learned state.
+    Graph traversal must not let edge insertion order stand in for semantic
+    relevance.  Fetch candidate embeddings in bounded batches so expansion
+    stays query-conditioned without issuing one Chroma request per neighbor.
     """
-    if not node_ids:
+    candidate_ids = list(dict.fromkeys(node_ids))
+    if not candidate_ids:
         return {}
-    payload = collection.get(ids=list(node_ids), include=["embeddings"])
+
     scores = {}
     query_norm = math.sqrt(sum(value * value for value in query_embedding))
-    for node_id, embedding in zip(payload.get("ids", []), payload.get("embeddings", [])):
-        target_norm = math.sqrt(sum(value * value for value in embedding))
-        scores[node_id] = (sum(a * b for a, b in zip(query_embedding, embedding)) / (query_norm * target_norm)
-                           if query_norm and target_norm else 0.0)
+    batch_size = max(1, int(CONFIG.get("attention_relevance_batch_size", 256)))
+    for start in range(0, len(candidate_ids), batch_size):
+        payload = collection.get(
+            ids=candidate_ids[start:start + batch_size], include=["embeddings"],
+        )
+        for node_id, embedding in zip(payload.get("ids", []), payload.get("embeddings", [])):
+            target_norm = math.sqrt(sum(value * value for value in embedding))
+            scores[node_id] = (
+                sum(a * b for a, b in zip(query_embedding, embedding)) / (query_norm * target_norm)
+                if query_norm and target_norm else 0.0
+            )
     return scores
+
+
+def _dynamic_query_relevance(query_embedding, collection, node_ids):
+    """Backward-compatible name for query-conditioned dynamic-edge relevance."""
+    return _query_relevance(query_embedding, collection, node_ids)
 
 
 def _build_associative_context(seeds, adjacency, primary_ids):
@@ -521,12 +534,33 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
     learned_adjacency = _build_hebbian_adjacency(hebbian_state, set(nodes))
     associative_context_enabled = CONFIG.get('hebbian_associative_context_enabled', False)
     hebbian_adjacency = {} if associative_context_enabled else learned_adjacency
-    dynamic_targets = {
-        target_id
-        for dynamic_neighbors in hebbian_adjacency.values()
-        for target_id, _weight, _trust in dynamic_neighbors
-    }
-    dynamic_relevance = _dynamic_query_relevance(query_emb, collection, dynamic_targets)
+    static_targets = []
+    dynamic_targets = []
+    candidate_frontier = set(seed_ids)
+    candidate_seen = set(seed_ids)
+    for _ in range(max_hop):
+        next_frontier = set()
+        for current_id in candidate_frontier:
+            for edge in edges.get(current_id, []):
+                target_id = _resolve_target(edge['target'], nodes)
+                if target_id is not None and target_id not in candidate_seen:
+                    static_targets.append(target_id)
+                    candidate_seen.add(target_id)
+                    next_frontier.add(target_id)
+            for target_id, _weight, _trust in hebbian_adjacency.get(current_id, []):
+                if target_id not in candidate_seen:
+                    dynamic_targets.append(target_id)
+                    candidate_seen.add(target_id)
+                    next_frontier.add(target_id)
+        candidate_frontier = next_frontier
+        if not candidate_frontier:
+            break
+    neighbor_relevance = _query_relevance(
+        query_emb,
+        collection,
+        static_targets + dynamic_targets,
+    )
+    dynamic_relevance = neighbor_relevance
     dynamic_relevance_floor = CONFIG.get('hebbian_dynamic_query_relevance_floor', 0.0)
     queue = deque()
     for note_id, score in seeds:
@@ -553,12 +587,13 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
             target_id = _resolve_target(target, nodes)
             if target_id is None:
                 continue
+            relevance = neighbor_relevance.get(target_id)
             neighbors[target_id] = {
                 'matched_by': 'static_edge',
                 'hebbian_edge_weight': 0.0,
                 'hebbian_edge_trust': 0.0,
-
-                'priority': scores.get(target_id, 0.1),
+                'query_relevance': relevance,
+                'priority': relevance if relevance is not None else 0.1,
             }
 
         for target_id, weight, trust in hebbian_adjacency.get(current_id, []):
@@ -572,14 +607,12 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
                 existing['matched_by'] = 'static_and_hebbian_edge'
                 existing['hebbian_edge_weight'] = max(existing['hebbian_edge_weight'], weight)
                 existing['hebbian_edge_trust'] = max(existing['hebbian_edge_trust'], trust)
-
-                existing['priority'] = max(existing['priority'], weight)
             else:
                 neighbors[target_id] = {
                     'matched_by': 'hebbian_edge',
                     'hebbian_edge_weight': weight,
                     'hebbian_edge_trust': trust,
-
+                    'query_relevance': dynamic_relevance.get(target_id),
                     'priority': max(scores.get(target_id, 0.0), weight * trust),
                 }
 
@@ -600,6 +633,14 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
                 else CONFIG.get('hop_decay', 0.5)
             )
             new_score = score * decay
+            query_relevance = neighbor['query_relevance']
+            if (
+                neighbor['matched_by'] in {'static_edge', 'static_and_hebbian_edge'}
+                and query_relevance is not None
+            ):
+                # Keep explicit wikilinks traversable on sparse/noisy embeddings,
+                # while ensuring relevance actually ranks their propagated score.
+                new_score *= max(0.1, query_relevance)
             if neighbor['matched_by'] == 'hebbian_edge':
                 new_score *= ((0.5 + dynamic_weight) * CONFIG.get('hebbian_dynamic_gain', 1.0)
                               * dynamic_trust)
@@ -630,6 +671,7 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
                             'matched_by': neighbor['matched_by'],
                             'hebbian_edge_weight': round(dynamic_weight, 4),
                             'hebbian_edge_trust': round(dynamic_trust, 4),
+                            'query_relevance': round(query_relevance, 4) if query_relevance is not None else None,
                             'final_score': round(new_score, 4),
                         })
             elif new_score > traversal_threshold:
@@ -641,6 +683,7 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
                     'matched_by': neighbor['matched_by'],
                     'hebbian_edge_weight': round(dynamic_weight, 4),
                     'hebbian_edge_trust': round(dynamic_trust, 4),
+                    'query_relevance': round(query_relevance, 4) if query_relevance is not None else None,
                     'vector_score': round(raw_vector_scores.get(target_id, 0.0), 4),
                     'bm25_score': round(bm25_scores.get(target_id, 0.0), 4),
                     'hybrid_score': round(retrieval_scores.get(target_id, 0.0), 4),

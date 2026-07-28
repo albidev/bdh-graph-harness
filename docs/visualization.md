@@ -51,6 +51,7 @@ Each activated note now carries both its final activation score and its role in 
 - **`seed`** — selected directly by vector/Hybrid retrieval (`hop: 0`)
 - **`graph_neighbor`** — reached through a wikilink expansion, with `hop` and `parent_id`
 - `vector_score`, `bm25_score`, and `hybrid_score` preserve retrieval evidence
+- `query_relevance` records the batch cosine similarity used to rank a traversed static neighbor; `null` means its embedding was unavailable and structural fallback was used
 - `hebbian_boost` shows the contextual memory contribution
 - `final_score` is the score used for activation and visualization
 
