@@ -223,6 +223,7 @@ def _add_neurogenesis_source_edges(
     """Materialize exact, persisted neurogenesis provenance IDs as graph edges."""
     for newborn_id, frontmatter in frontmatter_by_id.items():
         for source_id in parse_json_frontmatter_list(frontmatter, "activated_from_ids"):
+            source_id = _canonical_state_id(source_id, nodes)
             if source_id not in nodes:
                 unresolved.append({
                     "kind": "neurogenesis_source",
