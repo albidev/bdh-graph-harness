@@ -150,7 +150,9 @@ async def broadcast_activation(event: dict, ws_clients: set = None) -> None:
         await _default_manager.broadcast_activation(event)
 
 
-async def websocket_handler(request, app_state: dict, ws_clients: set = None) -> web.WebSocketResponse:
+async def websocket_handler(
+    request, app_state: dict, ws_clients: set | None = None,
+) -> web.WebSocketResponse | web.Response:
     """WebSocket handler.
 
     Resolves the target vault from the ``vault_id`` query parameter
@@ -161,15 +163,8 @@ async def websocket_handler(request, app_state: dict, ws_clients: set = None) ->
     that set (matching the original closure-based design where ``ws_clients``
     was captured from the enclosing ``start_api_server`` scope).
     """
-    ws = web.WebSocketResponse(heartbeat=30.0)  # ping every 30s to keep alive
-    await ws.prepare(request)
-
-    if ws_clients is not None:
-        ws_clients.add(ws)
-    else:
-        _default_manager.clients.add(ws)
-
-    # Resolve vault context (default if vault_id not specified)
+    # Resolve vault context before upgrading the connection.  An unknown
+    # explicit vault_id must not silently attach to the default vault.
     vault_id = request.query.get('vault_id') or None
     registry = app_state.get('registry')
     event_sequence = 0
@@ -177,7 +172,13 @@ async def websocket_handler(request, app_state: dict, ws_clients: set = None) ->
         try:
             ctx = registry.get(vault_id)
         except KeyError:
-            ctx = registry.get()  # fall back to default
+            return web.json_response(
+                {
+                    'error': f"Unknown vault '{vault_id}'",
+                    'available_vaults': registry.available_ids(),
+                },
+                status=400,
+            )
         n = ctx.nodes
         e = ctx.edges
         s = ctx.state
@@ -189,6 +190,13 @@ async def websocket_handler(request, app_state: dict, ws_clients: set = None) ->
         e = app_state.get('edges', {})
         s = app_state.get('state', {'synapses': {}})
         vault_id_label = app_state.get('vault_id', 'default')
+
+    ws = web.WebSocketResponse(heartbeat=30.0)  # ping every 30s to keep alive
+    await ws.prepare(request)
+    if ws_clients is not None:
+        ws_clients.add(ws)
+    else:
+        _default_manager.clients.add(ws)
 
     try:
         setattr(ws, '_bdh_vault_id', vault_id_label)
