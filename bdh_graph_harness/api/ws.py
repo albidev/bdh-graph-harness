@@ -31,92 +31,11 @@ class WebSocketManager:
         for ws in dead:
             self.clients.discard(ws)
 
-    async def websocket_handler(self, request, app_state: dict) -> web.WebSocketResponse:
-        """Handle WebSocket connections for real-time graph visualization."""
-        ws = web.WebSocketResponse()
-        await ws.prepare(request)
-        self.clients.add(ws)
-
-        # Send full graph on connect
-        n = app_state['nodes']
-        e = app_state['edges']
-        s = app_state['state']
-
-        node_list = []
-        for note_id, node in n.items():
-            node_list.append({
-                'id': note_id,
-                'title': node['title'],
-                'display_label': node.get('display_label', node['title']),
-                'context_label': node.get('context_label'),
-                'tags': node.get('tags', []),
-                'path': node.get('path', ''),
-                'absolute_path': node.get('absolute_path', node.get('path', '')),
-                'relative_path': node.get('relative_path', ''),
-                'source_id': node.get('source_id', 'vault'),
-                'source_type': node.get('source_type', 'vault'),
-                'project_group': node.get('project_group'),
-                'writable': node.get('writable', True),
-                'text': node.get('text', '')[:200],
-            })
-
-        # _resolve_target is in the graph module
-        from bdh_graph_harness.graph import _resolve_target
-
-        edge_list = []
-        for src, links in e.items():
-            for link in links:
-                target_id = _resolve_target(link['target'], n)
-                if target_id:
-                    edge_list.append({
-                        'source': src,
-                        'target': target_id,
-                        'display': link.get('display', link.get('relation', '')),
-                        'type': link.get('type', 'wikilink'),
-                        'weight': link.get('weight', 1.0),
-                        'explicit': link.get('explicit', True),
-                        'relation': link.get('relation'),
-                        'group_id': link.get('group_id'),
-                        'generated': link.get('generated', False),
-                    })
-
-        hebbian_list = []
-        for key, syn in s['synapses'].items():
-            pair = safe_decode_synapse_key(key)
-            if pair is None:
-                continue
-            a, b = pair
-            hebbian_list.append({
-                'note_a': a,
-                'note_b': b,
-                'weight': syn['weight'],
-                'frequency': syn.get('frequency', 0),
-            })
-
-        init_msg = {
-            'type': 'graph',
-            'nodes': node_list,
-            'edges': edge_list,
-            'hebbian': hebbian_list,
-            'stats': {
-                'neurons': len(n),
-                'synapses': sum(len(links) for links in e.values()),
-                'hebbian_synapses': len(s['synapses']),
-                'dormant_neurons': len(s.get('dormant_nodes', [])),
-                'phantom_links': len(s.get('phantom_links', [])),
-            },
-        }
-        await ws.send_str(json.dumps(init_msg))
-
-        # Listen for messages (ping/pong keepalive)
-        try:
-            async for msg in ws:
-                if msg.type == web.WSMsgType.ERROR:
-                    break
-        finally:
-            self.clients.discard(ws)
-
-        return ws
+    async def websocket_handler(
+        self, request, app_state: dict,
+    ) -> web.WebSocketResponse | web.Response:
+        """Compatibility adapter for the canonical multi-vault handler."""
+        return await websocket_handler(request, app_state, self.clients)
 
 
 # ---- Module-level convenience functions (backwards-compatible API) ----
