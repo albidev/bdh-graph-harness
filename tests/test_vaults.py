@@ -177,12 +177,46 @@ def test_registry_get_by_id():
 
     ctx_a = _make_ctx("alpha")
     ctx_b = _make_ctx("beta")
-    reg._contexts["alpha"] = ctx_a
-    reg._contexts["beta"] = ctx_b
-    reg._default_id = "alpha"
+    reg.register_context("alpha", ctx_a)
+    reg.register_context("beta", ctx_b)
 
     assert reg.get("alpha") is ctx_a
     assert reg.get("beta") is ctx_b
+
+
+def test_federated_load_all_preserves_raw_legacy_state_on_disk(monkeypatch, tmp_path):
+    """Federated startup may canonicalize runtime IDs but must not rewrite state."""
+    from bdh_graph_harness.vaults import VaultConfig, VaultRegistry
+    from bdh_graph_harness.graph import federated
+    from bdh_graph_harness.memory import state_store
+    from bdh_graph_harness.retrieval import chroma_store
+    from bdh_graph_harness.memory.hebbian import encode_synapse_key
+
+    raw_key = "wiki/a|wiki/b"
+    raw_state = {"synapses": {raw_key: {"weight": 0.8}}, "queries": 1}
+    saved = {}
+    nodes = {"vault:wiki/a.md": {}, "vault:wiki/b.md": {}}
+    config = VaultConfig(
+        id="fed", name="Federated", path=str(tmp_path),
+        chroma_path=str(tmp_path / "chroma"), chroma_collection="fed",
+        settings={"hybrid_search": False},
+    )
+    registry = VaultRegistry.__new__(VaultRegistry)
+    registry._vault_configs = [config]
+    registry._contexts = {}
+    registry._default_id = "fed"
+
+    monkeypatch.setattr(federated, "build_configured_graph", lambda *_a, **_k: (nodes, {}, []))
+    monkeypatch.setattr(chroma_store, "compute_all_embeddings", lambda *_a, **_k: MagicMock())
+    monkeypatch.setattr(state_store, "load_state", lambda *_a, **_k: raw_state)
+    monkeypatch.setattr(state_store, "save_state", lambda _path, state, **_k: saved.update(state=state))
+
+    registry.load_all()
+
+    assert raw_key in saved["state"]["synapses"]
+    assert raw_key in registry.get("fed").persisted_state["synapses"]
+    runtime_key = encode_synapse_key("vault:wiki/a.md", "vault:wiki/b.md")
+    assert runtime_key in registry.get("fed").state["synapses"]
 
 
 def test_registry_get_default_when_id_omitted():

@@ -10,6 +10,10 @@ from collections import defaultdict, deque
 from datetime import datetime
 
 from bdh_graph_harness.config import CONFIG, logger
+from bdh_graph_harness.memory.hebbian import (
+    encode_synapse_key,
+    safe_decode_synapse_key,
+)
 from bdh_graph_harness.retrieval.embeddings import get_embeddings
 from bdh_graph_harness.retrieval.bm25 import BM25Index
 from bdh_graph_harness.retrieval.hybrid import hybrid_score
@@ -111,6 +115,22 @@ def _hebbian_dynamic_trust(synapse, now=None):
     return min(1.0, max(floor, frequency_factor * consolidation_factor * recency_factor))
 
 
+def _synapse_weight_for_pair(synapses, note_a, note_b):
+    """Read a pair weight from v2 state, falling back to decodable legacy keys."""
+    v2_synapse = synapses.get(encode_synapse_key(note_a, note_b))
+    if v2_synapse is not None:
+        return v2_synapse.get("weight", 0.0)
+
+    for key, synapse in synapses.items():
+        pair = safe_decode_synapse_key(key)
+        if pair is None:
+            continue
+        left, right = pair
+        if (left == note_a and right == note_b) or (left == note_b and right == note_a):
+            return synapse.get("weight", 0.0)
+    return 0.0
+
+
 # ---------------------------------------------------------------------------
 # Adaptive Threshold (Phase 3.3)
 # ---------------------------------------------------------------------------
@@ -201,10 +221,10 @@ def _compute_hebbian_boost(candidate_id, hebbian_state, recently_active):
     # Collect synapse weights from candidate to recently active notes
     weights = []
     for key, syn in synapses.items():
-        try:
-            left, right = key.split('|', 1)
-        except ValueError:
+        pair = safe_decode_synapse_key(key)
+        if pair is None:
             continue
+        left, right = pair
         left = _resolve_hebbian_node_id(left, valid_ids)
         right = _resolve_hebbian_node_id(right, valid_ids)
         if left is None or right is None:
@@ -269,7 +289,10 @@ def _get_recently_active_notes(hebbian_state, valid_node_ids=None):
             try:
                 co_time = datetime.fromisoformat(last_co)
                 if co_time > recent_cutoff:
-                    parts = key.split('|')
+                    pair = safe_decode_synapse_key(key)
+                    if pair is None:
+                        continue
+                    parts = list(pair)
                     # Filter dead synapses if we have the valid node set
                     if valid_node_ids is not None:
                         parts = [
@@ -303,10 +326,10 @@ def _build_hebbian_adjacency(hebbian_state, valid_node_ids):
         weight = float(synapse.get("weight", 0.0))
         if weight < min_weight:
             continue
-        try:
-            left, right = key.split("|", 1)
-        except ValueError:
+        pair = safe_decode_synapse_key(key)
+        if pair is None:
             continue
+        left, right = pair
         left = _resolve_hebbian_node_id(left, valid_node_ids)
         right = _resolve_hebbian_node_id(right, valid_node_ids)
         if left is None or right is None:
@@ -592,11 +615,8 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
             # boosts propagation when the synapse exists. hebbian_gain=0 reproduces old behavior.
             hebbian_gain = CONFIG.get('hebbian_gain', 0.0)
             if hebbian_gain > 0 and hebbian_state and neighbor['matched_by'] == 'static_edge':
-                syn_key = (
-                    f"{current_id}|{target_id}" if current_id < target_id
-                    else f"{target_id}|{current_id}"
-                )
-                syn_weight = hebbian_state.get('synapses', {}).get(syn_key, {}).get('weight', 0.0)
+                synapses = hebbian_state.get('synapses', {})
+                syn_weight = _synapse_weight_for_pair(synapses, current_id, target_id)
                 if syn_weight > 0:
                     new_score *= (1.0 + hebbian_gain * syn_weight)
 

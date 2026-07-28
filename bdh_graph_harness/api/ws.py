@@ -4,6 +4,7 @@ import asyncio
 import json
 
 from aiohttp import web
+from bdh_graph_harness.memory.hebbian import safe_decode_synapse_key
 
 __all__ = ["WebSocketManager", "broadcast_activation", "websocket_handler"]
 
@@ -81,7 +82,10 @@ class WebSocketManager:
 
         hebbian_list = []
         for key, syn in s['synapses'].items():
-            a, b = key.split('|')
+            pair = safe_decode_synapse_key(key)
+            if pair is None:
+                continue
+            a, b = pair
             hebbian_list.append({
                 'note_a': a,
                 'note_b': b,
@@ -226,7 +230,10 @@ async def websocket_handler(request, app_state: dict, ws_clients: set = None) ->
 
     hebbian_list = []
     for key, syn in s['synapses'].items():
-        a, b = key.split('|')
+        pair = safe_decode_synapse_key(key)
+        if pair is None:
+            continue
+        a, b = pair
         hebbian_list.append({
             'note_a': a,
             'note_b': b,

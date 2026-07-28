@@ -48,6 +48,22 @@ def load_state(vault_root):
             fcntl.flock(lock_f, fcntl.LOCK_UN)
 
 
+def _preserve_synapse_for_persistence(key, valid_node_ids):
+    """Keep opaque synapses; prune decodable state with missing endpoints.
+
+    An ambiguous pipe-delimited key cannot be safely resolved against the
+    current graph without risking data loss, so it remains persisted and
+    consumers simply ignore it. Decodable v2 and simple legacy keys can be
+    pruned against the current graph as before.
+    """
+    from bdh_graph_harness.memory.hebbian import safe_decode_synapse_key
+
+    endpoints = safe_decode_synapse_key(key)
+    if endpoints is None:
+        return True
+    return all(endpoint in valid_node_ids for endpoint in endpoints)
+
+
 def merge_states(disk_state, mem_state, *, valid_node_ids=None):
     """Merge on-disk state with in-memory state to prevent lost updates.
 
@@ -70,13 +86,11 @@ def merge_states(disk_state, mem_state, *, valid_node_ids=None):
         valid = set(valid_node_ids)
         disk_syn = {
             key: value for key, value in disk_syn.items()
-            if len(key.split('|', 1)) == 2
-            and all(part in valid for part in key.split('|', 1))
+            if _preserve_synapse_for_persistence(key, valid)
         }
         mem_syn = {
             key: value for key, value in mem_syn.items()
-            if len(key.split('|', 1)) == 2
-            and all(part in valid for part in key.split('|', 1))
+            if _preserve_synapse_for_persistence(key, valid)
         }
     merged_syn = {}
 
@@ -118,8 +132,7 @@ def reconcile_state_to_nodes(state, nodes):
     valid = set(nodes)
     synapses = {}
     for key, value in state.get('synapses', {}).items():
-        parts = key.split('|', 1)
-        if len(parts) == 2 and parts[0] in valid and parts[1] in valid:
+        if _preserve_synapse_for_persistence(key, valid):
             synapses[key] = value
     state['synapses'] = synapses
 

@@ -244,6 +244,59 @@ def test_attention_resolves_federated_hebbian_ids_to_core_nodes(monkeypatch):
     assert active["wiki/learned"] == 0.65
 
 
+def test_static_edge_hebbian_gain_reads_v2_synapse_key(monkeypatch):
+    """Static traversal must apply Hebbian gain from canonical v2 state."""
+    from bdh_graph_harness.memory.hebbian import encode_synapse_key
+
+    seed, learned = "seed|source", "learned|target"
+    nodes = {
+        seed: {"title": "Seed", "text": "seed"},
+        learned: {"title": "Learned", "text": "learned"},
+    }
+    state = {"synapses": {encode_synapse_key(seed, learned): {"weight": 0.8}}}
+    monkeypatch.setattr(attention, "get_embeddings", lambda _queries: [[1.0]])
+    monkeypatch.setitem(config.CONFIG, "adaptive_threshold", False)
+    monkeypatch.setitem(config.CONFIG, "active_threshold", 0.01)
+    monkeypatch.setitem(config.CONFIG, "hop_decay", 0.5)
+    monkeypatch.setitem(config.CONFIG, "hebbian_dynamic_edges_enabled", False)
+    monkeypatch.setitem(config.CONFIG, "hebbian_gain", 1.0)
+
+    active = attention.attention(
+        "q",
+        nodes,
+        {seed: [{"target": learned}], learned: []},
+        FakeCollection(ids=(seed,)),
+        k=1,
+        max_hop=1,
+        hebbian_state=state,
+    )
+
+    assert active[learned] == 0.9
+
+
+def test_static_edge_hebbian_gain_reads_legacy_synapse_key(monkeypatch):
+    """Static traversal keeps applying gain while legacy state remains on disk."""
+    seed, learned = "seed", "learned"
+    nodes = {
+        seed: {"title": "Seed", "text": "seed"},
+        learned: {"title": "Learned", "text": "learned"},
+    }
+    state = {"synapses": {"learned|seed": {"weight": 0.8}}}
+    monkeypatch.setattr(attention, "get_embeddings", lambda _queries: [[1.0]])
+    monkeypatch.setitem(config.CONFIG, "adaptive_threshold", False)
+    monkeypatch.setitem(config.CONFIG, "active_threshold", 0.01)
+    monkeypatch.setitem(config.CONFIG, "hop_decay", 0.5)
+    monkeypatch.setitem(config.CONFIG, "hebbian_dynamic_edges_enabled", False)
+    monkeypatch.setitem(config.CONFIG, "hebbian_gain", 1.0)
+
+    active = attention.attention(
+        "q", nodes, {seed: [{"target": learned}], learned: []},
+        FakeCollection(ids=(seed,)), k=1, max_hop=1, hebbian_state=state,
+    )
+
+    assert active[learned] == 0.9
+
+
 def test_static_and_hebbian_edge_applies_learned_weight_once(monkeypatch):
     nodes = {
         "seed": {"title": "Seed", "text": "seed"},

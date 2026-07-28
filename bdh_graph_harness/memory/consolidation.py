@@ -31,6 +31,7 @@ from datetime import datetime, timedelta
 from copy import deepcopy
 
 from bdh_graph_harness.config import CONFIG, logger
+from bdh_graph_harness.memory.hebbian import encode_synapse_key, safe_decode_synapse_key
 from bdh_graph_harness.memory.quality import compute_all_qualities
 
 
@@ -131,7 +132,7 @@ def _coactivation_timestamp(value):
 
 def _normal_synapse_key(source: str, target: str) -> str:
     """Canonicalize an undirected synapse key for protection lookups."""
-    return '|'.join(sorted((str(source), str(target))))
+    return encode_synapse_key(source, target)
 
 
 def _structural_backbone_keys(edges: dict | None) -> set[str]:
@@ -192,8 +193,8 @@ def protected_synapses(
     if cfg.get('consolidation_protect_backbone', DEFAULT_PROTECT_BACKBONE):
         backbone = _structural_backbone_keys(edges)
         for key in state.get('synapses', {}):
-            endpoints = key.split('|', 1)
-            if len(endpoints) == 2 and _normal_synapse_key(*endpoints) in backbone:
+            endpoints = safe_decode_synapse_key(key)
+            if endpoints is not None and _normal_synapse_key(*endpoints) in backbone:
                 protected[key] = 'structural_or_bridge'
 
     recent_hours = float(cfg.get(
@@ -444,7 +445,10 @@ def prune_stale_dormant(state: dict, nodes: dict, persist_cycles: int | None = N
     synapses = state.get('synapses', {})
     syn_to_delete = []
     for key in synapses:
-        a, b = key.split('|')
+        pair = safe_decode_synapse_key(key)
+        if pair is None:
+            continue
+        a, b = pair
         if a in removed or b in removed:
             syn_to_delete.append(key)
     for key in syn_to_delete:

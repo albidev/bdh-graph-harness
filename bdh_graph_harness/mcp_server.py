@@ -37,6 +37,7 @@ import urllib.error
 from mcp.server.fastmcp import FastMCP
 
 from bdh_graph_harness.config import load_config
+from bdh_graph_harness.memory.hebbian import safe_decode_synapse_key
 
 logger = logging.getLogger("bdh-mcp")
 
@@ -278,7 +279,10 @@ def _fallback_stats(vault_id: str | None = None) -> str:
     if state["synapses"]:
         sorted_syn = sorted(state["synapses"].items(), key=lambda x: -x[1]["weight"])[:10]
         for key, syn in sorted_syn:
-            a, b = key.split("|")
+            pair = safe_decode_synapse_key(key)
+            if pair is None:
+                continue
+            a, b = pair
             top_hebbian.append({
                 "pair": f"{a} ↔ {b}",
                 "weight": round(syn["weight"], 4),
@@ -306,7 +310,10 @@ def _fallback_hebbian(vault_id: str | None = None) -> str:
 
     synapses = []
     for key, syn in sorted(state["synapses"].items(), key=lambda x: -x[1]["weight"]):
-        a, b = key.split("|")
+        pair = safe_decode_synapse_key(key)
+        if pair is None:
+            continue
+        a, b = pair
         title_a = nodes.get(a, {}).get("title", a)
         title_b = nodes.get(b, {}).get("title", b)
         synapses.append({
