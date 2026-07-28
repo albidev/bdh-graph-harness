@@ -260,6 +260,36 @@ async def test_api_hebbian(mock_app_setup, monkeypatch):
         await client.close()
 
 
+@pytest.mark.asyncio
+async def test_api_hebbian_decodes_v2_and_skips_ambiguous_legacy_key(mock_app_setup, monkeypatch):
+    """The public API must safely expose v2 state and omit unrecoverable state."""
+    from aiohttp.test_utils import TestClient, TestServer
+    from bdh_graph_harness.memory.hebbian import encode_synapse_key
+
+    nodes, edges, collection, state, config, _ = mock_app_setup
+    state['synapses'] = {
+        encode_synapse_key('alpha|left', 'beta|right'): {
+            'weight': 0.8, 'frequency': 3, 'last_coactivated': '2026-01-01T00:00:00',
+        },
+        'a|b|c': {
+            'weight': 0.2, 'frequency': 1, 'last_coactivated': '2026-01-01T00:00:00',
+        },
+    }
+    app = _capture_app(monkeypatch, config, nodes, edges, collection, state)
+    server = TestServer(app)
+    client = TestClient(server)
+    await client.start_server()
+    try:
+        response = await client.get('/api/hebbian')
+        assert response.status == 200
+        data = await response.json()
+        assert data['total'] == 1
+        assert data['synapses'][0]['note_a'] == 'alpha|left'
+        assert data['synapses'][0]['note_b'] == 'beta|right'
+    finally:
+        await client.close()
+
+
 # ---------------------------------------------------------------------------
 # POST /api/query
 # ---------------------------------------------------------------------------

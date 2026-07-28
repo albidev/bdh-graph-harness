@@ -12,6 +12,8 @@ Key design choices
 * Pruning is deferred to the consolidation cycle; here synapses are only
   decayed and never deleted.
 """
+import base64
+import json
 from datetime import datetime, timedelta, timezone
 from math import exp, log1p
 
@@ -20,12 +22,73 @@ from bdh_graph_harness.memory.quality import prune_dormant, try_reactivate
 
 
 # ---------------------------------------------------------------------------
+# Synapse key codec — v2 base64url JSON
+# ---------------------------------------------------------------------------
+
+_V2_PREFIX = "v2:"
+
+
+def encode_synapse_key(a: str, b: str) -> str:
+    """Encode two note IDs into a canonical v2 synapse key.
+
+    Format: ``v2:`` + URL-safe base64 (no padding) of the compact JSON
+    array ``[canonical_a, canonical_b]`` with lexicographic endpoint
+    ordering.
+    """
+    a, b = (a, b) if a < b else (b, a)
+    payload = json.dumps([a, b], separators=(",", ":"), ensure_ascii=True)
+    b64 = base64.urlsafe_b64encode(payload.encode()).rstrip(b"=").decode()
+    return f"{_V2_PREFIX}{b64}"
+
+
+def decode_synapse_key(key: str) -> tuple[str, str]:
+    """Decode a synapse key into its two endpoint note IDs.
+
+    Recognises:
+    * ``v2:`` + base64url JSON array — the canonical format.
+    * ``a|b`` (exactly one pipe) — the legacy format.
+    * More than one pipe — ambiguous; raises ``ValueError``.
+    """
+    if key.startswith(_V2_PREFIX):
+        b64_part = key[len(_V2_PREFIX):]
+        # Re-add padding for base64 decoding.
+        padding = 4 - len(b64_part) % 4
+        if padding != 4:
+            b64_part += "=" * padding
+        raw = base64.urlsafe_b64decode(b64_part)
+        pair = json.loads(raw)
+        if (
+            not isinstance(pair, list)
+            or len(pair) != 2
+            or not all(isinstance(endpoint, str) for endpoint in pair)
+        ):
+            raise ValueError(f"v2 key must decode to a 2-element string array, got {pair!r}")
+        return pair[0], pair[1]
+
+    # Legacy: pipe-delimited
+    parts = key.split("|")
+    if len(parts) == 2:
+        return parts[0], parts[1]
+    raise ValueError(
+        f"ambiguous synapse key with {len(parts) - 1} pipe(s): {key!r}"
+    )
+
+
+def safe_decode_synapse_key(key: str) -> tuple[str, str] | None:
+    """Decode a synapse key, returning ``None`` on malformed input."""
+    try:
+        return decode_synapse_key(key)
+    except (ValueError, KeyError):
+        return None
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 def _ordered_key(a: str, b: str) -> str:
     """Canonical ordering for undirected synapse keys."""
-    return f"{a}|{b}" if a < b else f"{b}|{a}"
+    return encode_synapse_key(a, b)
 
 
 def _recency_factor(last_coactivated: str | None, tau_hours: float) -> float:

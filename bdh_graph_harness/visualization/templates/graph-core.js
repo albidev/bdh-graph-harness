@@ -371,6 +371,11 @@ function linkEndpointId(endpoint) {
   return typeof endpoint === 'object' && endpoint ? endpoint.id : endpoint;
 }
 
+function canonicalHebbianPairKey(noteA, noteB) {
+  const sorted = noteA < noteB ? [noteA, noteB] : [noteB, noteA];
+  return JSON.stringify(sorted);
+}
+
 function linkKey(link) {
   const source = linkEndpointId(link.source);
   const target = linkEndpointId(link.target);

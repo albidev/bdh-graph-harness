@@ -392,10 +392,10 @@ function mergeEventIntoSourceSnapshot(event) {
   });
 
   sourceGraphData.hebbian = (sourceGraphData.hebbian || []).filter(link => !deleted.has(link.note_a) && !deleted.has(link.note_b));
-  const hebbianKeys = new Set(sourceGraphData.hebbian.map(link => [link.note_a, link.note_b].sort().join('|')));
+  const hebbianKeys = new Set(sourceGraphData.hebbian.map(link => canonicalHebbianPairKey(link.note_a, link.note_b)));
   (event.added_node_data || []).forEach(node => {
     (node.hebbian || []).forEach(link => {
-      const key = [link.note_a, link.note_b].sort().join('|');
+      const key = canonicalHebbianPairKey(link.note_a, link.note_b);
       if (!hebbianKeys.has(key)) {
         sourceGraphData.hebbian.push({ ...link });
         hebbianKeys.add(key);

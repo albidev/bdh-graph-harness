@@ -63,10 +63,15 @@ def compute_node_quality(node_id: str, synapses: dict, max_freq: int) -> dict:
         ``{"score": float, "strong_ratio": float, "mean_weight": float,
           "frequency": int}``
     """
+    from bdh_graph_harness.memory.hebbian import safe_decode_synapse_key
+
     edges = []
     total_freq = 0
     for key, syn in synapses.items():
-        a, b = key.split('|')
+        pair = safe_decode_synapse_key(key)
+        if pair is None:
+            continue
+        a, b = pair
         if a == node_id or b == node_id:
             edges.append(syn.get('weight', 0.0))
             total_freq += syn.get('frequency', 0)

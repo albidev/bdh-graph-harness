@@ -98,6 +98,9 @@ class VaultContext:
     edges: dict
     collection: Any
     state: dict
+    # Raw state retained for federated vaults; ``state`` may use canonical
+    # runtime IDs while persistence must preserve legacy historical keys.
+    persisted_state: dict | None = None
     bm25_index: Any | None = None
     state_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     runtime_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
@@ -270,11 +273,21 @@ class VaultRegistry:
                 collection_name=vc.chroma_collection,
                 config=vc.settings,
             )
-            state = load_state(vc.path)
-            state = migrate_legacy_state_ids(state, nodes)
-            state = reconcile_state_to_nodes(state, nodes)
-            state['unresolved_links'] = unresolved
-            save_state(vc.path, state, valid_node_ids=set(nodes))
+            persisted_state = load_state(vc.path)
+            is_federated = any(node_id.startswith('vault:') for node_id in nodes)
+            if is_federated:
+                # Federation canonicalizes IDs only in memory. Keep raw legacy
+                # state on disk, since saving the canonical copy would rewrite
+                # or collapse historical records.
+                persisted_state['unresolved_links'] = unresolved
+                save_state(vc.path, persisted_state)
+                state = reconcile_state_to_nodes(
+                    migrate_legacy_state_ids(persisted_state, nodes), nodes,
+                )
+            else:
+                state = reconcile_state_to_nodes(persisted_state, nodes)
+                state['unresolved_links'] = unresolved
+                save_state(vc.path, state, valid_node_ids=set(nodes))
 
             bm25_idx = None
             if vc.settings.get('hybrid_search', False):
@@ -290,6 +303,7 @@ class VaultRegistry:
                 edges=edges,
                 collection=collection,
                 state=state,
+                persisted_state=persisted_state if is_federated else None,
                 bm25_index=bm25_idx,
             )
 
