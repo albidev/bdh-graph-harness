@@ -73,3 +73,145 @@ def test_scan_sources_is_read_only_and_skips_runtime_pipeline(monkeypatch, tmp_p
     assert "✓ Counterpart edges: 0" in output
     assert not (vault / ".bdh-graph-cache.json").exists()
     assert not (projects / ".bdh-graph-cache.json").exists()
+
+
+def test_vault_id_forwards_resolved_chroma_routing_to_embeddings(monkeypatch, tmp_path):
+    """A selected vault must not fall back to the default Chroma collection."""
+    episodic = tmp_path / "episodic"
+    episodic.mkdir()
+    chroma_path = tmp_path / "chroma"
+    config = {
+        "vaults": [{
+            "id": "episodic",
+            "path": str(episodic),
+            "chroma_path": str(chroma_path),
+            "chroma_collection": "episodic_notes",
+        }],
+    }
+    captured = {}
+
+    monkeypatch.setattr(sys, "argv", ["bdh", "--vault-id", "episodic", "--stats"])
+    monkeypatch.setattr(cli, "load_config", lambda _path: config)
+    monkeypatch.setattr(cli, "build_graph", lambda _path, use_cache: ({"note": {}}, {"note": []}))
+    monkeypatch.setattr(
+        cli,
+        "compute_all_embeddings",
+        lambda nodes, vault_root, **kwargs: captured.update(
+            nodes=nodes, vault_root=vault_root, **kwargs
+        ) or "collection",
+    )
+    monkeypatch.setattr(cli, "load_state", lambda _path: {"synapses": {}, "queries": 0})
+    monkeypatch.setattr(cli, "migrate_legacy_state_ids", lambda state, _nodes: state)
+    monkeypatch.setattr(cli, "show_stats", lambda *_args: None)
+
+    cli.main()
+
+    assert captured == {
+        "nodes": {"note": {}},
+        "vault_root": str(episodic),
+        "chroma_path": str(chroma_path),
+        "collection_name": "episodic_notes",
+        "config": {
+            "vault_path": str(episodic),
+            "chroma_path": str(chroma_path),
+            "chroma_collection": "episodic_notes",
+        },
+    }
+
+
+def test_refresh_embeddings_forwards_resolved_chroma_routing(monkeypatch, tmp_path):
+    """Refreshing a selected vault must retain its Chroma routing."""
+    episodic = tmp_path / "episodic"
+    episodic.mkdir()
+    chroma_path = tmp_path / "chroma"
+    config = {
+        "vaults": [{
+            "id": "episodic",
+            "path": str(episodic),
+            "chroma_path": str(chroma_path),
+            "chroma_collection": "episodic_notes",
+        }],
+    }
+    calls = []
+
+    class Collection:
+        def count(self):
+            return 1
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["bdh", "--vault-id", "episodic", "--refresh-embeddings"],
+    )
+    monkeypatch.setattr(cli, "load_config", lambda _path: config)
+    monkeypatch.setattr(cli, "build_graph", lambda _path, use_cache: ({"note": {}}, {"note": []}))
+    monkeypatch.setattr(
+        cli,
+        "compute_all_embeddings",
+        lambda nodes, vault_root, **kwargs: calls.append({
+            "nodes": nodes,
+            "vault_root": vault_root,
+            **kwargs,
+        }) or Collection(),
+    )
+    monkeypatch.setattr(cli, "load_state", lambda _path: {"synapses": {}, "queries": 0})
+    monkeypatch.setattr(cli, "migrate_legacy_state_ids", lambda state, _nodes: state)
+
+    cli.main()
+
+    assert calls[-1] == {
+        "nodes": {"note": {}},
+        "vault_root": str(episodic),
+        "force_refresh": True,
+        "chroma_path": str(chroma_path),
+        "collection_name": "episodic_notes",
+        "config": {
+            "vault_path": str(episodic),
+            "chroma_path": str(chroma_path),
+            "chroma_collection": "episodic_notes",
+        },
+    }
+
+
+def test_external_sources_preserve_global_chroma_routing(monkeypatch, tmp_path):
+    """External sources without --vault-id retain global Chroma routing."""
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    chroma_path = tmp_path / "global-chroma"
+    config = {
+        "vault_path": str(vault),
+        "chroma_path": str(chroma_path),
+        "chroma_collection": "global_notes",
+        "external_sources": [{"id": "projects", "path": str(tmp_path / "projects")}],
+        "hybrid_search": False,
+        "online_plasticity": False,
+    }
+    captured = {}
+
+    monkeypatch.setattr(sys, "argv", ["bdh", "--stats"])
+    monkeypatch.setattr(cli, "load_config", lambda _path: config)
+    monkeypatch.setattr(
+        cli,
+        "build_configured_graph",
+        lambda _config, use_cache: ({"note": {}}, {"note": []}, []),
+    )
+    monkeypatch.setattr(
+        cli,
+        "compute_all_embeddings",
+        lambda nodes, vault_root, **kwargs: captured.update(
+            nodes=nodes, vault_root=vault_root, **kwargs
+        ) or "collection",
+    )
+    monkeypatch.setattr(cli, "load_state", lambda _path: {"synapses": {}, "queries": 0})
+    monkeypatch.setattr(cli, "migrate_legacy_state_ids", lambda state, _nodes: state)
+    monkeypatch.setattr(cli, "show_stats", lambda *_args: None)
+
+    cli.main()
+
+    assert captured == {
+        "nodes": {"note": {}},
+        "vault_root": str(vault),
+        "chroma_path": str(chroma_path),
+        "collection_name": "global_notes",
+        "config": config,
+    }
