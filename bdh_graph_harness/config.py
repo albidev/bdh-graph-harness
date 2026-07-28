@@ -64,6 +64,7 @@ CONFIG = {
     'hub_dampening': True,
     'hub_degree_threshold': 25,      # dampen only very high-degree hubs (e.g. wiki/index)
     'max_neighbors_per_hop': 10,
+    'attention_relevance_batch_size': 256,
     'hop_decay': 0.5,  # score decay per hop (single application, not compound)
     'hebbian_gain': 0.0,  # multiplier on learned synapse weight during propagation; 0 = disabled
     # Dynamic Hebbian adjacency: learned co-activations are traversable edges,
