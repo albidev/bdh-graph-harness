@@ -153,6 +153,43 @@ def test_federated_builder_materializes_validated_neurogenesis_source_edges(tmp_
     assert any(item.get("kind") == "neurogenesis_source" for item in unresolved)
 
 
+def test_federated_builder_canonicalizes_legacy_activation_ids_without_rewriting_note(tmp_path):
+    vault = tmp_path / "vault"
+    newborn_path = vault / "wiki/newborn.md"
+    newborn_content = (
+        '---\nactivated_from_ids: ["wiki/source.md", "vault:missing.md", '
+        '"external:projects/missing.md"]\n---\n# Newborn'
+    )
+    _write(vault / "wiki/source.md", "# Source")
+    _write(newborn_path, newborn_content)
+
+    nodes, edges, unresolved = build_federated_graph(
+        [VaultMarkdownSource(str(vault))],
+        neurogenesis_source_edges_enabled=True,
+    )
+
+    source_id = "vault:wiki/source.md"
+    newborn_id = "vault:wiki/newborn.md"
+    assert source_id in nodes
+    assert any(
+        edge["target"] == source_id and edge["type"] == "neurogenesis_source"
+        for edge in edges[newborn_id]
+    )
+    assert not any(
+        item.get("kind") == "neurogenesis_source"
+        and item["source"] == newborn_id
+        and item["target"] == "wiki/source.md"
+        for item in unresolved
+    )
+    assert {
+        item["target"]
+        for item in unresolved
+        if item.get("kind") == "neurogenesis_source"
+        and item["source"] == newborn_id
+    } == {"vault:missing.md", "external:projects/missing.md"}
+    assert newborn_path.read_text(encoding="utf-8") == newborn_content
+
+
 def test_counterpart_edges_are_reciprocal_without_parent_node(tmp_path):
     vault = tmp_path / "vault"
     projects = tmp_path / "projects"
