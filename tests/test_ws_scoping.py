@@ -1,11 +1,11 @@
 from types import SimpleNamespace
 
 import pytest
-from aiohttp import web
+from aiohttp import WSServerHandshakeError, web
 from aiohttp.test_utils import TestClient, TestServer
 
 from bdh_graph_harness.api.routes import setup_routes
-from bdh_graph_harness.api.ws import broadcast_activation
+from bdh_graph_harness.api.ws import WebSocketManager, broadcast_activation
 
 
 class FakeWebSocket:
@@ -91,5 +91,34 @@ async def test_websocket_rejects_unknown_vault_instead_of_falling_back_to_defaul
             "error": "Unknown vault 'unknown'",
             "available_vaults": ["core", "episodic"],
         }
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_legacy_manager_rejects_unknown_vault_like_canonical_handler():
+    manager = WebSocketManager()
+    app = web.Application()
+    app_state = {
+        "registry": _Registry(),
+        # The duplicate legacy handler currently consumes these flat keys.
+        "nodes": {},
+        "edges": {},
+        "state": {"synapses": {}},
+    }
+
+    async def legacy_ws_route(request):
+        return await manager.websocket_handler(request, app_state)
+
+    app.router.add_get("/ws", legacy_ws_route)
+    client = TestClient(TestServer(app))
+    await client.start_server()
+
+    try:
+        with pytest.raises(WSServerHandshakeError) as error:
+            await client.ws_connect("/ws?vault_id=unknown")
+
+        assert error.value.status == 400
+        assert not manager.clients
     finally:
         await client.close()
