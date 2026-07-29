@@ -30,7 +30,8 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from bdh_graph_harness.config import CONFIG, config_overlay, load_config
-from bdh_graph_harness.graph.builder import build_graph
+from bdh_graph_harness.graph.federated import build_configured_graph
+from bdh_graph_harness.vaults import normalize_vault_configs
 from bdh_graph_harness.memory import load_state, save_state
 from bdh_graph_harness.memory.hebbian import hebbian_update
 from bdh_graph_harness.retrieval.attention import attention
@@ -53,6 +54,8 @@ class Metrics:
     config_hash: str | None = None
     hop_histogram: dict[int, int] = field(default_factory=dict)
     synapse_counts: list[int] = field(default_factory=list)
+    negative_query_count: int = 0
+    negative_nonempty_rate: float = 0.0
 
 
 def _config_hash(overrides: dict) -> str:
@@ -107,8 +110,12 @@ def validate_golden_set(queries: list[dict], nodes: dict) -> None:
         if not isinstance(query, str) or not query.strip():
             errors.append(f"query {index}: query must be a non-empty string")
             continue
-        if not isinstance(relevant_ids, list) or not 1 <= len(relevant_ids) <= 4:
-            errors.append(f"query {index}: relevant_note_ids must contain 1-4 IDs")
+        expected_empty = entry.get("expected_empty", False)
+        if not isinstance(relevant_ids, list) or (
+            not expected_empty and not 1 <= len(relevant_ids) <= 4
+        ) or (expected_empty and relevant_ids):
+            requirement = "be empty for expected_empty queries" if expected_empty else "contain 1-4 IDs"
+            errors.append(f"query {index}: relevant_note_ids must {requirement}")
             continue
         normalized_query = _normalized_text(query)
         for note_id in relevant_ids:
@@ -132,6 +139,7 @@ def _run_single_query(
     bm25_index: BM25Index,
     state: dict,
     category: str,
+    expected_empty: bool = False,
     cold: bool = True,
     collect_hops: bool = True,
 ) -> tuple[dict, dict]:
@@ -155,11 +163,13 @@ def _run_single_query(
     metrics["query"] = query
     metrics["category"] = category
     metrics["n_activated"] = len(activated_ids)
+    metrics["expected_empty"] = expected_empty
+    metrics["is_correct_rejection"] = expected_empty and not activated_ids
 
     metadata = {"latency_ms": latency_ms}
 
-    # Online plasticity: update Hebbian state in warm mode unless disabled.
-    if not cold and CONFIG.get("online_plasticity", True):
+    # Negative controls must never teach the Hebbian state.
+    if not expected_empty and not cold and CONFIG.get("online_plasticity", True):
         state, _updated_keys, _pruned = hebbian_update(active, state)
 
     if collect_hops:
@@ -201,8 +211,10 @@ def run_eval(
     if not queries:
         raise ValueError("No queries in golden set")
 
-    # Ensure CONFIG reflects the caller's on-disk config before we overlay.
-    load_config(config_path)
+    # Resolve multi-vault configs exactly like the runtime: the benchmark
+    # targets the configured default vault, not the legacy top-level fallback.
+    loaded_config = load_config(config_path)
+    vault_settings = _resolve_benchmark_vault_settings(loaded_config)
     resolved_config_path = str(Path(config_path).resolve()) if config_path else None
 
     # Ablations must not mutate the production ChromaDB or state files.
@@ -212,10 +224,16 @@ def run_eval(
     overrides = dict(config_overrides)
     overrides.setdefault("chroma_path", str(ablation_chroma))
 
-    with config_overlay(overrides):
+    with config_overlay(vault_settings), config_overlay(overrides):
         nodes, edges, _state_path = _build_materialized_graph()
         validate_golden_set(queries, nodes)
-        collection = compute_all_embeddings(nodes, CONFIG["vault_path"])
+        collection = compute_all_embeddings(
+            nodes,
+            CONFIG["vault_path"],
+            chroma_path=CONFIG["chroma_path"],
+            collection_name=CONFIG.get("chroma_collection"),
+            config=CONFIG,
+        )
         bm25_index = BM25Index(nodes)
 
         results: dict[str, Any] = {
@@ -249,10 +267,20 @@ def run_eval(
         return results
 
 
+def _resolve_benchmark_vault_settings(config: dict) -> dict:
+    """Return the effective settings for the configured default vault."""
+    vaults = normalize_vault_configs(config)
+    default_id = config.get("default_vault", vaults[0].id)
+    for vault in vaults:
+        if vault.id == default_id:
+            return dict(vault.settings)
+    available = ", ".join(vault.id for vault in vaults)
+    raise ValueError(f"default_vault '{default_id}' not found; available: {available}")
+
+
 def _build_materialized_graph():
-    """Build graph using the current CONFIG. Returns (nodes, edges, state_path)."""
-    vault_path = CONFIG["vault_path"]
-    nodes, edges = build_graph(vault_path, use_cache=True)
+    """Build the graph selected by the current CONFIG."""
+    nodes, edges, _unresolved = build_configured_graph(CONFIG, use_cache=True)
     return nodes, edges, None
 
 
@@ -270,6 +298,7 @@ def _run_pass(queries, nodes, edges, collection, bm25_index, state, *, cold: boo
             bm25_index=bm25_index,
             state=state,
             category=entry.get("category", "unknown"),
+            expected_empty=entry.get("expected_empty", False),
             cold=cold,
             collect_hops=collect_hops,
         )
@@ -279,7 +308,14 @@ def _run_pass(queries, nodes, edges, collection, bm25_index, state, *, cold: boo
         for hop, count in metadata.get("hop_histogram", {}).items():
             aggregated_meta["hop_histogram"][int(hop)] += int(count)
 
-    agg = aggregate_metrics(per_query)
+    ranking_per_query = [metrics for metrics in per_query if not metrics["expected_empty"]]
+    negative_per_query = [metrics for metrics in per_query if metrics["expected_empty"]]
+    agg = aggregate_metrics(ranking_per_query)
+    negative_nonempty_rate = (
+        sum(metrics["n_activated"] > 0 for metrics in negative_per_query) / len(negative_per_query)
+        if negative_per_query
+        else 0.0
+    )
     metrics = Metrics(
         mrr=agg.get("mrr", {}).get("mean", 0.0),
         recall_at_5=agg.get("recall@5", {}).get("mean", 0.0),
@@ -291,6 +327,8 @@ def _run_pass(queries, nodes, edges, collection, bm25_index, state, *, cold: boo
         per_query=per_query,
         hop_histogram=dict(sorted(aggregated_meta["hop_histogram"].items())),
         synapse_counts=aggregated_meta["synapse_counts"],
+        negative_query_count=len(negative_per_query),
+        negative_nonempty_rate=negative_nonempty_rate,
     )
     return metrics, aggregated_meta
 
@@ -405,6 +443,8 @@ def _serialize(obj: Any) -> Any:
             "per_query": obj.per_query,
             "hop_histogram": obj.hop_histogram,
             "synapse_counts": obj.synapse_counts,
+            "negative_query_count": obj.negative_query_count,
+            "negative_nonempty_rate": obj.negative_nonempty_rate,
         }
     if isinstance(obj, dict):
         return {k: _serialize(v) for k, v in obj.items()}

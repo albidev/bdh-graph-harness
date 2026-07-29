@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from bdh_graph_harness.graph.federated import build_federated_graph, migrate_legacy_state_ids
@@ -87,6 +88,30 @@ def test_external_source_include_exclude_and_cross_source_links(tmp_path):
     }]
 
 
+def test_federated_builder_warns_for_unresolved_explicit_external_wikilink(tmp_path, caplog):
+    """A broken explicit external reference must be visible at graph-build time."""
+    vault = tmp_path / "vault"
+    _write(
+        vault / "wiki/source.md",
+        "# Source\nSee [[external:projects/missing/design]].",
+    )
+
+    with caplog.at_level(logging.WARNING, logger="bdh.graph.federated"):
+        _nodes, _edges, unresolved = build_federated_graph([
+            VaultMarkdownSource(str(vault)),
+        ])
+
+    assert unresolved == [{
+        "source": "vault:wiki/source.md",
+        "target": "external:projects/missing/design",
+        "display": "external:projects/missing/design",
+        "source_path": "wiki/source.md",
+    }]
+    assert "unresolved_explicit_external_wikilinks" in caplog.text
+    assert "external:projects/missing/design" in caplog.text
+    assert "vault:wiki/source.md" in caplog.text
+
+
 def test_federated_builder_drops_resolved_self_wikilinks(tmp_path):
     vault = tmp_path / "vault"
     _write(vault / "wiki/concepts/self.md", "# Self\nSee [[self]] and [[other]].")
@@ -151,6 +176,43 @@ def test_federated_builder_materializes_validated_neurogenesis_source_edges(tmp_
         for edge in source_edges
     )
     assert any(item.get("kind") == "neurogenesis_source" for item in unresolved)
+
+
+def test_federated_builder_canonicalizes_legacy_activation_ids_without_rewriting_note(tmp_path):
+    vault = tmp_path / "vault"
+    newborn_path = vault / "wiki/newborn.md"
+    newborn_content = (
+        '---\nactivated_from_ids: ["wiki/source.md", "vault:missing.md", '
+        '"external:projects/missing.md"]\n---\n# Newborn'
+    )
+    _write(vault / "wiki/source.md", "# Source")
+    _write(newborn_path, newborn_content)
+
+    nodes, edges, unresolved = build_federated_graph(
+        [VaultMarkdownSource(str(vault))],
+        neurogenesis_source_edges_enabled=True,
+    )
+
+    source_id = "vault:wiki/source.md"
+    newborn_id = "vault:wiki/newborn.md"
+    assert source_id in nodes
+    assert any(
+        edge["target"] == source_id and edge["type"] == "neurogenesis_source"
+        for edge in edges[newborn_id]
+    )
+    assert not any(
+        item.get("kind") == "neurogenesis_source"
+        and item["source"] == newborn_id
+        and item["target"] == "wiki/source.md"
+        for item in unresolved
+    )
+    assert {
+        item["target"]
+        for item in unresolved
+        if item.get("kind") == "neurogenesis_source"
+        and item["source"] == newborn_id
+    } == {"vault:missing.md", "external:projects/missing.md"}
+    assert newborn_path.read_text(encoding="utf-8") == newborn_content
 
 
 def test_counterpart_edges_are_reciprocal_without_parent_node(tmp_path):
@@ -362,6 +424,13 @@ def test_migrate_legacy_state_ids_to_federated_vault_ids():
 
     migrated = migrate_legacy_state_ids(state, nodes)
 
-    assert "vault:wiki/concepts/bdh.md|vault:wiki/concepts/other.md" in migrated["synapses"]
+    from bdh_graph_harness.memory.hebbian import encode_synapse_key
+
+    assert encode_synapse_key(
+        "vault:wiki/concepts/bdh.md", "vault:wiki/concepts/other.md",
+    ) in migrated["synapses"]
+    # Migration creates an in-memory federated view; historical state remains
+    # legacy until an explicit, audited migration is requested.
+    assert "wiki/concepts/bdh|wiki/concepts/other" in state["synapses"]
     assert "vault:wiki/concepts/bdh.md" in migrated["node_quality"]
     assert migrated["dormant_nodes"] == ["vault:wiki/concepts/other.md"]

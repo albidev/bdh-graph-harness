@@ -10,10 +10,73 @@ from collections import defaultdict, deque
 from datetime import datetime
 
 from bdh_graph_harness.config import CONFIG, logger
+from bdh_graph_harness.memory.hebbian import (
+    encode_synapse_key,
+    safe_decode_synapse_key,
+)
 from bdh_graph_harness.retrieval.embeddings import get_embeddings
 from bdh_graph_harness.retrieval.bm25 import BM25Index
 from bdh_graph_harness.retrieval.hybrid import hybrid_score
 from bdh_graph_harness.graph.builder import _resolve_target
+
+
+def _query_relevance(query_embedding, collection, node_ids):
+    """Batch cosine relevance for traversal candidates against the query.
+
+    Graph traversal must not let edge insertion order stand in for semantic
+    relevance.  Fetch candidate embeddings in bounded batches so expansion
+    stays query-conditioned without issuing one Chroma request per neighbor.
+    """
+    candidate_ids = list(dict.fromkeys(node_ids))
+    if not candidate_ids:
+        return {}
+
+    scores = {}
+    query_norm = math.sqrt(sum(value * value for value in query_embedding))
+    batch_size = max(1, int(CONFIG.get("attention_relevance_batch_size", 256)))
+    for start in range(0, len(candidate_ids), batch_size):
+        payload = collection.get(
+            ids=candidate_ids[start:start + batch_size], include=["embeddings"],
+        )
+        for node_id, embedding in zip(payload.get("ids", []), payload.get("embeddings", [])):
+            target_norm = math.sqrt(sum(value * value for value in embedding))
+            scores[node_id] = (
+                sum(a * b for a, b in zip(query_embedding, embedding)) / (query_norm * target_norm)
+                if query_norm and target_norm else 0.0
+            )
+    return scores
+
+
+def _dynamic_query_relevance(query_embedding, collection, node_ids):
+    """Backward-compatible name for query-conditioned dynamic-edge relevance."""
+    return _query_relevance(query_embedding, collection, node_ids)
+
+
+def _build_associative_context(seeds, adjacency, primary_ids):
+    """Return a bounded, non-ranking Hebbian context lane from primary seeds."""
+    max_items = CONFIG.get('hebbian_associative_context_max_items', 2)
+    max_per_seed = CONFIG.get('hebbian_associative_context_max_per_seed', 1)
+    candidates = []
+    for seed_id, seed_score in seeds:
+        selected = 0
+        for target_id, weight, trust in adjacency.get(seed_id, []):
+            if target_id in primary_ids:
+                continue
+            association_score = seed_score * CONFIG.get('hebbian_dynamic_hop_decay', 0.6) * (0.5 + weight) * CONFIG.get('hebbian_dynamic_gain', 1.0) * trust
+            candidates.append({
+                'id': target_id,
+                'source_seed_id': seed_id,
+                'matched_by': 'hebbian_edge',
+                'association_score': association_score,
+                'hebbian_edge_weight': weight,
+                'hebbian_edge_trust': trust,
+            })
+            selected += 1
+            if selected >= max_per_seed:
+                break
+    candidates.sort(key=lambda item: item['association_score'], reverse=True)
+    seen = set()
+    return [item for item in candidates if not (item['id'] in seen or seen.add(item['id']))][:max_items]
 
 
 def _resolve_hebbian_node_id(node_id, valid_node_ids):
@@ -65,6 +128,22 @@ def _hebbian_dynamic_trust(synapse, now=None):
     return min(1.0, max(floor, frequency_factor * consolidation_factor * recency_factor))
 
 
+def _synapse_weight_for_pair(synapses, note_a, note_b):
+    """Read a pair weight from v2 state, falling back to decodable legacy keys."""
+    v2_synapse = synapses.get(encode_synapse_key(note_a, note_b))
+    if v2_synapse is not None:
+        return v2_synapse.get("weight", 0.0)
+
+    for key, synapse in synapses.items():
+        pair = safe_decode_synapse_key(key)
+        if pair is None:
+            continue
+        left, right = pair
+        if (left == note_a and right == note_b) or (left == note_b and right == note_a):
+            return synapse.get("weight", 0.0)
+    return 0.0
+
+
 # ---------------------------------------------------------------------------
 # Adaptive Threshold (Phase 3.3)
 # ---------------------------------------------------------------------------
@@ -111,6 +190,21 @@ def compute_adaptive_threshold(scores, floor=0.05, min_activations=3):
     return threshold
 
 
+def should_abstain_from_retrieval(vector_top_score, bm25_matched_term_count):
+    """Reject queries lacking seed-level retrieval evidence.
+
+    RRF scores are query-local rank normalizations: their top result is 1.0 by
+    construction and must not be treated as an absolute confidence score.
+    """
+    if not CONFIG.get('retrieval_abstention_enabled', True):
+        return False
+    return (
+        vector_top_score < CONFIG.get('retrieval_min_vector_score', 0.50)
+        and bm25_matched_term_count < CONFIG.get('retrieval_min_bm25_matched_terms', 2)
+    )
+
+
+
 # ---------------------------------------------------------------------------
 # Attention: Embedding seed + Graph traversal
 # ---------------------------------------------------------------------------
@@ -155,10 +249,10 @@ def _compute_hebbian_boost(candidate_id, hebbian_state, recently_active):
     # Collect synapse weights from candidate to recently active notes
     weights = []
     for key, syn in synapses.items():
-        try:
-            left, right = key.split('|', 1)
-        except ValueError:
+        pair = safe_decode_synapse_key(key)
+        if pair is None:
             continue
+        left, right = pair
         left = _resolve_hebbian_node_id(left, valid_ids)
         right = _resolve_hebbian_node_id(right, valid_ids)
         if left is None or right is None:
@@ -223,7 +317,10 @@ def _get_recently_active_notes(hebbian_state, valid_node_ids=None):
             try:
                 co_time = datetime.fromisoformat(last_co)
                 if co_time > recent_cutoff:
-                    parts = key.split('|')
+                    pair = safe_decode_synapse_key(key)
+                    if pair is None:
+                        continue
+                    parts = list(pair)
                     # Filter dead synapses if we have the valid node set
                     if valid_node_ids is not None:
                         parts = [
@@ -257,10 +354,10 @@ def _build_hebbian_adjacency(hebbian_state, valid_node_ids):
         weight = float(synapse.get("weight", 0.0))
         if weight < min_weight:
             continue
-        try:
-            left, right = key.split("|", 1)
-        except ValueError:
+        pair = safe_decode_synapse_key(key)
+        if pair is None:
             continue
+        left, right = pair
         left = _resolve_hebbian_node_id(left, valid_node_ids)
         right = _resolve_hebbian_node_id(right, valid_node_ids)
         if left is None or right is None:
@@ -373,24 +470,28 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
                 sim *= dampen
             scores[note_id] = sim
 
-    # Update routing metadata with chosen fusion and component scores.
+    # Seed evidence must be evaluated before graph expansion. In particular,
+    # RRF's per-query min-max normalization makes its top score 1.0 by design.
+    ranked = sorted(scores.values(), reverse=True)
+    vector_top_score = max(raw_vector_scores.values(), default=0.0)
+    bm25_ranked = sorted(bm25_scores.items(), key=lambda item: -item[1]) if hybrid_enabled else []
+    bm25_top_id = bm25_ranked[0][0] if bm25_ranked else None
+    bm25_query_terms = (
+        bm25_index._tokenize(query)
+        if hybrid_enabled and bm25_index is not None else []
+    )
+    bm25_matched_terms = (
+        bm25_index.matched_terms(query, bm25_top_id)
+        if hybrid_enabled and bm25_index is not None and bm25_top_id is not None else []
+    )
+    bm25_matched_term_count = len(bm25_matched_terms)
+
     if routing_meta is not None:
-        ranked = sorted(scores.values(), reverse=True)
-        bm25_ranked = sorted(bm25_scores.items(), key=lambda item: -item[1]) if hybrid_enabled else []
-        bm25_top_id = bm25_ranked[0][0] if bm25_ranked else None
-        bm25_query_terms = (
-            bm25_index._tokenize(query)
-            if hybrid_enabled and bm25_index is not None else []
-        )
-        bm25_matched_terms = (
-            bm25_index.matched_terms(query, bm25_top_id)
-            if hybrid_enabled and bm25_index is not None and bm25_top_id is not None else []
-        )
         routing_meta.update({
-            "vector_top_score": max(raw_vector_scores.values(), default=0.0),
+            "vector_top_score": vector_top_score,
             "bm25_top_score": max(bm25_scores.values(), default=0.0),
             "bm25_query_term_count": len(set(bm25_query_terms)),
-            "bm25_matched_term_count": len(bm25_matched_terms),
+            "bm25_matched_term_count": bm25_matched_term_count,
             "bm25_matched_terms": bm25_matched_terms,
             "hybrid_top_score": ranked[0] if ranked else 0.0,
             "hybrid_second_score": ranked[1] if len(ranked) > 1 else 0.0,
@@ -398,6 +499,16 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
             "hybrid_enabled": hybrid_enabled,
             "hybrid_fusion": CONFIG.get('hybrid_fusion', 'weighted') if hybrid_enabled else None,
         })
+
+    if should_abstain_from_retrieval(vector_top_score, bm25_matched_term_count):
+        if routing_meta is not None:
+            routing_meta.update({
+                "abstained": True,
+                "abstention_reason": "insufficient_retrieval_evidence",
+            })
+        return {}
+    if routing_meta is not None:
+        routing_meta.update({"abstained": False, "abstention_reason": None})
 
     # Keep retrieval-only scores separate from Hebbian and hop propagation scores.
     retrieval_scores = dict(scores)
@@ -449,7 +560,37 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
 
     # Step 2: Graph traversal — expand from seeds via wikilinks
     active = dict(seeds)
-    hebbian_adjacency = _build_hebbian_adjacency(hebbian_state, set(nodes))
+    learned_adjacency = _build_hebbian_adjacency(hebbian_state, set(nodes))
+    associative_context_enabled = CONFIG.get('hebbian_associative_context_enabled', False)
+    hebbian_adjacency = {} if associative_context_enabled else learned_adjacency
+    static_targets = []
+    dynamic_targets = []
+    candidate_frontier = set(seed_ids)
+    candidate_seen = set(seed_ids)
+    for _ in range(max_hop):
+        next_frontier = set()
+        for current_id in candidate_frontier:
+            for edge in edges.get(current_id, []):
+                target_id = _resolve_target(edge['target'], nodes)
+                if target_id is not None and target_id not in candidate_seen:
+                    static_targets.append(target_id)
+                    candidate_seen.add(target_id)
+                    next_frontier.add(target_id)
+            for target_id, _weight, _trust in hebbian_adjacency.get(current_id, []):
+                if target_id not in candidate_seen:
+                    dynamic_targets.append(target_id)
+                    candidate_seen.add(target_id)
+                    next_frontier.add(target_id)
+        candidate_frontier = next_frontier
+        if not candidate_frontier:
+            break
+    neighbor_relevance = _query_relevance(
+        query_emb,
+        collection,
+        static_targets + dynamic_targets,
+    )
+    dynamic_relevance = neighbor_relevance
+    dynamic_relevance_floor = CONFIG.get('hebbian_dynamic_query_relevance_floor', 0.0)
     queue = deque()
     for note_id, score in seeds:
         queue.append((note_id, score, 0, None))
@@ -475,25 +616,32 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
             target_id = _resolve_target(target, nodes)
             if target_id is None:
                 continue
+            relevance = neighbor_relevance.get(target_id)
             neighbors[target_id] = {
                 'matched_by': 'static_edge',
                 'hebbian_edge_weight': 0.0,
                 'hebbian_edge_trust': 0.0,
-                'priority': scores.get(target_id, 0.1),
+                'query_relevance': relevance,
+                'priority': relevance if relevance is not None else 0.1,
             }
 
         for target_id, weight, trust in hebbian_adjacency.get(current_id, []):
+            # Historical co-activation alone cannot displace declared graph
+            # knowledge. A learned-only edge also needs query-local semantic
+            # support before it enters this traversal.
+            if dynamic_relevance.get(target_id, 0.0) < dynamic_relevance_floor:
+                continue
             existing = neighbors.get(target_id)
             if existing:
                 existing['matched_by'] = 'static_and_hebbian_edge'
                 existing['hebbian_edge_weight'] = max(existing['hebbian_edge_weight'], weight)
                 existing['hebbian_edge_trust'] = max(existing['hebbian_edge_trust'], trust)
-                existing['priority'] = max(existing['priority'], weight)
             else:
                 neighbors[target_id] = {
                     'matched_by': 'hebbian_edge',
                     'hebbian_edge_weight': weight,
                     'hebbian_edge_trust': trust,
+                    'query_relevance': dynamic_relevance.get(target_id),
                     'priority': max(scores.get(target_id, 0.0), weight * trust),
                 }
 
@@ -505,6 +653,7 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
         for target_id, neighbor in neighbors:
             dynamic_weight = neighbor['hebbian_edge_weight']
             dynamic_trust = neighbor['hebbian_edge_trust']
+
             # Dynamic edges get an independently tunable decay. Static and
             # mixed edges preserve the existing graph traversal behavior.
             decay = (
@@ -513,6 +662,14 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
                 else CONFIG.get('hop_decay', 0.5)
             )
             new_score = score * decay
+            query_relevance = neighbor['query_relevance']
+            if (
+                neighbor['matched_by'] in {'static_edge', 'static_and_hebbian_edge'}
+                and query_relevance is not None
+            ):
+                # Keep explicit wikilinks traversable on sparse/noisy embeddings,
+                # while ensuring relevance actually ranks their propagated score.
+                new_score *= max(0.1, query_relevance)
             if neighbor['matched_by'] == 'hebbian_edge':
                 new_score *= ((0.5 + dynamic_weight) * CONFIG.get('hebbian_dynamic_gain', 1.0)
                               * dynamic_trust)
@@ -528,11 +685,8 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
             # boosts propagation when the synapse exists. hebbian_gain=0 reproduces old behavior.
             hebbian_gain = CONFIG.get('hebbian_gain', 0.0)
             if hebbian_gain > 0 and hebbian_state and neighbor['matched_by'] == 'static_edge':
-                syn_key = (
-                    f"{current_id}|{target_id}" if current_id < target_id
-                    else f"{target_id}|{current_id}"
-                )
-                syn_weight = hebbian_state.get('synapses', {}).get(syn_key, {}).get('weight', 0.0)
+                synapses = hebbian_state.get('synapses', {})
+                syn_weight = _synapse_weight_for_pair(synapses, current_id, target_id)
                 if syn_weight > 0:
                     new_score *= (1.0 + hebbian_gain * syn_weight)
 
@@ -546,6 +700,7 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
                             'matched_by': neighbor['matched_by'],
                             'hebbian_edge_weight': round(dynamic_weight, 4),
                             'hebbian_edge_trust': round(dynamic_trust, 4),
+                            'query_relevance': round(query_relevance, 4) if query_relevance is not None else None,
                             'final_score': round(new_score, 4),
                         })
             elif new_score > traversal_threshold:
@@ -557,6 +712,7 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
                     'matched_by': neighbor['matched_by'],
                     'hebbian_edge_weight': round(dynamic_weight, 4),
                     'hebbian_edge_trust': round(dynamic_trust, 4),
+                    'query_relevance': round(query_relevance, 4) if query_relevance is not None else None,
                     'vector_score': round(raw_vector_scores.get(target_id, 0.0), 4),
                     'bm25_score': round(bm25_scores.get(target_id, 0.0), 4),
                     'hybrid_score': round(retrieval_scores.get(target_id, 0.0), 4),
@@ -566,6 +722,12 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
                 queue.append((target_id, new_score, hop + 1, current_id))
 
     if routing_meta is not None:
+        if associative_context_enabled:
+            routing_meta['associative_context'] = _build_associative_context(
+                seeds=seeds,
+                adjacency=learned_adjacency,
+                primary_ids=set(active),
+            )
         routing_meta['activation_details'] = [
             {'id': nid, **activation_details[nid]}
             for nid, _score in sorted(active.items(), key=lambda item: -item[1])

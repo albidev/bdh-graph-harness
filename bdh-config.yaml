@@ -105,6 +105,7 @@ active_threshold: 0.25 # min activation score
 hub_dampening: true    # dampen high-degree hub nodes
 hub_degree_threshold: 15
 max_neighbors_per_hop: 10
+attention_relevance_batch_size: 256 # Chroma embedding IDs per traversal relevance batch
 
 # Integrate-and-Fire attention (Phase 4) — EXPERIMENTAL
 # When true, uses iterative accumulation + per-neuron threshold firing
@@ -151,6 +152,12 @@ hybrid_beta: 0.3    # weight for BM25 keyword score (only used if hybrid_search:
 rrf_k: 60           # rank fusion constant (only used if hybrid_search: true and hybrid_fusion: rrf)
 bm25_k1: 1.5
 bm25_b: 0.75
+
+# Query-level abstention runs before seed selection. RRF's top score is a
+# per-query normalized rank, not calibrated confidence.
+retrieval_abstention_enabled: true
+retrieval_min_vector_score: 0.58
+retrieval_min_bm25_matched_terms: 5
 
 # Adaptive threshold (Phase 3.3)
 adaptive_threshold: true

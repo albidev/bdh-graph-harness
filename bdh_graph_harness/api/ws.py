@@ -2,10 +2,77 @@
 
 import asyncio
 import json
+from copy import deepcopy
 
 from aiohttp import web
+from bdh_graph_harness.memory.hebbian import safe_decode_synapse_key
 
-__all__ = ["WebSocketManager", "broadcast_activation", "websocket_handler"]
+__all__ = [
+    "WebSocketManager",
+    "broadcast_activation",
+    "canonicalize_graph_event",
+    "websocket_handler",
+]
+
+
+def _endpoint_id(endpoint):
+    return endpoint.get("id") if isinstance(endpoint, dict) else endpoint
+
+
+def _canonical_edge_key(edge: dict) -> tuple[str, str, str]:
+    source = _endpoint_id(edge.get("source"))
+    target = _endpoint_id(edge.get("target"))
+    ordered = sorted((str(source), str(target)))
+    return ordered[0], ordered[1], edge.get("type", "wikilink")
+
+
+def canonicalize_graph_event(event: dict) -> dict:
+    """Return a stable, de-duplicated graph delta without changing its meaning."""
+    graph_delta_fields = {
+        "changed_nodes", "new_concepts", "deleted_nodes", "added_node_data",
+    }
+    if not graph_delta_fields.intersection(event):
+        return deepcopy(event)
+
+    canonical = deepcopy(event)
+    for field in ("changed_nodes", "new_concepts"):
+        values = canonical.get(field)
+        if values is not None:
+            by_id = {item["id"]: item for item in values if item and item.get("id")}
+            canonical[field] = [by_id[node_id] for node_id in sorted(by_id)]
+    if "deleted_nodes" in canonical:
+        canonical["deleted_nodes"] = sorted(set(canonical["deleted_nodes"]))
+
+    nodes_by_id = {}
+    for node in canonical.get("added_node_data", []):
+        if not node or not node.get("id"):
+            continue
+        node_id = node["id"]
+        merged = nodes_by_id.setdefault(node_id, {"id": node_id, "edges": []})
+        merged.update({key: value for key, value in node.items() if key != "edges"})
+        merged["edges"].extend(node.get("edges", []))
+
+    raw_edges_by_node = {
+        node_id: list(node.get("edges", []))
+        for node_id, node in nodes_by_id.items()
+    }
+    seen_edges = set()
+    for node_id in sorted(nodes_by_id):
+        nodes_by_id[node_id]["edges"] = []
+    for original_node_id in sorted(nodes_by_id):
+        for edge in raw_edges_by_node[original_node_id]:
+            if not isinstance(edge, dict) or not edge.get("source") or not edge.get("target"):
+                continue
+            source, target, edge_type = _canonical_edge_key(edge)
+            key = (source, target, edge_type)
+            if key in seen_edges:
+                continue
+            seen_edges.add(key)
+            canonical_edge = {**edge, "source": source, "target": target, "type": edge_type}
+            owner = source if source in nodes_by_id else original_node_id
+            nodes_by_id[owner]["edges"].append(canonical_edge)
+    canonical["added_node_data"] = [nodes_by_id[node_id] for node_id in sorted(nodes_by_id)]
+    return canonical
 
 
 class WebSocketManager:
@@ -20,7 +87,7 @@ class WebSocketManager:
 
     async def broadcast_activation(self, event: dict) -> None:
         """Broadcast an activation event to all connected WebSocket clients."""
-        msg = json.dumps(event)
+        msg = json.dumps(canonicalize_graph_event(event))
         dead = []
         for ws in self.clients:
             try:
@@ -30,89 +97,11 @@ class WebSocketManager:
         for ws in dead:
             self.clients.discard(ws)
 
-    async def websocket_handler(self, request, app_state: dict) -> web.WebSocketResponse:
-        """Handle WebSocket connections for real-time graph visualization."""
-        ws = web.WebSocketResponse()
-        await ws.prepare(request)
-        self.clients.add(ws)
-
-        # Send full graph on connect
-        n = app_state['nodes']
-        e = app_state['edges']
-        s = app_state['state']
-
-        node_list = []
-        for note_id, node in n.items():
-            node_list.append({
-                'id': note_id,
-                'title': node['title'],
-                'display_label': node.get('display_label', node['title']),
-                'context_label': node.get('context_label'),
-                'tags': node.get('tags', []),
-                'path': node.get('path', ''),
-                'absolute_path': node.get('absolute_path', node.get('path', '')),
-                'relative_path': node.get('relative_path', ''),
-                'source_id': node.get('source_id', 'vault'),
-                'source_type': node.get('source_type', 'vault'),
-                'project_group': node.get('project_group'),
-                'writable': node.get('writable', True),
-                'text': node.get('text', '')[:200],
-            })
-
-        # _resolve_target is in the graph module
-        from bdh_graph_harness.graph import _resolve_target
-
-        edge_list = []
-        for src, links in e.items():
-            for link in links:
-                target_id = _resolve_target(link['target'], n)
-                if target_id:
-                    edge_list.append({
-                        'source': src,
-                        'target': target_id,
-                        'display': link.get('display', link.get('relation', '')),
-                        'type': link.get('type', 'wikilink'),
-                        'weight': link.get('weight', 1.0),
-                        'explicit': link.get('explicit', True),
-                        'relation': link.get('relation'),
-                        'group_id': link.get('group_id'),
-                        'generated': link.get('generated', False),
-                    })
-
-        hebbian_list = []
-        for key, syn in s['synapses'].items():
-            a, b = key.split('|')
-            hebbian_list.append({
-                'note_a': a,
-                'note_b': b,
-                'weight': syn['weight'],
-                'frequency': syn.get('frequency', 0),
-            })
-
-        init_msg = {
-            'type': 'graph',
-            'nodes': node_list,
-            'edges': edge_list,
-            'hebbian': hebbian_list,
-            'stats': {
-                'neurons': len(n),
-                'synapses': sum(len(links) for links in e.values()),
-                'hebbian_synapses': len(s['synapses']),
-                'dormant_neurons': len(s.get('dormant_nodes', [])),
-                'phantom_links': len(s.get('phantom_links', [])),
-            },
-        }
-        await ws.send_str(json.dumps(init_msg))
-
-        # Listen for messages (ping/pong keepalive)
-        try:
-            async for msg in ws:
-                if msg.type == web.WSMsgType.ERROR:
-                    break
-        finally:
-            self.clients.discard(ws)
-
-        return ws
+    async def websocket_handler(
+        self, request, app_state: dict,
+    ) -> web.WebSocketResponse | web.Response:
+        """Compatibility adapter for the canonical multi-vault handler."""
+        return await websocket_handler(request, app_state, self.clients)
 
 
 # ---- Module-level convenience functions (backwards-compatible API) ----
@@ -128,7 +117,7 @@ async def broadcast_activation(event: dict, ws_clients: set = None) -> None:
     module-level default manager.
     """
     if ws_clients is not None:
-        msg = json.dumps(event)
+        msg = json.dumps(canonicalize_graph_event(event))
         dead = []
         # Copy the set to avoid RuntimeError: Set changed size during iteration
         for ws in list(ws_clients):
@@ -146,7 +135,9 @@ async def broadcast_activation(event: dict, ws_clients: set = None) -> None:
         await _default_manager.broadcast_activation(event)
 
 
-async def websocket_handler(request, app_state: dict, ws_clients: set = None) -> web.WebSocketResponse:
+async def websocket_handler(
+    request, app_state: dict, ws_clients: set | None = None,
+) -> web.WebSocketResponse | web.Response:
     """WebSocket handler.
 
     Resolves the target vault from the ``vault_id`` query parameter
@@ -157,15 +148,8 @@ async def websocket_handler(request, app_state: dict, ws_clients: set = None) ->
     that set (matching the original closure-based design where ``ws_clients``
     was captured from the enclosing ``start_api_server`` scope).
     """
-    ws = web.WebSocketResponse(heartbeat=30.0)  # ping every 30s to keep alive
-    await ws.prepare(request)
-
-    if ws_clients is not None:
-        ws_clients.add(ws)
-    else:
-        _default_manager.clients.add(ws)
-
-    # Resolve vault context (default if vault_id not specified)
+    # Resolve vault context before upgrading the connection.  An unknown
+    # explicit vault_id must not silently attach to the default vault.
     vault_id = request.query.get('vault_id') or None
     registry = app_state.get('registry')
     event_sequence = 0
@@ -173,7 +157,13 @@ async def websocket_handler(request, app_state: dict, ws_clients: set = None) ->
         try:
             ctx = registry.get(vault_id)
         except KeyError:
-            ctx = registry.get()  # fall back to default
+            return web.json_response(
+                {
+                    'error': f"Unknown vault '{vault_id}'",
+                    'available_vaults': registry.available_ids(),
+                },
+                status=400,
+            )
         n = ctx.nodes
         e = ctx.edges
         s = ctx.state
@@ -185,6 +175,13 @@ async def websocket_handler(request, app_state: dict, ws_clients: set = None) ->
         e = app_state.get('edges', {})
         s = app_state.get('state', {'synapses': {}})
         vault_id_label = app_state.get('vault_id', 'default')
+
+    ws = web.WebSocketResponse(heartbeat=30.0)  # ping every 30s to keep alive
+    await ws.prepare(request)
+    if ws_clients is not None:
+        ws_clients.add(ws)
+    else:
+        _default_manager.clients.add(ws)
 
     try:
         setattr(ws, '_bdh_vault_id', vault_id_label)
@@ -226,7 +223,10 @@ async def websocket_handler(request, app_state: dict, ws_clients: set = None) ->
 
     hebbian_list = []
     for key, syn in s['synapses'].items():
-        a, b = key.split('|')
+        pair = safe_decode_synapse_key(key)
+        if pair is None:
+            continue
+        a, b = pair
         hebbian_list.append({
             'note_a': a,
             'note_b': b,

@@ -33,10 +33,12 @@ import json
 import logging
 import urllib.request
 import urllib.error
+from urllib.parse import quote
 
 from mcp.server.fastmcp import FastMCP
 
 from bdh_graph_harness.config import load_config
+from bdh_graph_harness.memory.hebbian import safe_decode_synapse_key
 
 logger = logging.getLogger("bdh-mcp")
 
@@ -53,6 +55,11 @@ def _api_url(path: str, host: str | None = None, port: int | None = None) -> str
     h = host or os.environ.get("BDH_API_HOST", DEFAULT_API_HOST)
     p = port or int(os.environ.get("BDH_API_PORT", str(DEFAULT_API_PORT)))
     return f"http://{h}:{p}{path}"
+
+
+def _api_url_with_vault(path: str, vault_id: str) -> str:
+    """Build a web API URL scoped to a percent-encoded vault identifier."""
+    return f"{_api_url(path)}?vault_id={quote(vault_id, safe='')}"
 
 
 def _http_get(url: str, timeout: float = 30) -> dict | None:
@@ -89,6 +96,28 @@ def _http_post(url: str, body: dict, timeout: float = 120) -> dict | None:
 
 # Per-vault fallback cache.  Key = vault_id (or 'default' for single-vault mode).
 _fallback_by_vault: dict[str, dict] = {}
+
+# Fallback queries can persist Hebbian state and create notes while the web
+# registry is unavailable.  The next successful HTTP operation must rebuild
+# the registry before it serves stale in-memory state.
+_fallback_dirty_vaults: set[str] = set()
+
+
+def _fallback_vault_key(vault_id: str | None) -> str:
+    return vault_id or "default"
+
+
+def _refresh_registry_after_fallback(vault_id: str | None) -> bool:
+    """Refresh a recovered registry before it serves a fallback-written vault."""
+    key = _fallback_vault_key(vault_id)
+    if key not in _fallback_dirty_vaults:
+        return True
+    payload = {"vault_id": vault_id} if vault_id is not None else {}
+    if _http_post(_api_url("/api/refresh"), payload) is None:
+        return False
+    _fallback_dirty_vaults.discard(key)
+    logger.info("Refreshed web registry after MCP fallback write [%s]", key)
+    return True
 
 # Global config cache for vault resolution
 _fallback_config: dict | None = None
@@ -278,7 +307,10 @@ def _fallback_stats(vault_id: str | None = None) -> str:
     if state["synapses"]:
         sorted_syn = sorted(state["synapses"].items(), key=lambda x: -x[1]["weight"])[:10]
         for key, syn in sorted_syn:
-            a, b = key.split("|")
+            pair = safe_decode_synapse_key(key)
+            if pair is None:
+                continue
+            a, b = pair
             top_hebbian.append({
                 "pair": f"{a} ↔ {b}",
                 "weight": round(syn["weight"], 4),
@@ -306,7 +338,10 @@ def _fallback_hebbian(vault_id: str | None = None) -> str:
 
     synapses = []
     for key, syn in sorted(state["synapses"].items(), key=lambda x: -x[1]["weight"]):
-        a, b = key.split("|")
+        pair = safe_decode_synapse_key(key)
+        if pair is None:
+            continue
+        a, b = pair
         title_a = nodes.get(a, {}).get("title", a)
         title_b = nodes.get(b, {}).get("title", b)
         synapses.append({
@@ -461,6 +496,14 @@ def query(question: str, vault_id: str | None = None) -> str:
         with similarity scores), new_concepts (if any were created),
         hebbian_updates (synaptic changes from this query).
     """
+    # A fallback query may have persisted state or created notes.  Do not let a
+    # recovered server answer from its pre-fallback registry.
+    if not _refresh_registry_after_fallback(vault_id):
+        logger.warning("Web registry refresh failed, using in-process fallback pipeline")
+        result = _fallback_query(question, vault_id=vault_id)
+        _fallback_dirty_vaults.add(_fallback_vault_key(vault_id))
+        return result
+
     # Try the web server first (thin client)
     payload: dict = {"query": question}
     if vault_id is not None:
@@ -471,7 +514,9 @@ def query(question: str, vault_id: str | None = None) -> str:
 
     # Fallback: in-process pipeline
     logger.warning("Web server not reachable, using in-process fallback pipeline")
-    return _fallback_query(question, vault_id=vault_id)
+    result = _fallback_query(question, vault_id=vault_id)
+    _fallback_dirty_vaults.add(_fallback_vault_key(vault_id))
+    return result
 
 
 @mcp.tool()
@@ -487,7 +532,7 @@ def stats(vault_id: str | None = None) -> str:
     """
     url = _api_url("/api/stats")
     if vault_id is not None:
-        url = f"{url}?vault_id={vault_id}"
+        url = _api_url_with_vault("/api/stats", vault_id)
     result = _http_get(url)
     if result is not None:
         # Web API already returns the right keys, just pass through
@@ -514,7 +559,7 @@ def hebbian(vault_id: str | None = None) -> str:
     """
     url = _api_url("/api/hebbian")
     if vault_id is not None:
-        url = f"{url}?vault_id={vault_id}"
+        url = _api_url_with_vault("/api/hebbian", vault_id)
     result = _http_get(url)
     if result is not None:
         # Normalise: web API uses 'total' + 'queries', MCP uses 'total_synapses' + 'queries_processed'
@@ -546,7 +591,7 @@ def graph(vault_id: str | None = None) -> str:
     """
     url = _api_url("/api/graph")
     if vault_id is not None:
-        url = f"{url}?vault_id={vault_id}"
+        url = _api_url_with_vault("/api/graph", vault_id)
     result = _http_get(url)
     if result is not None:
         # Normalise: web API returns 'nodes' + 'edges' without counts
@@ -587,7 +632,7 @@ def refresh(vault_id: str | None = None) -> str:
         if "hebbian_synapses" not in result:
             stats_url = _api_url("/api/stats")
             if vault_id is not None:
-                stats_url = f"{stats_url}?vault_id={vault_id}"
+                stats_url = _api_url_with_vault("/api/stats", vault_id)
             s = _http_get(stats_url)
             if s and "hebbian_synapses" in s:
                 result["hebbian_synapses"] = s["hebbian_synapses"]

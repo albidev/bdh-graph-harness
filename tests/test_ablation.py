@@ -40,6 +40,42 @@ def test_cold_pass_never_updates_hebbian_state(monkeypatch):
     assert updates == []
 
 
+def test_materialized_graph_uses_configured_federated_builder(monkeypatch):
+    monkeypatch.setitem(ablation.CONFIG, "external_sources", [{"id": "projects"}])
+    expected_nodes = {"external:projects/readme": {}}
+    expected_edges = {"external:projects/readme": []}
+    calls = []
+
+    def fake_builder(config, *, use_cache):
+        calls.append((config, use_cache))
+        return expected_nodes, expected_edges, []
+
+    monkeypatch.setattr(ablation, "build_configured_graph", fake_builder)
+
+    nodes, edges, state_path = ablation._build_materialized_graph()
+
+    assert (nodes, edges, state_path) == (expected_nodes, expected_edges, None)
+    assert calls == [(ablation.CONFIG, True)]
+
+
+def test_resolve_benchmark_vault_uses_configured_default_vault():
+    config = {
+        "default_vault": "core",
+        "chroma_path": "/tmp/chroma",
+        "vaults": [
+            {"id": "core", "path": "/tmp/core", "external_sources": [{"id": "projects"}]},
+            {"id": "episodic", "path": "/tmp/episodic"},
+        ],
+    }
+
+    settings = ablation._resolve_benchmark_vault_settings(config)
+
+    assert settings["vault_path"] == "/tmp/core"
+    assert settings["external_sources"] == [{"id": "projects"}]
+    assert settings["chroma_collection"] == "vault_core_notes"
+    assert "vaults" not in settings
+
+
 def test_instrumented_query_calls_attention_once(monkeypatch):
     calls = []
     monkeypatch.setattr(ablation, "attention", _fake_attention(calls))
@@ -89,6 +125,51 @@ def test_golden_set_validator_accepts_multiple_existing_semantic_targets():
             "traversal": {"title": "Graph Traversal"},
         },
     )
+
+
+def test_golden_set_validator_accepts_expected_empty_negative_query():
+    ablation.validate_golden_set(
+        [
+            {
+                "query": "What is the rainfall forecast for Rome tomorrow?",
+                "expected_empty": True,
+                "relevant_note_ids": [],
+            }
+        ],
+        {},
+    )
+
+
+def test_run_pass_excludes_expected_empty_queries_from_ranking_metrics(monkeypatch):
+    monkeypatch.setattr(ablation, "attention", lambda *_args, **_kwargs: {"target": 1.0})
+
+    metrics, _metadata = ablation._run_pass(
+        [
+            {"query": "positive", "relevant_note_ids": ["target"]},
+            {"query": "negative", "expected_empty": True, "relevant_note_ids": []},
+        ],
+        {"target": {"title": "Target"}},
+        {},
+        object(),
+        object(),
+        ablation._fresh_state(),
+        cold=True,
+        collect_hops=False,
+    )
+
+    assert metrics.mrr == 1.0
+    assert metrics.negative_query_count == 1
+    assert metrics.negative_nonempty_rate == 1.0
+    assert metrics.per_query[1]["is_correct_rejection"] is False
+
+
+def test_serialize_includes_negative_control_metrics():
+    serialized = ablation._serialize(
+        ablation.Metrics(negative_query_count=10, negative_nonempty_rate=0.2)
+    )
+
+    assert serialized["negative_query_count"] == 10
+    assert serialized["negative_nonempty_rate"] == 0.2
 
 
 def test_hebbian_trajectory_trains_only_on_training_queries(monkeypatch):

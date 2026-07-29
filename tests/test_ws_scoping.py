@@ -1,6 +1,15 @@
-import pytest
+from types import SimpleNamespace
 
-from bdh_graph_harness.api.ws import broadcast_activation
+import pytest
+from aiohttp import WSServerHandshakeError, web
+from aiohttp.test_utils import TestClient, TestServer
+
+from bdh_graph_harness.api.routes import setup_routes
+from bdh_graph_harness.api.ws import (
+    WebSocketManager,
+    broadcast_activation,
+    canonicalize_graph_event,
+)
 
 
 class FakeWebSocket:
@@ -10,6 +19,53 @@ class FakeWebSocket:
 
     async def send_str(self, message):
         self.messages.append(message)
+
+
+def test_canonicalize_graph_event_leaves_non_graph_events_unchanged():
+    event = {"type": "activation", "query": "hello", "activated_notes": []}
+
+    canonical = canonicalize_graph_event(event)
+
+    assert canonical == event
+    assert canonical is not event
+
+
+def test_canonicalize_graph_event_dedupes_equivalent_payload_edges_and_nodes():
+    event = {
+        "type": "graph_refresh",
+        "changed_nodes": [
+            {"id": "b", "title": "B"},
+            {"id": "a", "title": "A"},
+            {"id": "b", "title": "B newer"},
+        ],
+        "deleted_nodes": ["gone", "gone"],
+        "new_concepts": [{"id": "b"}, {"id": "b"}],
+        "added_node_data": [
+            {
+                "id": "b",
+                "edges": [
+                    {"source": "b", "target": "a", "type": "wikilink"},
+                    {"source": "b", "target": "a", "type": "wikilink"},
+                ],
+            },
+            {
+                "id": "a",
+                "edges": [{"source": "a", "target": "b", "type": "wikilink"}],
+            },
+        ],
+    }
+
+    canonical = canonicalize_graph_event(event)
+
+    assert [node["id"] for node in canonical["changed_nodes"]] == ["a", "b"]
+    assert canonical["changed_nodes"][1]["title"] == "B newer"
+    assert canonical["deleted_nodes"] == ["gone"]
+    assert canonical["new_concepts"] == [{"id": "b"}]
+    assert [node["id"] for node in canonical["added_node_data"]] == ["a", "b"]
+    assert sum(len(node["edges"]) for node in canonical["added_node_data"]) == 1
+    assert canonical["added_node_data"][0]["edges"] == [
+        {"source": "a", "target": "b", "type": "wikilink"},
+    ]
 
 
 @pytest.mark.asyncio
@@ -38,3 +94,82 @@ async def test_broadcast_activation_keeps_legacy_clients_compatible():
 
     assert len(legacy.messages) == 1
     assert len(core.messages) == 1
+
+
+class _Registry:
+    """Minimal multi-vault registry for the WebSocket routing contract."""
+
+    def __init__(self):
+        self._contexts = {
+            "core": SimpleNamespace(
+                config=SimpleNamespace(id="core"),
+                nodes={},
+                edges={},
+                state={"synapses": {}},
+                event_sequence=0,
+            ),
+            "episodic": SimpleNamespace(
+                config=SimpleNamespace(id="episodic"),
+                nodes={},
+                edges={},
+                state={"synapses": {}},
+                event_sequence=0,
+            ),
+        }
+
+    def get(self, vault_id=None):
+        target = vault_id or "core"
+        if target not in self._contexts:
+            raise KeyError(target)
+        return self._contexts[target]
+
+    def available_ids(self):
+        return list(self._contexts)
+
+
+@pytest.mark.asyncio
+async def test_websocket_rejects_unknown_vault_instead_of_falling_back_to_default():
+    app = web.Application()
+    setup_routes(app, {"registry": _Registry()}, set())
+    client = TestClient(TestServer(app))
+    await client.start_server()
+
+    try:
+        response = await client.get("/ws?vault_id=unknown")
+
+        assert response.status == 400
+        assert await response.json() == {
+            "error": "Unknown vault 'unknown'",
+            "available_vaults": ["core", "episodic"],
+        }
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_legacy_manager_rejects_unknown_vault_like_canonical_handler():
+    manager = WebSocketManager()
+    app = web.Application()
+    app_state = {
+        "registry": _Registry(),
+        # The duplicate legacy handler currently consumes these flat keys.
+        "nodes": {},
+        "edges": {},
+        "state": {"synapses": {}},
+    }
+
+    async def legacy_ws_route(request):
+        return await manager.websocket_handler(request, app_state)
+
+    app.router.add_get("/ws", legacy_ws_route)
+    client = TestClient(TestServer(app))
+    await client.start_server()
+
+    try:
+        with pytest.raises(WSServerHandshakeError) as error:
+            await client.ws_connect("/ws?vault_id=unknown")
+
+        assert error.value.status == 400
+        assert not manager.clients
+    finally:
+        await client.close()

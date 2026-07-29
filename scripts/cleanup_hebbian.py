@@ -12,6 +12,8 @@ import json
 import sys
 from pathlib import Path
 
+from bdh_graph_harness.memory.hebbian import safe_decode_synapse_key
+
 
 def load_state(vault_root):
     state_path = Path(vault_root) / ".bdh-state.json"
@@ -40,8 +42,7 @@ def load_graph_edges(vault_root):
     for src, targets in edges.items():
         for t in targets:
             target_id = t['target'] if isinstance(t, dict) else t
-            connected.add(f"{src}|{target_id}")
-            connected.add(f"{target_id}|{src}")
+            connected.add(frozenset((src, target_id)))
     return connected
 
 
@@ -61,8 +62,12 @@ def cleanup(vault_root, dry_run=False):
         if freq > 1 or weight >= 0.5:
             continue
 
+        pair = safe_decode_synapse_key(key)
+        if pair is None:
+            continue
+
         # Keep if direct wikilink exists
-        if key in wikilinks:
+        if frozenset(pair) in wikilinks:
             continue
 
         # This is a weak, non-wikilink synapse — remove
@@ -78,7 +83,10 @@ def cleanup(vault_root, dry_run=False):
         if removed_voicebox:
             print(f"\n  Removing {len(removed_voicebox)} voicebox synapses:")
             for k in removed_voicebox:
-                a, b = k.split('|')
+                pair = safe_decode_synapse_key(k)
+                if pair is None:
+                    continue
+                a, b = pair
                 print(f"    {a.split('/')[-1]} <-> {b.split('/')[-1]}")
 
         if not dry_run:

@@ -20,6 +20,7 @@ from bdh_graph_harness.visualization import render_viz_html, get_template_path
 from bdh_graph_harness.retrieval.attention import attention
 from bdh_graph_harness.retrieval.shadow import append_dynamic_shadow, build_dynamic_shadow
 from bdh_graph_harness.memory import hebbian_update, save_state
+from bdh_graph_harness.memory.hebbian import safe_decode_synapse_key
 from bdh_graph_harness.memory.state_store import reconcile_state_to_nodes
 from bdh_graph_harness.memory.consolidation import (
     consolidate,
@@ -43,6 +44,7 @@ from bdh_graph_harness.neurogenesis.merge import (
     looks_conflicting,
 )
 from bdh_graph_harness.graph import _resolve_target
+from bdh_graph_harness.graph.federated import project_runtime_state_to_persisted
 from bdh_graph_harness.api.ws import broadcast_activation
 
 __all__ = [
@@ -67,6 +69,27 @@ __all__ = [
 # ---------------------------------------------------------------------------
 # Vault resolution helpers
 # ---------------------------------------------------------------------------
+
+def _hebbian_state_status(settings: dict, state: dict) -> dict:
+    """Expose the learning state honestly without leaking edge content."""
+    state_file = settings.get('hebbian_state_file', '.bdh-state.json')
+    basename = os.path.basename(state_file)
+    if basename == '.bdh-state.json':
+        mode = 'legacy_active'
+    elif 'primary-seeds-v2' in basename:
+        mode = 'clean_room_shadow'
+    elif 'legacy-curated' in basename:
+        mode = 'curated_experimental'
+    else:
+        mode = 'custom'
+    return {
+        'mode': mode,
+        'state_file': basename,
+        'synapses': len(state.get('synapses', {})),
+        'associative_context_enabled': bool(settings.get('hebbian_associative_context_enabled', False)),
+        'primary_ranking_affected': False,
+    }
+
 
 def _resolve_vault_ctx(app_state: dict, vault_id: str | None = None):
     """Resolve the target :class:`~bdh_graph_harness.vaults.VaultContext`.
@@ -138,6 +161,34 @@ async def api_health(request, app_state: dict) -> web.Response:
     return web.json_response({'status': 'ok'})
 
 
+def record_retrieval_telemetry(ctx, routing: dict, active: dict) -> None:
+    """Aggregate per-vault retrieval evidence without retaining query content."""
+    telemetry = ctx.retrieval_telemetry
+    telemetry['query_count'] = telemetry.get('query_count', 0) + 1
+    telemetry['abstained_count'] = telemetry.get('abstained_count', 0) + int(bool(routing.get('abstained')))
+    telemetry['activated_note_count'] = telemetry.get('activated_note_count', 0) + len(active)
+    telemetry['vector_top_score_sum'] = telemetry.get('vector_top_score_sum', 0.0) + float(routing.get('vector_top_score') or 0.0)
+    telemetry['bm25_matched_term_count_sum'] = telemetry.get('bm25_matched_term_count_sum', 0) + int(routing.get('bm25_matched_term_count') or 0)
+    if reason := routing.get('abstention_reason'):
+        reasons = telemetry.setdefault('abstention_reasons', {})
+        reasons[reason] = reasons.get(reason, 0) + 1
+
+
+def retrieval_telemetry_summary(telemetry: dict) -> dict:
+    """Return public aggregate retrieval health, excluding all raw inputs."""
+    query_count = telemetry.get('query_count', 0)
+    return {
+        'query_count': query_count,
+        'abstained_count': telemetry.get('abstained_count', 0),
+        'abstention_rate': round(telemetry.get('abstained_count', 0) / query_count, 4) if query_count else 0.0,
+        'activated_note_count': telemetry.get('activated_note_count', 0),
+        'mean_activated_notes': round(telemetry.get('activated_note_count', 0) / query_count, 4) if query_count else 0.0,
+        'mean_vector_top_score': round(telemetry.get('vector_top_score_sum', 0.0) / query_count, 4) if query_count else 0.0,
+        'mean_bm25_matched_terms': round(telemetry.get('bm25_matched_term_count_sum', 0) / query_count, 4) if query_count else 0.0,
+        'abstention_reasons': dict(telemetry.get('abstention_reasons', {})),
+    }
+
+
 async def api_stats(request, app_state: dict) -> web.Response:
     """Return graph stats + Hebbian summary as JSON."""
     ctx, err = _resolve_vault_ctx(app_state, _vault_id_from_query(request))
@@ -152,6 +203,7 @@ async def api_stats(request, app_state: dict) -> web.Response:
         'synapses': sum(len(links) for links in e.values()),
         'avg_degree': sum(len(links) for links in e.values()) / max(len(e), 1),
         'hebbian_synapses': len(s['synapses']),
+        'hebbian_state': _hebbian_state_status(ctx.config.settings, s),
         'queries_processed': s.get('queries', 0),
         'dormant_neurons': len(dormant),
         'active_neurons': len(n) - len(dormant),
@@ -163,14 +215,18 @@ async def api_stats(request, app_state: dict) -> web.Response:
             'model': ctx.config.settings.get('llm_model'),
             'endpoint': ctx.config.settings.get('llm_endpoint'),
         },
+        'retrieval_telemetry': retrieval_telemetry_summary(ctx.retrieval_telemetry),
     }
     stats.update(hebbian_tail_stats(s, config=ctx.config.settings))
     if s['synapses']:
-        sorted_syn = sorted(s['synapses'].items(), key=lambda x: -x[1]['weight'])[:10]
-        stats['top_hebbian'] = [
-            {'pair': key, 'weight': syn['weight'], 'frequency': syn['frequency']}
-            for key, syn in sorted_syn
-        ]
+        for key, syn in sorted(s['synapses'].items(), key=lambda x: -x[1]['weight'])[:10]:
+            pair = safe_decode_synapse_key(key)
+            if pair is None:
+                continue
+            stats['top_hebbian'].append({
+                'note_a': pair[0], 'note_b': pair[1],
+                'weight': syn['weight'], 'frequency': syn['frequency'],
+            })
     return web.json_response(stats)
 
 
@@ -225,7 +281,10 @@ async def api_graph(request, app_state: dict) -> web.Response:
 
     hebbian_list = []
     for key, syn in s['synapses'].items():
-        a, b = key.split('|')
+        pair = safe_decode_synapse_key(key)
+        if pair is None:
+            continue
+        a, b = pair
         hebbian_list.append({
             'note_a': a,
             'note_b': b,
@@ -247,6 +306,7 @@ async def api_graph(request, app_state: dict) -> web.Response:
             'neurons': len(n),
             'synapses': sum(len(links) for links in e.values()),
             'hebbian_synapses': len(s['synapses']),
+            'hebbian_state': _hebbian_state_status(ctx.config.settings, s),
             'dormant_neurons': len(s.get('dormant_nodes', [])),
             'phantom_links': len(phantom_list),
         },
@@ -261,7 +321,10 @@ async def api_hebbian(request, app_state: dict) -> web.Response:
     s = ctx.state
     synapses = []
     for key, syn in sorted(s['synapses'].items(), key=lambda x: -x[1]['weight']):
-        a, b = key.split('|')
+        pair = safe_decode_synapse_key(key)
+        if pair is None:
+            continue
+        a, b = pair
         synapses.append({
             'note_a': a,
             'note_b': b,
@@ -270,7 +333,7 @@ async def api_hebbian(request, app_state: dict) -> web.Response:
             'last_coactivated': syn['last_coactivated'],
         })
     return web.json_response({
-        'total': len(s['synapses']),
+        'total': len(synapses),
         'queries': s.get('queries', 0),
         'synapses': synapses,
     })
@@ -327,6 +390,8 @@ async def _run_attention_and_plasticity_unlocked(
             'multi_query_enabled': False,
         })
 
+    record_retrieval_telemetry(ctx, routing, active)
+
     activated_notes = []
     activation_details = {
         item['id']: item for item in routing.get('activation_details', [])
@@ -352,6 +417,17 @@ async def _run_attention_and_plasticity_unlocked(
                 note_payload['source_id'] = node.get('source_id', 'vault')
             activated_notes.append(note_payload)
 
+    associative_context = []
+    for item in routing.get('associative_context', []):
+        node = n.get(item['id'])
+        associative_context.append({
+            **item,
+            'title': node['title'] if node else item['id'],
+            **({'path': node['path']} if node and node.get('path') else {}),
+        })
+    if associative_context:
+        routing['associative_context'] = associative_context
+
     if config.get('hebbian_dynamic_shadow_enabled', True):
         dynamic_shadow = build_dynamic_shadow(query, routing)
         routing['hebbian_dynamic_shadow'] = dynamic_shadow
@@ -364,22 +440,36 @@ async def _run_attention_and_plasticity_unlocked(
     updated_keys = set()
     pruned_count = 0
     if learn and config.get('online_plasticity', True) and active:
+        # Learn only from direct retrieval seeds. Graph-propagated neighbors are read
+        # context, not evidence that two notes should form a durable association.
+        learning_active = {
+            item['id']: active[item['id']]
+            for item in routing.get('activation_details', [])
+            if item.get('role') == 'seed' and item['id'] in active
+        }
         # Acquire lock, then run hebbian_update + save_state in a thread
         async with ctx.state_lock:
             ctx.state, updated_keys, pruned_count = await asyncio.to_thread(
-                hebbian_update, active, ctx.state, n, source
+                hebbian_update, learning_active, ctx.state, n, source
             )
-            await asyncio.to_thread(
-                save_state, ctx.config.path, ctx.state
-            )
+            if ctx.persisted_state is not None:
+                ctx.persisted_state = project_runtime_state_to_persisted(
+                    ctx.persisted_state, ctx.state, n,
+                )
+                state_to_save = ctx.persisted_state
+            else:
+                state_to_save = ctx.state
+            await asyncio.to_thread(save_state, ctx.config.path, state_to_save)
 
     # Collect ONLY hebbian synapses updated in this query (for pulse animation)
     hebbian_updates = []
     for key in updated_keys:
         syn = ctx.state['synapses'].get(key)
-        if syn:
+        pair = safe_decode_synapse_key(key)
+        if syn and pair is not None:
             hebbian_updates.append({
-                'pair': key,
+                'note_a': pair[0],
+                'note_b': pair[1],
                 'weight': syn['weight'],
                 'frequency': syn.get('frequency', 0),
             })
@@ -779,19 +869,21 @@ async def api_refresh(request, app_state: dict) -> web.Response:
     ctx, err = _resolve_vault_ctx(app_state, _vault_id_from_body(data))
     if err:
         return err
+    assert ctx is not None
 
-    n = ctx.nodes
-    vault_root = ctx.config.path
+    async with ctx.runtime_lock:
+        n = ctx.nodes
+        vault_root = ctx.config.path
 
-    from bdh_graph_harness.retrieval import compute_all_embeddings
-    coll = await asyncio.to_thread(
-        compute_all_embeddings, n, vault_root, False,
-        chroma_path=ctx.config.chroma_path,
-        collection_name=ctx.config.chroma_collection,
-        config=ctx.config.settings,
-    )
-    ctx.collection = coll
-    return web.json_response({'status': 'ok', 'embeddings': coll.count()})
+        from bdh_graph_harness.retrieval import compute_all_embeddings
+        coll = await asyncio.to_thread(
+            compute_all_embeddings, n, vault_root, False,
+            chroma_path=ctx.config.chroma_path,
+            collection_name=ctx.config.chroma_collection,
+            config=ctx.config.settings,
+        )
+        ctx.collection = coll
+        return web.json_response({'status': 'ok', 'embeddings': coll.count()})
 
 
 async def api_node_update(request, app_state: dict, ws_clients: set) -> web.Response:
@@ -951,6 +1043,7 @@ async def _api_refresh_graph_unlocked(request, app_state: dict, ws_clients: set)
     ctx, err = _resolve_vault_ctx(app_state, _vault_id_from_body(data))
     if err:
         return err
+    assert ctx is not None
 
     vault_root = ctx.config.path
     config = ctx.config.settings
@@ -969,7 +1062,13 @@ async def _api_refresh_graph_unlocked(request, app_state: dict, ws_clients: set)
     ctx.edges = edges
     ctx.state = reconcile_state_to_nodes(ctx.state, nodes)
     ctx.state['unresolved_links'] = unresolved
-    save_state(vault_root, ctx.state, valid_node_ids=set(nodes))
+    if ctx.persisted_state is not None:
+        # Federated runtime state uses canonical IDs. Preserve the raw state
+        # file instead of serializing this transient normalized representation.
+        ctx.persisted_state['unresolved_links'] = unresolved
+        save_state(vault_root, ctx.persisted_state)
+    else:
+        save_state(vault_root, ctx.state, valid_node_ids=set(nodes))
 
     new_node_ids = set(nodes.keys()) - old_node_ids
     changed_nodes = []
@@ -1302,6 +1401,7 @@ async def api_consolidate(request, app_state: dict, ws_clients: set) -> web.Resp
     ctx, err = _resolve_vault_ctx(app_state, _vault_id_from_body(data))
     if err:
         return err
+    assert ctx is not None
 
     n = ctx.nodes
     e = ctx.edges
@@ -1322,7 +1422,14 @@ async def api_consolidate(request, app_state: dict, ws_clients: set) -> web.Resp
             consolidate, ctx.state, n, e,
             config=config, collection=ctx.collection,
         )
-        await asyncio.to_thread(save_state, ctx.config.path, ctx.state)
+        if ctx.persisted_state is not None:
+            ctx.persisted_state = project_runtime_state_to_persisted(
+                ctx.persisted_state, ctx.state, n,
+            )
+            state_to_save = ctx.persisted_state
+        else:
+            state_to_save = ctx.state
+        await asyncio.to_thread(save_state, ctx.config.path, state_to_save)
 
     from bdh_graph_harness.api.ws import broadcast_activation
     event = {'type': 'consolidation', 'vault_id': ctx.config.id, **results}

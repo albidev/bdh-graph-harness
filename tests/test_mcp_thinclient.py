@@ -54,6 +54,71 @@ def test_merge_queries_takes_max():
     assert merged['queries'] == 42
 
 
+def test_merge_states_preserves_v2_synapse_with_valid_node_ids():
+    """Filtering during atomic state merge must preserve canonical v2 keys."""
+    from bdh_graph_harness.memory.hebbian import encode_synapse_key
+
+    left, right = 'note|left', 'note|right'
+    key = encode_synapse_key(left, right)
+    disk = {'synapses': {key: {'weight': 0.5, 'frequency': 2}}, 'queries': 1}
+    mem = {'synapses': {}, 'queries': 1}
+
+    merged = bdh_state_store.merge_states(
+        disk,
+        mem,
+        valid_node_ids={left, right},
+    )
+
+    assert merged['synapses'] == disk['synapses']
+
+
+def test_reconcile_state_to_nodes_preserves_v2_synapse():
+    """Graph refresh must not discard valid v2 synapses before persisting state."""
+    from bdh_graph_harness.memory.hebbian import encode_synapse_key
+
+    left, right = 'note|left', 'note|right'
+    key = encode_synapse_key(left, right)
+    state = {
+        'synapses': {key: {'weight': 0.5, 'frequency': 2, 'last_coactivated': '2026-01-01'}},
+        'node_quality': {},
+        'dormant_nodes': [],
+        'phantom_links': [],
+    }
+
+    reconciled = bdh_state_store.reconcile_state_to_nodes(
+        state,
+        {left: {'title': left}, right: {'title': right}},
+    )
+
+    assert key in reconciled['synapses']
+
+
+def test_reconcile_preserves_ambiguous_legacy_synapse_as_opaque_state():
+    """Unrecoverable historical keys must survive refresh, not be silently erased."""
+    key = 'legacy|note|id'
+    state = {
+        'synapses': {key: {'weight': 0.5, 'frequency': 2}},
+        'node_quality': {},
+        'dormant_nodes': [],
+        'phantom_links': [],
+    }
+
+    reconciled = bdh_state_store.reconcile_state_to_nodes(state, {})
+
+    assert reconciled['synapses'][key]['weight'] == 0.5
+
+
+def test_merge_preserves_ambiguous_legacy_synapse_as_opaque_state():
+    """Atomic save must not delete opaque historical keys while filtering v2 keys."""
+    key = 'legacy|note|id'
+    disk = {'synapses': {key: {'weight': 0.5}}, 'queries': 1}
+    mem = {'synapses': {}, 'queries': 1}
+
+    merged = bdh_state_store.merge_states(disk, mem, valid_node_ids=set())
+
+    assert key in merged['synapses']
+
+
 def test_merge_other_keys_memory_wins():
     """Non-synapse, non-queries keys: memory version wins, disk-only keys preserved."""
     disk = {'synapses': {}, 'queries': 1, 'created': '2026-01-01', 'disk_only': 'disk_val'}
@@ -108,6 +173,54 @@ def test_mcp_http_post_returns_none_when_server_down():
     from bdh_graph_harness.mcp_server import _http_post
     result = _http_post("http://localhost:99999/api/query", {"query": "test"}, timeout=0.5)
     assert result is None
+
+
+def test_mcp_query_refreshes_registry_after_fallback_write(monkeypatch):
+    """A recovered web server must refresh its registry before the next query."""
+    import bdh_graph_harness.mcp_server as mcp_server
+
+    mcp_server._fallback_dirty_vaults = set()
+    calls = []
+    responses = [None, {"status": "ok"}, {"response": "online"}]
+
+    def fake_http_post(url, payload, timeout=120):
+        calls.append((url, payload))
+        return responses.pop(0)
+
+    monkeypatch.setattr(mcp_server, "_http_post", fake_http_post)
+    monkeypatch.setattr(mcp_server, "_fallback_query", lambda *_args, **_kwargs: '{"response": "fallback"}')
+
+    assert json.loads(mcp_server.query("offline"))["response"] == "fallback"
+    assert json.loads(mcp_server.query("recovered"))["response"] == "online"
+    assert calls == [
+        ("http://localhost:8643/api/query", {"query": "offline"}),
+        ("http://localhost:8643/api/refresh", {}),
+        ("http://localhost:8643/api/query", {"query": "recovered"}),
+    ]
+
+
+def test_mcp_read_tools_urlencode_reserved_vault_id(monkeypatch):
+    """MCP read tools must preserve vault IDs containing reserved URL characters."""
+    import bdh_graph_harness.mcp_server as mcp_server
+
+    requested_urls = []
+
+    def fake_http_get(url, timeout=30):
+        requested_urls.append(url)
+        return {"synapses": [], "total": 0, "queries": 0, "nodes": [], "edges": []}
+
+    monkeypatch.setattr(mcp_server, "_http_get", fake_http_get)
+    vault_id = "core vault&research/a+b"
+
+    mcp_server.stats(vault_id)
+    mcp_server.hebbian(vault_id)
+    mcp_server.graph(vault_id)
+
+    assert requested_urls == [
+        "http://localhost:8643/api/stats?vault_id=core%20vault%26research%2Fa%2Bb",
+        "http://localhost:8643/api/hebbian?vault_id=core%20vault%26research%2Fa%2Bb",
+        "http://localhost:8643/api/graph?vault_id=core%20vault%26research%2Fa%2Bb",
+    ]
 
 
 def test_mcp_api_url_construction():

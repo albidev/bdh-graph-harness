@@ -4,33 +4,66 @@
 
 # BDH Graph Harness
 
-> **⚠️ Disclaimer**
-> This is an **experimental research project** implementing biological neural network analogies (Hebbian plasticity, neurogenesis, sleep-cycle consolidation) on Obsidian vault graphs. It is **not production software** — API endpoints, configuration, and data formats may change without notice between versions.
+> **A living memory system for Obsidian vaults and AI agents.**
 >
-> The theoretical foundation comes from the [Dragon Hatchling paper](https://arxiv.org/abs/2509.26507) (Kosowski et al., 2025). This implementation is an independent exploration of those ideas, not an official implementation of the paper.
->
-> If you're looking for a stable knowledge management tool, consider [Obsidian](https://obsidian.md) + [Dataview](https://github.com/blacksmithgu/obsidian-dataview) or a mature RAG solution. This project is for people who want to experiment with bio-inspired graph learning.
+> BDH turns Markdown notes into a queryable, self-maintaining knowledge graph. It combines explicit structure (wikilinks), semantic retrieval (embeddings + optional BM25), learned associations (Hebbian dynamic edges), and maintenance cycles that prune noise and consolidate useful structure over time.
 
-## What it does
+This is **not a RAG wrapper with a graph visualizer glued on**. Retrieval, learning, ingestion, quality control, consolidation, and agent interfaces are separate but connected subsystems. The graph changes as the vault changes and as it is used.
 
-Turns an Obsidian vault into a living knowledge graph where:
-- **Notes → neurons** — each note embedded with `nomic-embed-text-v2-moe` (768d, via Ollama) and stored in ChromaDB with `OllamaEmbeddingFunction`
-- **Wikilinks → synapses** — graph edges from `[[wikilinks]]`
-- **Hebbian learning** — co-activated notes strengthen their synaptic weight over time (frequency + recency + activation correlation)
-- **Trusted dynamic Hebbian edges** — learned, non-static relations can extend retrieval with explicit provenance, recurrence/consolidation/recency trust, and privacy-safe shadow telemetry
-- **Vector + lexical retrieval** — semantic search via Chroma embeddings with optional BM25 Hybrid scoring (`hybrid_search: true`, α=0.7 / β=0.3)
-- **Adaptive thresholding** — dynamic threshold from the score distribution (`median + 0.3*std`, with a configurable floor and a minimum-activation guarantee) to filter noise adaptively
-- **Neurogenesis** — LLM extracts new concepts from queries and creates notes in the vault, filtered by a 3-layer signal system (prompt engineering + regex blocklist + semantic dedup) to prevent noise; generation provenance is kept in frontmatter so it does not pollute embeddings
-- **Node quality scoring** — composite score (strong edges + mean weight + frequency) auto-prunes dormant nodes from visualization; re-activates on strong re-encounter
-- **Sleep-cycle consolidation** — periodic synaptic downscaling (×0.9), structural pruning below weight floor, and stale dormant node removal — mirrors biological sleep consolidation
-- **Server-side file watcher** — source-aware polling detects vault and configured external Markdown changes, debounces editor bursts, and triggers incremental graph/embedding updates with source-safe pruning
-- **LLM responses** — any OpenAI-compatible provider (OpenRouter, Ollama Cloud, local Ollama), with citations back to source notes
-- **Real-time visualization** — WebGL force-graph showing nodes activating, edges pulsing as Hebbian weights update during queries
-- **Multi-vault isolation** — optional `vaults:` configuration creates one graph state, watcher, BM25 index, lock, and ChromaDB collection per vault; requests select a vault explicitly without cross-contaminating embeddings or state
-- **Federated Markdown sources** — optional read-only `external_sources` merge selected Markdown trees into the primary graph with source-aware IDs, cross-source wikilinks, and configurable `include`/`exclude` globs
+> **⚠️ Experimental research software.** APIs, configuration, and storage formats may change. The project independently explores ideas from the [Dragon Hatchling paper](https://arxiv.org/abs/2509.26507) (Kosowski et al., 2025); it is not an official implementation.
 
-For the theory behind these choices — why Hebbian plasticity, why Obsidian, why not just RAG — see [`docs/philosophy.md`](docs/philosophy.md).
-For the dynamic-edge retrieval contract, tuning guardrails, and evaluation limits, see [`docs/hebbian-dynamic-edges.md`](docs/hebbian-dynamic-edges.md).
+## System at a glance
+
+| Layer | What BDH does |
+|---|---|
+| **Ingest** | Watches Obsidian and optional read-only external Markdown sources; incrementally rebuilds graph, embeddings, and lexical indexes. |
+| **Connect** | Preserves explicit wikilinks, resolves federated source IDs, and adds bounded phantom links for validated semantic proximity. |
+| **Retrieve** | Combines vector/BM25 seed selection, multi-query fusion, adaptive attention spread, and provenance-rich results. |
+| **Learn** | Strengthens co-activated notes with Hebbian plasticity; trusted learned-only edges can extend traversal beyond declared links. |
+| **Maintain** | Scores node quality, marks dormant material, runs sleep-cycle downscaling/pruning, and refreshes structural relationships. |
+| **Grow** | Extracts genuinely useful concepts through filtered neurogenesis with provenance and semantic deduplication. |
+| **Expose** | Serves REST, WebSocket visualization, CLI, and MCP tools to humans and AI agents. |
+
+## Knowledge lifecycle
+
+```text
+Obsidian vault + federated Markdown sources
+                  │
+                  ▼
+    watcher → source-aware graph + Chroma + BM25
+                  │
+                  ▼
+query → hybrid seeds → attention traversal → cited context / response
+                  │                      │
+                  │                      └─ static + trusted dynamic Hebbian edges
+                  ▼
+Hebbian plasticity → neurogenesis (filtered) → incremental watcher update
+                  │
+                  ▼
+sleep-cycle consolidation → downscale → prune → quality re-evaluation → phantom refresh
+```
+
+## Core capabilities
+
+- **Semantic + structural retrieval** — Chroma embeddings, optional BM25/RRF, multi-query fusion, adaptive thresholds, and k-hop graph attention with per-note provenance.
+- **Trusted dynamic Hebbian edges** — repeated co-activation creates learned relations that can improve reachability without mutating the declared wikilink graph. Frequency, consolidation, and recency produce an explicit trust factor; dynamic-only results are shadow-instrumented without storing query text.
+- **Federated, multi-vault knowledge** — independent vault contexts prevent state or embedding contamination. Read-only external Markdown sources use source-aware IDs and can participate in cross-source links.
+- **Continuous ingestion** — a debounced, source-aware watcher handles vault edits and external-source updates incrementally instead of requiring manual full rebuilds.
+- **Quality and consolidation** — node quality detects dormant material; scheduled sleep cycles downscale, prune stale weak synapses, remove persistent dormant nodes, and refresh phantom relationships.
+- **Controlled neurogenesis** — LLM-generated concepts pass prompt constraints, deterministic blocklists, semantic deduplication, and source-provenance checks before becoming notes.
+- **Agent-native interfaces** — REST API, WebSocket event stream, CLI, and MCP server all use the same core retrieval and memory model.
+- **Inspectable visualization** — a WebGL force graph renders activation, edge families, learned strength, dormant state, and live updates.
+
+## Documentation map
+
+| Need | Read |
+|---|---|
+| Why this architecture exists | [`docs/philosophy.md`](docs/philosophy.md) |
+| Learned dynamic-edge contract, trust, telemetry, and evaluation limits | [`docs/hebbian-dynamic-edges.md`](docs/hebbian-dynamic-edges.md) |
+| MCP clients and transports | [`docs/mcp-server.md`](docs/mcp-server.md) |
+| Real-time graph visualization | [`docs/visualization.md`](docs/visualization.md) |
+| Testing and coverage policy | [`docs/testing.md`](docs/testing.md) |
+| Configurable behavior | [`bdh-config.yaml`](bdh-config.yaml) |
 
 ## Neurogenesis Signal Filtering
 
