@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from bdh_graph_harness.graph.federated import build_federated_graph, migrate_legacy_state_ids
@@ -85,6 +86,30 @@ def test_external_source_include_exclude_and_cross_source_links(tmp_path):
         "display": "missing-note",
         "source_path": "demo/docs/design.md",
     }]
+
+
+def test_federated_builder_warns_for_unresolved_explicit_external_wikilink(tmp_path, caplog):
+    """A broken explicit external reference must be visible at graph-build time."""
+    vault = tmp_path / "vault"
+    _write(
+        vault / "wiki/source.md",
+        "# Source\nSee [[external:projects/missing/design]].",
+    )
+
+    with caplog.at_level(logging.WARNING, logger="bdh.graph.federated"):
+        _nodes, _edges, unresolved = build_federated_graph([
+            VaultMarkdownSource(str(vault)),
+        ])
+
+    assert unresolved == [{
+        "source": "vault:wiki/source.md",
+        "target": "external:projects/missing/design",
+        "display": "external:projects/missing/design",
+        "source_path": "wiki/source.md",
+    }]
+    assert "unresolved_explicit_external_wikilinks" in caplog.text
+    assert "external:projects/missing/design" in caplog.text
+    assert "vault:wiki/source.md" in caplog.text
 
 
 def test_federated_builder_drops_resolved_self_wikilinks(tmp_path):
