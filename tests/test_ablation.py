@@ -127,6 +127,15 @@ def test_run_pass_excludes_expected_empty_queries_from_ranking_metrics(monkeypat
     assert metrics.per_query[1]["is_correct_rejection"] is False
 
 
+def test_serialize_includes_negative_control_metrics():
+    serialized = ablation._serialize(
+        ablation.Metrics(negative_query_count=10, negative_nonempty_rate=0.2)
+    )
+
+    assert serialized["negative_query_count"] == 10
+    assert serialized["negative_nonempty_rate"] == 0.2
+
+
 def test_hebbian_trajectory_trains_only_on_training_queries(monkeypatch):
     train = [{"query": "train", "relevant_note_ids": ["a"]}]
     holdout = [{"query": "holdout", "relevant_note_ids": ["a"]}]

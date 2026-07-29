@@ -424,6 +424,8 @@ def _serialize(obj: Any) -> Any:
             "per_query": obj.per_query,
             "hop_histogram": obj.hop_histogram,
             "synapse_counts": obj.synapse_counts,
+            "negative_query_count": obj.negative_query_count,
+            "negative_nonempty_rate": obj.negative_nonempty_rate,
         }
     if isinstance(obj, dict):
         return {k: _serialize(v) for k, v in obj.items()}
