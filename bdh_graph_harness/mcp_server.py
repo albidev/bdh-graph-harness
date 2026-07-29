@@ -97,6 +97,28 @@ def _http_post(url: str, body: dict, timeout: float = 120) -> dict | None:
 # Per-vault fallback cache.  Key = vault_id (or 'default' for single-vault mode).
 _fallback_by_vault: dict[str, dict] = {}
 
+# Fallback queries can persist Hebbian state and create notes while the web
+# registry is unavailable.  The next successful HTTP operation must rebuild
+# the registry before it serves stale in-memory state.
+_fallback_dirty_vaults: set[str] = set()
+
+
+def _fallback_vault_key(vault_id: str | None) -> str:
+    return vault_id or "default"
+
+
+def _refresh_registry_after_fallback(vault_id: str | None) -> bool:
+    """Refresh a recovered registry before it serves a fallback-written vault."""
+    key = _fallback_vault_key(vault_id)
+    if key not in _fallback_dirty_vaults:
+        return True
+    payload = {"vault_id": vault_id} if vault_id is not None else {}
+    if _http_post(_api_url("/api/refresh"), payload) is None:
+        return False
+    _fallback_dirty_vaults.discard(key)
+    logger.info("Refreshed web registry after MCP fallback write [%s]", key)
+    return True
+
 # Global config cache for vault resolution
 _fallback_config: dict | None = None
 _fallback_config_path: str | None = None
@@ -474,6 +496,14 @@ def query(question: str, vault_id: str | None = None) -> str:
         with similarity scores), new_concepts (if any were created),
         hebbian_updates (synaptic changes from this query).
     """
+    # A fallback query may have persisted state or created notes.  Do not let a
+    # recovered server answer from its pre-fallback registry.
+    if not _refresh_registry_after_fallback(vault_id):
+        logger.warning("Web registry refresh failed, using in-process fallback pipeline")
+        result = _fallback_query(question, vault_id=vault_id)
+        _fallback_dirty_vaults.add(_fallback_vault_key(vault_id))
+        return result
+
     # Try the web server first (thin client)
     payload: dict = {"query": question}
     if vault_id is not None:
@@ -484,7 +514,9 @@ def query(question: str, vault_id: str | None = None) -> str:
 
     # Fallback: in-process pipeline
     logger.warning("Web server not reachable, using in-process fallback pipeline")
-    return _fallback_query(question, vault_id=vault_id)
+    result = _fallback_query(question, vault_id=vault_id)
+    _fallback_dirty_vaults.add(_fallback_vault_key(vault_id))
+    return result
 
 
 @mcp.tool()

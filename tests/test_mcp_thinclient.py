@@ -175,6 +175,30 @@ def test_mcp_http_post_returns_none_when_server_down():
     assert result is None
 
 
+def test_mcp_query_refreshes_registry_after_fallback_write(monkeypatch):
+    """A recovered web server must refresh its registry before the next query."""
+    import bdh_graph_harness.mcp_server as mcp_server
+
+    mcp_server._fallback_dirty_vaults = set()
+    calls = []
+    responses = [None, {"status": "ok"}, {"response": "online"}]
+
+    def fake_http_post(url, payload, timeout=120):
+        calls.append((url, payload))
+        return responses.pop(0)
+
+    monkeypatch.setattr(mcp_server, "_http_post", fake_http_post)
+    monkeypatch.setattr(mcp_server, "_fallback_query", lambda *_args, **_kwargs: '{"response": "fallback"}')
+
+    assert json.loads(mcp_server.query("offline"))["response"] == "fallback"
+    assert json.loads(mcp_server.query("recovered"))["response"] == "online"
+    assert calls == [
+        ("http://localhost:8643/api/query", {"query": "offline"}),
+        ("http://localhost:8643/api/refresh", {}),
+        ("http://localhost:8643/api/query", {"query": "recovered"}),
+    ]
+
+
 def test_mcp_read_tools_urlencode_reserved_vault_id(monkeypatch):
     """MCP read tools must preserve vault IDs containing reserved URL characters."""
     import bdh_graph_harness.mcp_server as mcp_server
