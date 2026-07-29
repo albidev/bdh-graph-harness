@@ -1,0 +1,536 @@
+version: 2026-07-29-en-v4-candidate
+language: en
+status: candidate
+review_status: automated-source-validation-pending-human-review
+purpose: >-
+  Evaluate English retrieval against the live federated corpus. This set is
+  deliberately independent of the Italian candidate set and separates
+  positive retrieval, near-domain rejection, and out-of-domain rejection.
+snapshot:
+  live_endpoint: https://mac-mini-01.taild7292a.ts.net:8443
+  graph_node_count: 503
+  harness_commit: e890c64
+  source_scope: external English Markdown notes only
+  source_projects:
+    - privacy-guard
+    - tinka
+    - bdh-graph-harness
+    - bdh-hermes-bridge
+    - mlx-lm-glm52
+    - hermes-avatar-widget
+    - assess-chat
+splits:
+  development: 22
+  holdout: 18
+quality_rules:
+  - Every positive qrel names a live graph node ID and graded relevance.
+  - No source document is primary for more than two positive queries.
+  - Negative queries must have an empty qrel and must remain answerable only by rejecting retrieval.
+  - A human reviewer must verify every source claim before promotion from candidate to golden.
+queries:
+  - id: en-v4-001
+    split: development
+    query: What happens to a redaction result with leaked PII values under balanced policy versus strict policy?
+    category: comparison
+    difficulty: medium
+    relevant_note_ids:
+      - external:projects/privacy-guard/docs/architecture/document-pipeline.md
+      - external:projects/privacy-guard/docs/features/redaction-policy.md
+    qrels:
+      external:projects/privacy-guard/docs/architecture/document-pipeline.md: 2
+      external:projects/privacy-guard/docs/features/redaction-policy.md: 1
+    rationale: Compares documented status handling for balanced and strict redaction policies.
+    provenance: source-authored benchmark candidate
+    reviewed: false
+  - id: en-v4-002
+    split: development
+    query: What safeguards are required before the Privacy Guard HTTP daemon can bind to all network interfaces?
+    category: security
+    difficulty: easy
+    relevant_note_ids:
+      - external:projects/privacy-guard/docs/features/local-http-daemon.md
+    qrels:
+      external:projects/privacy-guard/docs/features/local-http-daemon.md: 2
+    rationale: Retrieves the documented all-interface binding guard.
+    provenance: source-authored benchmark candidate
+    reviewed: false
+  - id: en-v4-003
+    split: development
+    query: Which PII entity types are added when the account category is requested in Privacy Guard?
+    category: implementation
+    difficulty: easy
+    relevant_note_ids:
+      - external:projects/privacy-guard/docs/features/pii-recognizers.md
+    qrels:
+      external:projects/privacy-guard/docs/features/pii-recognizers.md: 2
+    rationale: Tests category-expansion behavior from a specific recognizer document.
+    provenance: source-authored benchmark candidate
+    reviewed: false
+  - id: en-v4-004
+    split: holdout
+    query: How are overlapping URL and business identifier spans resolved in Privacy Guard?
+    category: implementation
+    difficulty: medium
+    relevant_note_ids:
+      - external:projects/privacy-guard/docs/features/pii-recognizers.md
+    qrels:
+      external:projects/privacy-guard/docs/features/pii-recognizers.md: 2
+    rationale: Tests a precise overlap-resolution rule rather than title matching.
+    provenance: source-authored benchmark candidate
+    reviewed: false
+  - id: en-v4-005
+    split: development
+    query: What fallback path is used when the OPF sidecar cannot process a Privacy Guard redaction request?
+    category: architecture
+    difficulty: medium
+    relevant_note_ids:
+      - external:projects/privacy-guard/docs/architecture/inference-architecture.md
+      - external:projects/privacy-guard/docs/features/pii-recognizers.md
+    qrels:
+      external:projects/privacy-guard/docs/architecture/inference-architecture.md: 2
+      external:projects/privacy-guard/docs/features/pii-recognizers.md: 1
+    rationale: Requires the sidecar failure path and the deterministic fallback context.
+    provenance: source-authored benchmark candidate
+    reviewed: false
+  - id: en-v4-006
+    split: holdout
+    query: How does Tinka choose a blueprint configuration for the designer page when multiple sources are available?
+    category: implementation
+    difficulty: medium
+    relevant_note_ids:
+      - external:projects/tinka/docs/feature/multi-blueprint-support.md
+    qrels:
+      external:projects/tinka/docs/feature/multi-blueprint-support.md: 2
+    rationale: Tests documented precedence across query, prompt data, session, and default values.
+    provenance: source-authored benchmark candidate
+    reviewed: false
+  - id: en-v4-007
+    split: development
+    query: How does Privacy Guard decide that a model provider is installed, and what happens after setup completes?
+    category: implementation
+    difficulty: medium
+    relevant_note_ids:
+      - external:projects/privacy-guard/docs/architecture/model-management.md
+    qrels:
+      external:projects/privacy-guard/docs/architecture/model-management.md: 2
+    rationale: Tests installation validation, atomic manifest update, and completion behavior from an indexed provider-management document.
+    provenance: source-authored benchmark candidate
+    reviewed: false
+  - id: en-v4-008
+    split: holdout
+    query: What recovery step is documented when Privacy Guard development startup fails because of a stale Rust build?
+    category: setup
+    difficulty: easy
+    relevant_note_ids:
+      - external:projects/privacy-guard/docs/onboarding/setup-troubleshooting.md
+    qrels:
+      external:projects/privacy-guard/docs/onboarding/setup-troubleshooting.md: 2
+    rationale: Tests a specific troubleshooting action from an indexed onboarding document.
+    provenance: source-authored benchmark candidate
+    reviewed: false
+  - id: en-v4-009
+    split: development
+    query: How do Privacy Guard and Tinka differ in the authentication model used for their services?
+    category: comparison
+    difficulty: hard
+    relevant_note_ids:
+      - external:projects/privacy-guard/docs/features/local-http-daemon.md
+      - external:projects/tinka/docs/02-architecture.md
+      - external:projects/tinka/docs/03-core-components.md
+    qrels:
+      external:projects/privacy-guard/docs/features/local-http-daemon.md: 2
+      external:projects/tinka/docs/02-architecture.md: 1
+      external:projects/tinka/docs/03-core-components.md: 1
+    rationale: Requires a cross-project comparison of local bearer-token and cloud identity-provider patterns.
+    provenance: source-authored benchmark candidate
+    reviewed: false
+  - id: en-v4-010
+    split: holdout
+    query: Why are OAuth discovery routes exempted from Tinka locale middleware handling?
+    category: architecture
+    difficulty: medium
+    relevant_note_ids:
+      - external:projects/tinka/docs/02-architecture.md
+      - external:projects/tinka/docs/01-project-overview.md
+    qrels:
+      external:projects/tinka/docs/02-architecture.md: 2
+      external:projects/tinka/docs/01-project-overview.md: 1
+    rationale: Tests a documented routing exception and its reason.
+    provenance: source-authored benchmark candidate
+    reviewed: false
+  - id: en-v4-011
+    split: development
+    query: How many neurogenesis noise-filtering layers are documented, and what role does each layer play?
+    category: concept
+    difficulty: medium
+    relevant_note_ids:
+      - external:projects/bdh-graph-harness/README.md
+      - external:projects/bdh-graph-harness/docs/hermes-skill.md
+    qrels:
+      external:projects/bdh-graph-harness/README.md: 2
+      external:projects/bdh-graph-harness/docs/hermes-skill.md: 1
+    rationale: Requires a multi-layer explanation, not a title lookup.
+    provenance: source-authored benchmark candidate
+    reviewed: false
+  - id: en-v4-012
+    split: development
+    query: What formula defines the dynamic activation threshold, and which minimum conditions gate activation?
+    category: concept
+    difficulty: medium
+    relevant_note_ids:
+      - external:projects/bdh-graph-harness/docs/hermes-skill.md
+      - external:projects/bdh-graph-harness/docs/philosophy.md
+    qrels:
+      external:projects/bdh-graph-harness/docs/hermes-skill.md: 2
+      external:projects/bdh-graph-harness/docs/philosophy.md: 1
+    rationale: Tests retrieval of formula and preconditions from technical documentation.
+    provenance: source-authored benchmark candidate
+    reviewed: false
+  - id: en-v4-013
+    split: holdout
+    query: Why is a Hebbian update performed before the LLM response is generated?
+    category: concept
+    difficulty: easy
+    relevant_note_ids:
+      - external:projects/bdh-graph-harness/docs/philosophy.md
+      - external:projects/bdh-graph-harness/docs/hermes-skill.md
+    qrels:
+      external:projects/bdh-graph-harness/docs/philosophy.md: 2
+      external:projects/bdh-graph-harness/docs/hermes-skill.md: 1
+    rationale: Tests the documented online-plasticity design rationale.
+    provenance: source-authored benchmark candidate
+    reviewed: false
+  - id: en-v4-014
+    split: development
+    query: Which safeguards prevent BDH context from amplifying itself through Hermes responses?
+    category: crossref
+    difficulty: medium
+    relevant_note_ids:
+      - external:projects/bdh-hermes-bridge/README.md
+      - external:projects/bdh-graph-harness/README.md
+    qrels:
+      external:projects/bdh-hermes-bridge/README.md: 2
+      external:projects/bdh-graph-harness/README.md: 1
+    rationale: Requires multiple documented echo-loop safeguards.
+    provenance: source-authored benchmark candidate
+    reviewed: false
+  - id: en-v4-015
+    split: holdout
+    query: Which BM25 normalization defect distorted hybrid retrieval scoring, and what correction replaced it?
+    category: retrieval
+    difficulty: hard
+    relevant_note_ids:
+      - external:projects/bdh-graph-harness/benchmarks/BM25_ANALYSIS.md
+      - external:projects/bdh-graph-harness/benchmarks/EVIDENCE_REFACTOR_REPORT.md
+    qrels:
+      external:projects/bdh-graph-harness/benchmarks/BM25_ANALYSIS.md: 2
+      external:projects/bdh-graph-harness/benchmarks/EVIDENCE_REFACTOR_REPORT.md: 1
+    rationale: Tests diagnosis and remedy from independent benchmark reports.
+    provenance: source-authored benchmark candidate
+    reviewed: false
+  - id: en-v4-016
+    split: development
+    query: How can the BDH MCP server query the knowledge graph when the HTTP API server is not running?
+    category: architecture
+    difficulty: easy
+    relevant_note_ids:
+      - external:projects/bdh-graph-harness/docs/mcp-server.md
+      - external:projects/bdh-graph-harness/docs/issue19-contract.md
+    qrels:
+      external:projects/bdh-graph-harness/docs/mcp-server.md: 2
+      external:projects/bdh-graph-harness/docs/issue19-contract.md: 1
+    rationale: Tests the direct-package-access architecture.
+    provenance: source-authored benchmark candidate
+    reviewed: false
+  - id: en-v4-017
+    split: holdout
+    query: How are federated Markdown notes namespaced so identical paths from separate repositories remain distinguishable?
+    category: architecture
+    difficulty: hard
+    relevant_note_ids:
+      - external:projects/bdh-graph-harness/README.md
+      - external:projects/bdh-graph-harness/docs/plans/2026-07-09-multi-vault-chromadb.md
+    qrels:
+      external:projects/bdh-graph-harness/README.md: 2
+      external:projects/bdh-graph-harness/docs/plans/2026-07-09-multi-vault-chromadb.md: 1
+    rationale: Tests source-aware identity rather than generic graph terminology.
+    provenance: source-authored benchmark candidate
+    reviewed: false
+  - id: en-v4-018
+    split: development
+    query: Which provenance fields are stored on neurogenesis-generated notes, and why is frontmatter omitted from embeddings?
+    category: provenance
+    difficulty: medium
+    relevant_note_ids:
+      - external:projects/bdh-graph-harness/docs/visualization.md
+      - external:projects/bdh-graph-harness/README.md
+    qrels:
+      external:projects/bdh-graph-harness/docs/visualization.md: 2
+      external:projects/bdh-graph-harness/README.md: 1
+    rationale: Tests provenance metadata and the embedding-boundary rationale.
+    provenance: source-authored benchmark candidate
+    reviewed: false
+  - id: en-v4-019
+    split: holdout
+    query: What does the bridge query-classification prompt ask the LLM to decide before issuing a knowledge lookup?
+    category: architecture
+    difficulty: medium
+    relevant_note_ids:
+      - external:projects/bdh-hermes-bridge/README.md
+      - external:projects/bdh-hermes-bridge/docs/memory-policy-plan.md
+    qrels:
+      external:projects/bdh-hermes-bridge/README.md: 2
+      external:projects/bdh-hermes-bridge/docs/memory-policy-plan.md: 1
+    rationale: Tests query-routing policy and prompt contract.
+    provenance: source-authored benchmark candidate
+    reviewed: false
+  - id: en-v4-020
+    split: development
+    query: Which LoRA fine-tuning modes does mlx-lm support, and how is each selected?
+    category: tool-usage
+    difficulty: easy
+    relevant_note_ids:
+      - external:projects/mlx-lm-glm52/mlx_lm/LORA.md
+    qrels:
+      external:projects/mlx-lm-glm52/mlx_lm/LORA.md: 2
+    rationale: Tests documented fine-tuning mode selection.
+    provenance: source-authored benchmark candidate
+    reviewed: false
+  - id: en-v4-021
+    split: holdout
+    query: What default bridge-server listening address was identified as a security risk in the Hermes Avatar Widget audit?
+    category: security
+    difficulty: easy
+    relevant_note_ids:
+      - external:projects/hermes-avatar-widget/companion/docs/audits/audit-codebase.md
+    qrels:
+      external:projects/hermes-avatar-widget/companion/docs/audits/audit-codebase.md: 2
+    rationale: Tests retrieval of a concrete audit finding.
+    provenance: source-authored benchmark candidate
+    reviewed: false
+  - id: en-v4-022
+    split: development
+    query: How does assess-chat select SQLite or PostgreSQL when it initializes its database client?
+    category: architecture
+    difficulty: easy
+    relevant_note_ids:
+      - external:projects/assess-chat/docs/architecture.md
+      - external:projects/assess-chat/README.md
+    qrels:
+      external:projects/assess-chat/docs/architecture.md: 2
+      external:projects/assess-chat/README.md: 1
+    rationale: Tests runtime database selection.
+    provenance: source-authored benchmark candidate
+    reviewed: false
+  - id: en-v4-023
+    split: holdout
+    query: Which Activity Feed v2 modes are defined, and what user action triggers automatic pause?
+    category: design-spec
+    difficulty: medium
+    relevant_note_ids:
+      - external:projects/hermes-avatar-widget/companion/docs/plans/2026-06-07-activity-feed-v2.md
+    qrels:
+      external:projects/hermes-avatar-widget/companion/docs/plans/2026-06-07-activity-feed-v2.md: 2
+    rationale: Tests mode enumeration and a quantitative transition rule.
+    provenance: source-authored benchmark candidate
+    reviewed: false
+  - id: en-v4-024
+    split: development
+    query: Which protocol marks an assess-chat assessment as complete, and what structured output follows it?
+    category: workflow
+    difficulty: medium
+    relevant_note_ids:
+      - external:projects/assess-chat/README.md
+      - external:projects/assess-chat/docs/architecture.md
+    qrels:
+      external:projects/assess-chat/README.md: 2
+      external:projects/assess-chat/docs/architecture.md: 1
+    rationale: Tests the completion marker and the resulting assessment fields.
+    provenance: source-authored benchmark candidate
+    reviewed: false
+  - id: en-v4-025
+    split: holdout
+    query: How does mlx-lm Dynamic Quantization assign different precisions across model layers?
+    category: ml-technique
+    difficulty: medium
+    relevant_note_ids:
+      - external:projects/mlx-lm-glm52/mlx_lm/LEARNED_QUANTS.md
+    qrels:
+      external:projects/mlx-lm-glm52/mlx_lm/LEARNED_QUANTS.md: 2
+    rationale: Tests sensitivity-based per-layer quantization.
+    provenance: source-authored benchmark candidate
+    reviewed: false
+  - id: en-v4-026
+    split: development
+    query: Which fields must a Hermes Avatar Widget skin receive through SkinContext on each render frame?
+    category: api-reference
+    difficulty: medium
+    relevant_note_ids:
+      - external:projects/hermes-avatar-widget/companion/docs/plans/2026-05-20-skin-system.md
+    qrels:
+      external:projects/hermes-avatar-widget/companion/docs/plans/2026-05-20-skin-system.md: 2
+    rationale: Tests a detailed interface contract.
+    provenance: source-authored benchmark candidate
+    reviewed: false
+  - id: en-v4-027
+    split: holdout
+    query: When is the mlx-lm DWQ technique most effective, and which documented steps reduce its memory use?
+    category: ml-technique
+    difficulty: hard
+    relevant_note_ids:
+      - external:projects/mlx-lm-glm52/mlx_lm/LEARNED_QUANTS.md
+    qrels:
+      external:projects/mlx-lm-glm52/mlx_lm/LEARNED_QUANTS.md: 2
+    rationale: Requires synthesis across usage guidance and memory recommendations.
+    provenance: source-authored benchmark candidate
+    reviewed: false
+  - id: en-v4-028
+    split: development
+    query: How does assess-chat compute its final weighted score, and how are text answers without numeric values treated?
+    category: scoring
+    difficulty: hard
+    relevant_note_ids:
+      - external:projects/assess-chat/README.md
+      - external:projects/assess-chat/docs/architecture.md
+    qrels:
+      external:projects/assess-chat/README.md: 2
+      external:projects/assess-chat/docs/architecture.md: 1
+    rationale: Tests weighted scoring and qualitative handling together.
+    provenance: source-authored benchmark candidate
+    reviewed: false
+  - id: en-v4-029
+    split: holdout
+    query: Which inputs trigger Hermes Avatar Widget expanded mode, and why does its design avoid a second webview?
+    category: architecture
+    difficulty: medium
+    relevant_note_ids:
+      - external:projects/hermes-avatar-widget/EXPANDED_MODE_PLAN.md
+    qrels:
+      external:projects/hermes-avatar-widget/EXPANDED_MODE_PLAN.md: 2
+    rationale: Tests triggers and a design tradeoff.
+    provenance: source-authored benchmark candidate
+    reviewed: false
+  - id: en-v4-030
+    split: development
+    query: Which package extra enables mlx-lm fine-tuning and learned quantization features?
+    category: setup
+    difficulty: easy
+    relevant_note_ids:
+      - external:projects/mlx-lm-glm52/mlx_lm/LORA.md
+      - external:projects/mlx-lm-glm52/mlx_lm/LEARNED_QUANTS.md
+    qrels:
+      external:projects/mlx-lm-glm52/mlx_lm/LORA.md: 2
+      external:projects/mlx-lm-glm52/mlx_lm/LEARNED_QUANTS.md: 1
+    rationale: Tests an explicit shared setup prerequisite.
+    provenance: source-authored benchmark candidate
+    reviewed: false
+  - id: en-v4-031
+    split: holdout
+    query: Which AWS region hosts the Privacy Guard production deployment?
+    category: negative-near-domain
+    difficulty: medium
+    expected_empty: true
+    relevant_note_ids: []
+    qrels: {}
+    rationale: No reviewed English source in the frozen corpus documents an AWS production region.
+    provenance: authored negative control
+    reviewed: false
+  - id: en-v4-032
+    split: development
+    query: What Kubernetes autoscaling policy governs Tinka web traffic?
+    category: negative-near-domain
+    difficulty: medium
+    expected_empty: true
+    relevant_note_ids: []
+    qrels: {}
+    rationale: No reviewed English source in the frozen corpus documents Kubernetes autoscaling for Tinka.
+    provenance: authored negative control
+    reviewed: false
+  - id: en-v4-033
+    split: holdout
+    query: How does mlx-lm use CUDA graphs to accelerate inference?
+    category: negative-near-domain
+    difficulty: medium
+    expected_empty: true
+    relevant_note_ids: []
+    qrels: {}
+    rationale: The English mlx-lm notes cover MLX, not CUDA graph execution.
+    provenance: authored negative control
+    reviewed: false
+  - id: en-v4-034
+    split: development
+    query: Which CRDT protocol synchronizes Hermes Avatar Widget skins across devices?
+    category: negative-near-domain
+    difficulty: medium
+    expected_empty: true
+    relevant_note_ids: []
+    qrels: {}
+    rationale: No reviewed English source describes CRDT-based cross-device skin synchronization.
+    provenance: authored negative control
+    reviewed: false
+  - id: en-v4-035
+    split: holdout
+    query: Which Redis eviction policy is configured for assess-chat session storage?
+    category: negative-near-domain
+    difficulty: medium
+    expected_empty: true
+    relevant_note_ids: []
+    qrels: {}
+    rationale: No reviewed English source documents Redis session storage or eviction policy.
+    provenance: authored negative control
+    reviewed: false
+  - id: en-v4-036
+    split: development
+    query: What is the forecast for rainfall in Rome tomorrow?
+    category: negative-out-of-domain
+    difficulty: easy
+    expected_empty: true
+    relevant_note_ids: []
+    qrels: {}
+    rationale: Weather forecasts are outside the frozen technical corpus.
+    provenance: authored negative control
+    reviewed: false
+  - id: en-v4-037
+    split: holdout
+    query: How do I make a traditional carbonara sauce?
+    category: negative-out-of-domain
+    difficulty: easy
+    expected_empty: true
+    relevant_note_ids: []
+    qrels: {}
+    rationale: Recipes are outside the frozen technical corpus.
+    provenance: authored negative control
+    reviewed: false
+  - id: en-v4-038
+    split: development
+    query: Who won the most recent Formula One race?
+    category: negative-out-of-domain
+    difficulty: easy
+    expected_empty: true
+    relevant_note_ids: []
+    qrels: {}
+    rationale: Current sports results are outside the frozen technical corpus.
+    provenance: authored negative control
+    reviewed: false
+  - id: en-v4-039
+    split: holdout
+    query: What treatment is recommended for acute migraine symptoms?
+    category: negative-out-of-domain
+    difficulty: easy
+    expected_empty: true
+    relevant_note_ids: []
+    qrels: {}
+    rationale: Medical guidance is outside the frozen technical corpus.
+    provenance: authored negative control
+    reviewed: false
+  - id: en-v4-040
+    split: development
+    query: What was the population of Rome during the first century CE?
+    category: negative-out-of-domain
+    difficulty: easy
+    expected_empty: true
+    relevant_note_ids: []
+    qrels: {}
+    rationale: Ancient-history facts are outside the frozen technical corpus.
+    provenance: authored negative control
+    reviewed: false
