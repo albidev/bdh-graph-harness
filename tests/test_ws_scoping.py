@@ -5,7 +5,11 @@ from aiohttp import WSServerHandshakeError, web
 from aiohttp.test_utils import TestClient, TestServer
 
 from bdh_graph_harness.api.routes import setup_routes
-from bdh_graph_harness.api.ws import WebSocketManager, broadcast_activation
+from bdh_graph_harness.api.ws import (
+    WebSocketManager,
+    broadcast_activation,
+    canonicalize_graph_event,
+)
 
 
 class FakeWebSocket:
@@ -15,6 +19,53 @@ class FakeWebSocket:
 
     async def send_str(self, message):
         self.messages.append(message)
+
+
+def test_canonicalize_graph_event_leaves_non_graph_events_unchanged():
+    event = {"type": "activation", "query": "hello", "activated_notes": []}
+
+    canonical = canonicalize_graph_event(event)
+
+    assert canonical == event
+    assert canonical is not event
+
+
+def test_canonicalize_graph_event_dedupes_equivalent_payload_edges_and_nodes():
+    event = {
+        "type": "graph_refresh",
+        "changed_nodes": [
+            {"id": "b", "title": "B"},
+            {"id": "a", "title": "A"},
+            {"id": "b", "title": "B newer"},
+        ],
+        "deleted_nodes": ["gone", "gone"],
+        "new_concepts": [{"id": "b"}, {"id": "b"}],
+        "added_node_data": [
+            {
+                "id": "b",
+                "edges": [
+                    {"source": "b", "target": "a", "type": "wikilink"},
+                    {"source": "b", "target": "a", "type": "wikilink"},
+                ],
+            },
+            {
+                "id": "a",
+                "edges": [{"source": "a", "target": "b", "type": "wikilink"}],
+            },
+        ],
+    }
+
+    canonical = canonicalize_graph_event(event)
+
+    assert [node["id"] for node in canonical["changed_nodes"]] == ["a", "b"]
+    assert canonical["changed_nodes"][1]["title"] == "B newer"
+    assert canonical["deleted_nodes"] == ["gone"]
+    assert canonical["new_concepts"] == [{"id": "b"}]
+    assert [node["id"] for node in canonical["added_node_data"]] == ["a", "b"]
+    assert sum(len(node["edges"]) for node in canonical["added_node_data"]) == 1
+    assert canonical["added_node_data"][0]["edges"] == [
+        {"source": "a", "target": "b", "type": "wikilink"},
+    ]
 
 
 @pytest.mark.asyncio

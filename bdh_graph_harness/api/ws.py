@@ -2,11 +2,77 @@
 
 import asyncio
 import json
+from copy import deepcopy
 
 from aiohttp import web
 from bdh_graph_harness.memory.hebbian import safe_decode_synapse_key
 
-__all__ = ["WebSocketManager", "broadcast_activation", "websocket_handler"]
+__all__ = [
+    "WebSocketManager",
+    "broadcast_activation",
+    "canonicalize_graph_event",
+    "websocket_handler",
+]
+
+
+def _endpoint_id(endpoint):
+    return endpoint.get("id") if isinstance(endpoint, dict) else endpoint
+
+
+def _canonical_edge_key(edge: dict) -> tuple[str, str, str]:
+    source = _endpoint_id(edge.get("source"))
+    target = _endpoint_id(edge.get("target"))
+    ordered = sorted((str(source), str(target)))
+    return ordered[0], ordered[1], edge.get("type", "wikilink")
+
+
+def canonicalize_graph_event(event: dict) -> dict:
+    """Return a stable, de-duplicated graph delta without changing its meaning."""
+    graph_delta_fields = {
+        "changed_nodes", "new_concepts", "deleted_nodes", "added_node_data",
+    }
+    if not graph_delta_fields.intersection(event):
+        return deepcopy(event)
+
+    canonical = deepcopy(event)
+    for field in ("changed_nodes", "new_concepts"):
+        values = canonical.get(field)
+        if values is not None:
+            by_id = {item["id"]: item for item in values if item and item.get("id")}
+            canonical[field] = [by_id[node_id] for node_id in sorted(by_id)]
+    if "deleted_nodes" in canonical:
+        canonical["deleted_nodes"] = sorted(set(canonical["deleted_nodes"]))
+
+    nodes_by_id = {}
+    for node in canonical.get("added_node_data", []):
+        if not node or not node.get("id"):
+            continue
+        node_id = node["id"]
+        merged = nodes_by_id.setdefault(node_id, {"id": node_id, "edges": []})
+        merged.update({key: value for key, value in node.items() if key != "edges"})
+        merged["edges"].extend(node.get("edges", []))
+
+    raw_edges_by_node = {
+        node_id: list(node.get("edges", []))
+        for node_id, node in nodes_by_id.items()
+    }
+    seen_edges = set()
+    for node_id in sorted(nodes_by_id):
+        nodes_by_id[node_id]["edges"] = []
+    for original_node_id in sorted(nodes_by_id):
+        for edge in raw_edges_by_node[original_node_id]:
+            if not isinstance(edge, dict) or not edge.get("source") or not edge.get("target"):
+                continue
+            source, target, edge_type = _canonical_edge_key(edge)
+            key = (source, target, edge_type)
+            if key in seen_edges:
+                continue
+            seen_edges.add(key)
+            canonical_edge = {**edge, "source": source, "target": target, "type": edge_type}
+            owner = source if source in nodes_by_id else original_node_id
+            nodes_by_id[owner]["edges"].append(canonical_edge)
+    canonical["added_node_data"] = [nodes_by_id[node_id] for node_id in sorted(nodes_by_id)]
+    return canonical
 
 
 class WebSocketManager:
@@ -21,7 +87,7 @@ class WebSocketManager:
 
     async def broadcast_activation(self, event: dict) -> None:
         """Broadcast an activation event to all connected WebSocket clients."""
-        msg = json.dumps(event)
+        msg = json.dumps(canonicalize_graph_event(event))
         dead = []
         for ws in self.clients:
             try:
@@ -51,7 +117,7 @@ async def broadcast_activation(event: dict, ws_clients: set = None) -> None:
     module-level default manager.
     """
     if ws_clients is not None:
-        msg = json.dumps(event)
+        msg = json.dumps(canonicalize_graph_event(event))
         dead = []
         # Copy the set to avoid RuntimeError: Set changed size during iteration
         for ws in list(ws_clients):
