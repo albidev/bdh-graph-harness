@@ -175,6 +175,30 @@ def test_mcp_http_post_returns_none_when_server_down():
     assert result is None
 
 
+def test_mcp_read_tools_urlencode_reserved_vault_id(monkeypatch):
+    """MCP read tools must preserve vault IDs containing reserved URL characters."""
+    import bdh_graph_harness.mcp_server as mcp_server
+
+    requested_urls = []
+
+    def fake_http_get(url, timeout=30):
+        requested_urls.append(url)
+        return {"synapses": [], "total": 0, "queries": 0, "nodes": [], "edges": []}
+
+    monkeypatch.setattr(mcp_server, "_http_get", fake_http_get)
+    vault_id = "core vault&research/a+b"
+
+    mcp_server.stats(vault_id)
+    mcp_server.hebbian(vault_id)
+    mcp_server.graph(vault_id)
+
+    assert requested_urls == [
+        "http://localhost:8643/api/stats?vault_id=core%20vault%26research%2Fa%2Bb",
+        "http://localhost:8643/api/hebbian?vault_id=core%20vault%26research%2Fa%2Bb",
+        "http://localhost:8643/api/graph?vault_id=core%20vault%26research%2Fa%2Bb",
+    ]
+
+
 def test_mcp_api_url_construction():
     """_api_url should build correct URLs with defaults and overrides."""
     from bdh_graph_harness.mcp_server import _api_url
