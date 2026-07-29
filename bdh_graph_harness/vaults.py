@@ -105,6 +105,7 @@ class VaultContext:
     state_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     runtime_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     semantic_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    retrieval_telemetry: dict = field(default_factory=dict)
     event_sequence: int = 0
     watcher: Any | None = None
 
