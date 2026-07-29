@@ -58,6 +58,24 @@ def test_materialized_graph_uses_configured_federated_builder(monkeypatch):
     assert calls == [(ablation.CONFIG, True)]
 
 
+def test_resolve_benchmark_vault_uses_configured_default_vault():
+    config = {
+        "default_vault": "core",
+        "chroma_path": "/tmp/chroma",
+        "vaults": [
+            {"id": "core", "path": "/tmp/core", "external_sources": [{"id": "projects"}]},
+            {"id": "episodic", "path": "/tmp/episodic"},
+        ],
+    }
+
+    settings = ablation._resolve_benchmark_vault_settings(config)
+
+    assert settings["vault_path"] == "/tmp/core"
+    assert settings["external_sources"] == [{"id": "projects"}]
+    assert settings["chroma_collection"] == "vault_core_notes"
+    assert "vaults" not in settings
+
+
 def test_instrumented_query_calls_attention_once(monkeypatch):
     calls = []
     monkeypatch.setattr(ablation, "attention", _fake_attention(calls))

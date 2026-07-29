@@ -31,6 +31,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from bdh_graph_harness.config import CONFIG, config_overlay, load_config
 from bdh_graph_harness.graph.federated import build_configured_graph
+from bdh_graph_harness.vaults import normalize_vault_configs
 from bdh_graph_harness.memory import load_state, save_state
 from bdh_graph_harness.memory.hebbian import hebbian_update
 from bdh_graph_harness.retrieval.attention import attention
@@ -210,8 +211,10 @@ def run_eval(
     if not queries:
         raise ValueError("No queries in golden set")
 
-    # Ensure CONFIG reflects the caller's on-disk config before we overlay.
-    load_config(config_path)
+    # Resolve multi-vault configs exactly like the runtime: the benchmark
+    # targets the configured default vault, not the legacy top-level fallback.
+    loaded_config = load_config(config_path)
+    vault_settings = _resolve_benchmark_vault_settings(loaded_config)
     resolved_config_path = str(Path(config_path).resolve()) if config_path else None
 
     # Ablations must not mutate the production ChromaDB or state files.
@@ -221,10 +224,16 @@ def run_eval(
     overrides = dict(config_overrides)
     overrides.setdefault("chroma_path", str(ablation_chroma))
 
-    with config_overlay(overrides):
+    with config_overlay(vault_settings), config_overlay(overrides):
         nodes, edges, _state_path = _build_materialized_graph()
         validate_golden_set(queries, nodes)
-        collection = compute_all_embeddings(nodes, CONFIG["vault_path"])
+        collection = compute_all_embeddings(
+            nodes,
+            CONFIG["vault_path"],
+            chroma_path=CONFIG["chroma_path"],
+            collection_name=CONFIG.get("chroma_collection"),
+            config=CONFIG,
+        )
         bm25_index = BM25Index(nodes)
 
         results: dict[str, Any] = {
@@ -256,6 +265,17 @@ def run_eval(
             results["warm_final_synapses"] = len(warm_state["synapses"])
 
         return results
+
+
+def _resolve_benchmark_vault_settings(config: dict) -> dict:
+    """Return the effective settings for the configured default vault."""
+    vaults = normalize_vault_configs(config)
+    default_id = config.get("default_vault", vaults[0].id)
+    for vault in vaults:
+        if vault.id == default_id:
+            return dict(vault.settings)
+    available = ", ".join(vault.id for vault in vaults)
+    raise ValueError(f"default_vault '{default_id}' not found; available: {available}")
 
 
 def _build_materialized_graph():
