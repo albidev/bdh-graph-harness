@@ -33,6 +33,7 @@ import json
 import logging
 import urllib.request
 import urllib.error
+from urllib.parse import quote
 
 from mcp.server.fastmcp import FastMCP
 
@@ -54,6 +55,11 @@ def _api_url(path: str, host: str | None = None, port: int | None = None) -> str
     h = host or os.environ.get("BDH_API_HOST", DEFAULT_API_HOST)
     p = port or int(os.environ.get("BDH_API_PORT", str(DEFAULT_API_PORT)))
     return f"http://{h}:{p}{path}"
+
+
+def _api_url_with_vault(path: str, vault_id: str) -> str:
+    """Build a web API URL scoped to a percent-encoded vault identifier."""
+    return f"{_api_url(path)}?vault_id={quote(vault_id, safe='')}"
 
 
 def _http_get(url: str, timeout: float = 30) -> dict | None:
@@ -494,7 +500,7 @@ def stats(vault_id: str | None = None) -> str:
     """
     url = _api_url("/api/stats")
     if vault_id is not None:
-        url = f"{url}?vault_id={vault_id}"
+        url = _api_url_with_vault("/api/stats", vault_id)
     result = _http_get(url)
     if result is not None:
         # Web API already returns the right keys, just pass through
@@ -521,7 +527,7 @@ def hebbian(vault_id: str | None = None) -> str:
     """
     url = _api_url("/api/hebbian")
     if vault_id is not None:
-        url = f"{url}?vault_id={vault_id}"
+        url = _api_url_with_vault("/api/hebbian", vault_id)
     result = _http_get(url)
     if result is not None:
         # Normalise: web API uses 'total' + 'queries', MCP uses 'total_synapses' + 'queries_processed'
@@ -553,7 +559,7 @@ def graph(vault_id: str | None = None) -> str:
     """
     url = _api_url("/api/graph")
     if vault_id is not None:
-        url = f"{url}?vault_id={vault_id}"
+        url = _api_url_with_vault("/api/graph", vault_id)
     result = _http_get(url)
     if result is not None:
         # Normalise: web API returns 'nodes' + 'edges' without counts
@@ -594,7 +600,7 @@ def refresh(vault_id: str | None = None) -> str:
         if "hebbian_synapses" not in result:
             stats_url = _api_url("/api/stats")
             if vault_id is not None:
-                stats_url = f"{stats_url}?vault_id={vault_id}"
+                stats_url = _api_url_with_vault("/api/stats", vault_id)
             s = _http_get(stats_url)
             if s and "hebbian_synapses" in s:
                 result["hebbian_synapses"] = s["hebbian_synapses"]
