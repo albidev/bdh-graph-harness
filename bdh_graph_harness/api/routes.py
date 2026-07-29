@@ -838,19 +838,21 @@ async def api_refresh(request, app_state: dict) -> web.Response:
     ctx, err = _resolve_vault_ctx(app_state, _vault_id_from_body(data))
     if err:
         return err
+    assert ctx is not None
 
-    n = ctx.nodes
-    vault_root = ctx.config.path
+    async with ctx.runtime_lock:
+        n = ctx.nodes
+        vault_root = ctx.config.path
 
-    from bdh_graph_harness.retrieval import compute_all_embeddings
-    coll = await asyncio.to_thread(
-        compute_all_embeddings, n, vault_root, False,
-        chroma_path=ctx.config.chroma_path,
-        collection_name=ctx.config.chroma_collection,
-        config=ctx.config.settings,
-    )
-    ctx.collection = coll
-    return web.json_response({'status': 'ok', 'embeddings': coll.count()})
+        from bdh_graph_harness.retrieval import compute_all_embeddings
+        coll = await asyncio.to_thread(
+            compute_all_embeddings, n, vault_root, False,
+            chroma_path=ctx.config.chroma_path,
+            collection_name=ctx.config.chroma_collection,
+            config=ctx.config.settings,
+        )
+        ctx.collection = coll
+        return web.json_response({'status': 'ok', 'embeddings': coll.count()})
 
 
 async def api_node_update(request, app_state: dict, ws_clients: set) -> web.Response:

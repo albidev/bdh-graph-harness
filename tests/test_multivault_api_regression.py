@@ -1,6 +1,7 @@
 """Regression tests for per-vault API routing and async query isolation."""
 
 import asyncio
+import threading
 from types import SimpleNamespace
 
 import pytest
@@ -220,3 +221,37 @@ async def test_federated_consolidation_persists_raw_legacy_synapse_keys(monkeypa
     assert canonical_key in ctx.state["synapses"]
     assert raw_key in saved[-1]["synapses"]
     assert canonical_key not in saved[-1]["synapses"]
+
+
+@pytest.mark.asyncio
+async def test_embedding_refresh_waits_for_vault_runtime_lock(monkeypatch):
+    ctx = make_context("research")
+    started = threading.Event()
+
+    class Collection:
+        def count(self):
+            return 1
+
+    def compute_embeddings(*_args, **_kwargs):
+        started.set()
+        return Collection()
+
+    import bdh_graph_harness.retrieval as retrieval
+    monkeypatch.setattr(retrieval, "compute_all_embeddings", compute_embeddings)
+
+    async def json_body():
+        return {"vault_id": "research"}
+
+    await ctx.runtime_lock.acquire()
+    task = asyncio.create_task(
+        routes.api_refresh(SimpleNamespace(json=json_body), {"registry": make_registry(ctx)})
+    )
+    try:
+        await asyncio.sleep(0.05)
+        assert not started.is_set(), "embedding build ran while graph context was locked"
+    finally:
+        ctx.runtime_lock.release()
+
+    response = await task
+    assert response.status == 200
+    assert started.is_set()
