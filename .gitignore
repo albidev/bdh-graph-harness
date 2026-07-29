@@ -44,6 +44,8 @@ chroma_db/
 # Benchmark-generated caches and artifacts
 benchmarks/.bdh-chroma-ablation/
 benchmarks/results/*.json
+# Local review packs can contain vault excerpts and reviewer rationale.
+benchmarks/review/legacy-hebbian-*.json
 
 # Node (Obsidian plugin)
 plugins/obsidian/node_modules/

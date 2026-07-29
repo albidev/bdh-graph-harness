@@ -3,6 +3,7 @@ import os
 import json
 import tempfile
 import asyncio
+from types import SimpleNamespace
 import pytest
 import chromadb
 import harness
@@ -143,6 +144,101 @@ async def test_api_stats(mock_app_setup, monkeypatch):
         await client.close()
 
 
+def test_retrieval_telemetry_aggregates_abstentions_without_storing_queries():
+    """Runtime metrics expose evidence aggregates, never raw query text."""
+    ctx = SimpleNamespace(retrieval_telemetry={})
+
+    bdh_routes.record_retrieval_telemetry(
+        ctx,
+        routing={
+            'abstained': True,
+            'abstention_reason': 'insufficient_retrieval_evidence',
+            'vector_top_score': 0.2,
+            'bm25_matched_term_count': 3,
+        },
+        active={},
+    )
+
+    assert ctx.retrieval_telemetry == {
+        'query_count': 1,
+        'abstained_count': 1,
+        'activated_note_count': 0,
+        'vector_top_score_sum': 0.2,
+        'bm25_matched_term_count_sum': 3,
+        'abstention_reasons': {'insufficient_retrieval_evidence': 1},
+    }
+
+
+@pytest.mark.asyncio
+async def test_api_stats_exposes_anonymous_retrieval_telemetry():
+    """Stats expose aggregate gate health without query or note payloads."""
+    from bdh_graph_harness.vaults import VaultConfig, VaultContext, VaultRegistry
+
+    config = VaultConfig('default', 'Default', '/tmp', '/tmp/chroma', 'notes', {})
+    ctx = VaultContext(config, {}, {}, None, {'synapses': {}, 'queries': 0, 'dormant_nodes': set()})
+    ctx.retrieval_telemetry = {
+        'query_count': 4,
+        'abstained_count': 3,
+        'activated_note_count': 5,
+        'vector_top_score_sum': 1.8,
+        'bm25_matched_term_count_sum': 10,
+        'abstention_reasons': {'insufficient_retrieval_evidence': 3},
+    }
+    registry = VaultRegistry({'vault_path': '/tmp', 'chroma_path': '/tmp/chroma', 'chroma_collection': 'notes'})
+    registry.register_context('default', ctx)
+
+    response = await bdh_routes.api_stats(SimpleNamespace(query={}), {'registry': registry})
+    data = json.loads(response.body.decode())
+
+    assert data['retrieval_telemetry'] == {
+        'query_count': 4,
+        'abstained_count': 3,
+        'abstention_rate': 0.75,
+        'activated_note_count': 5,
+        'mean_activated_notes': 1.25,
+        'mean_vector_top_score': 0.45,
+        'mean_bm25_matched_terms': 2.5,
+        'abstention_reasons': {'insufficient_retrieval_evidence': 3},
+    }
+
+
+@pytest.mark.asyncio
+async def test_read_only_abstained_query_updates_runtime_telemetry(mock_app_setup, monkeypatch):
+    """Every retrieval is counted, while read-only mode leaves persistent state alone."""
+    from aiohttp.test_utils import TestClient, TestServer
+
+    def abstaining_attention(*args, routing_meta=None, **kwargs):
+        routing_meta.update({
+            'abstained': True,
+            'abstention_reason': 'insufficient_retrieval_evidence',
+            'vector_top_score': 0.2,
+            'bm25_matched_term_count': 0,
+            'activation_details': [],
+        })
+        return {}
+
+    nodes, edges, collection, state, config, _ = mock_app_setup
+    monkeypatch.setattr(bdh_routes, 'attention', abstaining_attention)
+    app = _capture_app(monkeypatch, config, nodes, edges, collection, state)
+    server = TestServer(app)
+    client = TestClient(server)
+    await client.start_server()
+    try:
+        response = await client.post('/api/query', json={
+            'query': 'carbonara recipe', 'learn': False, 'respond': False,
+        })
+        assert response.status == 200
+        assert state['queries'] == 5
+
+        stats_response = await client.get('/api/stats')
+        stats = await stats_response.json()
+        assert stats['retrieval_telemetry']['query_count'] == 1
+        assert stats['retrieval_telemetry']['abstained_count'] == 1
+        assert stats['retrieval_telemetry']['activated_note_count'] == 0
+    finally:
+        await client.close()
+
+
 # ---------------------------------------------------------------------------
 # GET /api/graph
 # ---------------------------------------------------------------------------
@@ -256,6 +352,36 @@ async def test_api_hebbian(mock_app_setup, monkeypatch):
         assert 'weight' in syn
         assert 'frequency' in syn
         assert 'last_coactivated' in syn
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_api_hebbian_decodes_v2_and_skips_ambiguous_legacy_key(mock_app_setup, monkeypatch):
+    """The public API must safely expose v2 state and omit unrecoverable state."""
+    from aiohttp.test_utils import TestClient, TestServer
+    from bdh_graph_harness.memory.hebbian import encode_synapse_key
+
+    nodes, edges, collection, state, config, _ = mock_app_setup
+    state['synapses'] = {
+        encode_synapse_key('alpha|left', 'beta|right'): {
+            'weight': 0.8, 'frequency': 3, 'last_coactivated': '2026-01-01T00:00:00',
+        },
+        'a|b|c': {
+            'weight': 0.2, 'frequency': 1, 'last_coactivated': '2026-01-01T00:00:00',
+        },
+    }
+    app = _capture_app(monkeypatch, config, nodes, edges, collection, state)
+    server = TestServer(app)
+    client = TestClient(server)
+    await client.start_server()
+    try:
+        response = await client.get('/api/hebbian')
+        assert response.status == 200
+        data = await response.json()
+        assert data['total'] == 1
+        assert data['synapses'][0]['note_a'] == 'alpha|left'
+        assert data['synapses'][0]['note_b'] == 'beta|right'
     finally:
         await client.close()
 

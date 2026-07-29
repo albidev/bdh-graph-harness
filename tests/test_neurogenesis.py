@@ -86,7 +86,9 @@ def test_create_note_persists_canonical_source_ids_without_body_links(temp_vault
         'source query',
         source_node_ids=['vault:wiki/source-a.md', 'external:projects/demo.md'],
     )
-    content = open(os.path.join(temp_vault, note_id + '.md'), encoding='utf-8').read()
+    assert note_id is not None
+    with open(os.path.join(temp_vault, note_id + '.md'), encoding='utf-8') as handle:
+        content = handle.read()
     assert 'activated_from_ids: ["vault:wiki/source-a.md", "external:projects/demo.md"]' in content
     assert '[[vault:wiki/source-a.md]]' not in content
     assert '[[external:projects/demo.md]]' not in content

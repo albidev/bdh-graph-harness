@@ -21,6 +21,7 @@ from bdh_graph_harness.graph import build_graph, build_configured_graph, migrate
 from bdh_graph_harness.retrieval.attention import attention
 from bdh_graph_harness.retrieval import compute_all_embeddings, BM25Index
 from bdh_graph_harness.memory import load_state, save_state, hebbian_update
+from bdh_graph_harness.memory.hebbian import safe_decode_synapse_key
 from bdh_graph_harness.llm import llm_respond
 from bdh_graph_harness.neurogenesis import extract_new_concepts, create_note
 from bdh_graph_harness.api import start_api_server
@@ -57,7 +58,11 @@ def show_stats(nodes, edges, state):
         sorted_syn = sorted(state['synapses'].items(), key=lambda x: -x[1]['weight'])
         print(f"\n  Top Hebbian connections:")
         for key, syn in sorted_syn[:5]:
-            a, b = key.split('|')
+            pair = safe_decode_synapse_key(key)
+            if pair is None:
+                print("    [skipped malformed synapse key]")
+                continue
+            a, b = pair
             print(f"    {a} ↔ {b} (w={syn['weight']:.3f}, freq={syn['frequency']})")
 
 
@@ -70,7 +75,11 @@ def show_hebbian(state):
     print(f"\n🔌 Hebbian Synaptic State ({len(state['synapses'])} connections)")
     sorted_syn = sorted(state['synapses'].items(), key=lambda x: -x[1]['weight'])
     for key, syn in sorted_syn:
-        a, b = key.split('|')
+        pair = safe_decode_synapse_key(key)
+        if pair is None:
+            print("  [skipped malformed synapse key]")
+            continue
+        a, b = pair
         print(f"  {a} ↔ {b}")
         print(f"    weight: {syn['weight']:.3f} | freq: {syn['frequency']} | last: {syn['last_coactivated']}")
 
@@ -322,17 +331,24 @@ def main():
         unresolved = []
     print(f"   ✓ {len(nodes)} neurons, {sum(len(e) for e in edges.values())} synapses")
 
+    # Selected vaults and federated sources need explicit Chroma routing.
+    embedding_kwargs = {}
+    if args.vault_id or effective_config.get('external_sources'):
+        embedding_kwargs = {
+            'chroma_path': effective_config.get('chroma_path'),
+            'collection_name': effective_config.get('chroma_collection'),
+            'config': effective_config,
+        }
+
     # Compute embeddings
     if effective_config.get('external_sources'):
         collection = compute_all_embeddings(
             nodes,
             vault_root,
-            chroma_path=effective_config.get('chroma_path'),
-            collection_name=effective_config.get('chroma_collection'),
-            config=effective_config,
+            **embedding_kwargs,
         )
     else:
-        collection = compute_all_embeddings(nodes, vault_root)
+        collection = compute_all_embeddings(nodes, vault_root, **embedding_kwargs)
 
     # Build BM25 index for hybrid search (Phase 3.1)
     # Skip if --serve: the server builds its own index
@@ -369,7 +385,12 @@ def main():
 
     if args.refresh_embeddings:
         print("🔄 Force-refreshing all embeddings...")
-        collection = compute_all_embeddings(nodes, vault_root, force_refresh=True)
+        collection = compute_all_embeddings(
+            nodes,
+            vault_root,
+            force_refresh=True,
+            **embedding_kwargs,
+        )
         print(f"  ✓ Refreshed {collection.count()} embeddings")
         return
 

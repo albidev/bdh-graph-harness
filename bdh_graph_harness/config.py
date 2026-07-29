@@ -33,6 +33,8 @@ DEFAULT_CONFIG_PATHS = [
 
 CONFIG = {
     'vault_path': os.path.expanduser('~/Documents/Hermes'),
+    # Optional alternate state file for reversible clean-room learning runs.
+    'hebbian_state_file': STATE_FILE,
     # Optional read-only Markdown sources merged into the primary vault graph.
     # Each entry supports id, path, include, exclude, and writable (false by default).
     'external_sources': [],
@@ -56,11 +58,13 @@ CONFIG = {
     'chroma_path': '.bdh-chroma',
     'chroma_collection': 'notes',
     'seed_count': 5,
+    'hebbian_learning_seed_count': 2,  # conservative write budget; separate from retrieval seeds
     'max_hop': 2,
     'active_threshold': 0.25,
     'hub_dampening': True,
     'hub_degree_threshold': 25,      # dampen only very high-degree hubs (e.g. wiki/index)
     'max_neighbors_per_hop': 10,
+    'attention_relevance_batch_size': 256,
     'hop_decay': 0.5,  # score decay per hop (single application, not compound)
     'hebbian_gain': 0.0,  # multiplier on learned synapse weight during propagation; 0 = disabled
     # Dynamic Hebbian adjacency: learned co-activations are traversable edges,
@@ -70,6 +74,12 @@ CONFIG = {
     'hebbian_dynamic_top_n': 3,
     'hebbian_dynamic_gain': 1.5,
     'hebbian_dynamic_hop_decay': 0.6,
+    'hebbian_associative_context_enabled': False,
+    'hebbian_associative_context_max_items': 2,
+    'hebbian_associative_context_max_per_seed': 1,
+    # Dynamic associations need query-local semantic evidence before they may
+    # compete with declared wikilinks in retrieval.
+    'hebbian_dynamic_query_relevance_floor': 0.35,
     # Confidence gate for learned-only traversal; static wikilinks ignore these.
     'hebbian_dynamic_frequency_saturation': 2.0,
     'hebbian_dynamic_unconsolidated_trust': 0.6,
@@ -97,6 +107,11 @@ CONFIG = {
     'rrf_k': 60,
     'bm25_k1': 1.5,
     'bm25_b': 0.75,
+    # Query-level abstention must run before seed selection. RRF scores are
+    # rank-normalized per query and cannot be used as absolute confidence.
+    'retrieval_abstention_enabled': True,
+    'retrieval_min_vector_score': 0.58,
+    'retrieval_min_bm25_matched_terms': 5,
     # Adaptive threshold (Phase 3.3)
     'adaptive_threshold': False,
     'threshold_floor': 0.15,

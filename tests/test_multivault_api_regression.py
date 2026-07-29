@@ -1,12 +1,15 @@
 """Regression tests for per-vault API routing and async query isolation."""
 
 import asyncio
+import threading
 from types import SimpleNamespace
 
 import pytest
 from aiohttp.test_utils import make_mocked_request
 
 from bdh_graph_harness.api import routes
+from bdh_graph_harness.graph.federated import project_runtime_state_to_persisted
+from bdh_graph_harness.memory.hebbian import encode_synapse_key
 from bdh_graph_harness.vaults import VaultConfig, VaultContext, VaultRegistry
 
 
@@ -111,7 +114,9 @@ async def test_attention_and_plasticity_only_mutates_resolved_vault(monkeypatch)
 
     assert active == {"note": 0.9}
     assert notes == [{"id": "note", "title": "Scoped note", "score": 0.9}]
-    assert updates == [{"pair": "note|note", "weight": 0.8, "frequency": 1}]
+    assert updates == [{
+        "note_a": "note", "note_b": "note", "weight": 0.8, "frequency": 1,
+    }]
     assert calls[0][3] == "assistant_response"
 
 
@@ -143,3 +148,110 @@ async def test_neurogenesis_is_scoped_to_context_path(monkeypatch):
         "title": "New concept",
         "source_notes": ["Scoped note"],
     }]
+
+
+def make_federated_context():
+    """A canonical runtime backed by a raw legacy federated state."""
+    ctx = make_context("federated")
+    first = "vault:wiki/first.md"
+    second = "vault:wiki/second.md"
+    raw_key = "wiki/first|wiki/second"
+    canonical_key = encode_synapse_key(first, second)
+    synapse = {"weight": 0.8, "frequency": 3, "last_coactivated": None}
+    ctx.nodes = {
+        first: {"title": "First", "text": "first", "tags": "test"},
+        second: {"title": "Second", "text": "second", "tags": "test"},
+    }
+    ctx.edges = {first: [], second: []}
+    ctx.state = {"synapses": {canonical_key: dict(synapse)}, "queries": 2}
+    ctx.persisted_state = {"synapses": {raw_key: dict(synapse)}, "queries": 2}
+    return ctx, raw_key, canonical_key
+
+
+def test_federated_projection_preserves_raw_key_absent_from_runtime():
+    ctx, raw_key, _ = make_federated_context()
+    assert ctx.persisted_state is not None
+
+    projected = project_runtime_state_to_persisted(
+        ctx.persisted_state, {"synapses": {}, "queries": 3}, ctx.nodes,
+    )
+
+    assert raw_key in projected["synapses"]
+    assert projected["queries"] == 3
+
+
+@pytest.mark.asyncio
+async def test_federated_plasticity_persists_raw_legacy_synapse_keys(monkeypatch):
+    ctx, raw_key, canonical_key = make_federated_context()
+    saved = []
+
+    monkeypatch.setattr(
+        routes, "attention",
+        lambda *args, **kwargs: {
+            "vault:wiki/first.md": 0.9,
+            "vault:wiki/second.md": 0.8,
+        },
+    )
+    monkeypatch.setattr(routes, "save_state", lambda _path, state, **_kwargs: saved.append(state.copy()))
+    monkeypatch.setattr(routes, "broadcast_activation", lambda *_args: asyncio.sleep(0))
+
+    await routes.run_attention_and_plasticity("federated query", ctx, set())
+
+    assert canonical_key in ctx.state["synapses"]
+    assert raw_key in saved[-1]["synapses"]
+    assert canonical_key not in saved[-1]["synapses"]
+
+
+@pytest.mark.asyncio
+async def test_federated_consolidation_persists_raw_legacy_synapse_keys(monkeypatch):
+    ctx, raw_key, canonical_key = make_federated_context()
+    saved = []
+
+    async def json_body():
+        return {"vault_id": "federated"}
+
+    monkeypatch.setattr(routes, "save_state", lambda _path, state, **_kwargs: saved.append(state.copy()))
+    monkeypatch.setattr(routes, "broadcast_activation", lambda *_args: asyncio.sleep(0))
+
+    response = await routes.api_consolidate(
+        SimpleNamespace(json=json_body), {"registry": make_registry(ctx)}, set(),
+    )
+
+    assert response.status == 200
+    assert canonical_key in ctx.state["synapses"]
+    assert raw_key in saved[-1]["synapses"]
+    assert canonical_key not in saved[-1]["synapses"]
+
+
+@pytest.mark.asyncio
+async def test_embedding_refresh_waits_for_vault_runtime_lock(monkeypatch):
+    ctx = make_context("research")
+    started = threading.Event()
+
+    class Collection:
+        def count(self):
+            return 1
+
+    def compute_embeddings(*_args, **_kwargs):
+        started.set()
+        return Collection()
+
+    import bdh_graph_harness.retrieval as retrieval
+    monkeypatch.setattr(retrieval, "compute_all_embeddings", compute_embeddings)
+
+    async def json_body():
+        return {"vault_id": "research"}
+
+    await ctx.runtime_lock.acquire()
+    task = asyncio.create_task(
+        routes.api_refresh(SimpleNamespace(json=json_body), {"registry": make_registry(ctx)})
+    )
+    try:
+        await asyncio.sleep(0.05)
+        assert not started.is_set(), "embedding build ran while graph context was locked"
+    finally:
+        ctx.runtime_lock.release()
+
+    response = await task
+    assert response.status == 200
+    assert started.is_set()
