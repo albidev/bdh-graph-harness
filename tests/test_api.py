@@ -3,6 +3,7 @@ import os
 import json
 import tempfile
 import asyncio
+from types import SimpleNamespace
 import pytest
 import chromadb
 import harness
@@ -139,6 +140,101 @@ async def test_api_stats(mock_app_setup, monkeypatch):
         assert data['llm_runtime']['transport'] == config['llm_transport']
         assert data['llm_runtime']['model'] == config['llm_model']
         assert 'api_key' not in data['llm_runtime']
+    finally:
+        await client.close()
+
+
+def test_retrieval_telemetry_aggregates_abstentions_without_storing_queries():
+    """Runtime metrics expose evidence aggregates, never raw query text."""
+    ctx = SimpleNamespace(retrieval_telemetry={})
+
+    bdh_routes.record_retrieval_telemetry(
+        ctx,
+        routing={
+            'abstained': True,
+            'abstention_reason': 'insufficient_retrieval_evidence',
+            'vector_top_score': 0.2,
+            'bm25_matched_term_count': 3,
+        },
+        active={},
+    )
+
+    assert ctx.retrieval_telemetry == {
+        'query_count': 1,
+        'abstained_count': 1,
+        'activated_note_count': 0,
+        'vector_top_score_sum': 0.2,
+        'bm25_matched_term_count_sum': 3,
+        'abstention_reasons': {'insufficient_retrieval_evidence': 1},
+    }
+
+
+@pytest.mark.asyncio
+async def test_api_stats_exposes_anonymous_retrieval_telemetry():
+    """Stats expose aggregate gate health without query or note payloads."""
+    from bdh_graph_harness.vaults import VaultConfig, VaultContext, VaultRegistry
+
+    config = VaultConfig('default', 'Default', '/tmp', '/tmp/chroma', 'notes', {})
+    ctx = VaultContext(config, {}, {}, None, {'synapses': {}, 'queries': 0, 'dormant_nodes': set()})
+    ctx.retrieval_telemetry = {
+        'query_count': 4,
+        'abstained_count': 3,
+        'activated_note_count': 5,
+        'vector_top_score_sum': 1.8,
+        'bm25_matched_term_count_sum': 10,
+        'abstention_reasons': {'insufficient_retrieval_evidence': 3},
+    }
+    registry = VaultRegistry({'vault_path': '/tmp', 'chroma_path': '/tmp/chroma', 'chroma_collection': 'notes'})
+    registry.register_context('default', ctx)
+
+    response = await bdh_routes.api_stats(SimpleNamespace(query={}), {'registry': registry})
+    data = json.loads(response.body.decode())
+
+    assert data['retrieval_telemetry'] == {
+        'query_count': 4,
+        'abstained_count': 3,
+        'abstention_rate': 0.75,
+        'activated_note_count': 5,
+        'mean_activated_notes': 1.25,
+        'mean_vector_top_score': 0.45,
+        'mean_bm25_matched_terms': 2.5,
+        'abstention_reasons': {'insufficient_retrieval_evidence': 3},
+    }
+
+
+@pytest.mark.asyncio
+async def test_read_only_abstained_query_updates_runtime_telemetry(mock_app_setup, monkeypatch):
+    """Every retrieval is counted, while read-only mode leaves persistent state alone."""
+    from aiohttp.test_utils import TestClient, TestServer
+
+    def abstaining_attention(*args, routing_meta=None, **kwargs):
+        routing_meta.update({
+            'abstained': True,
+            'abstention_reason': 'insufficient_retrieval_evidence',
+            'vector_top_score': 0.2,
+            'bm25_matched_term_count': 0,
+            'activation_details': [],
+        })
+        return {}
+
+    nodes, edges, collection, state, config, _ = mock_app_setup
+    monkeypatch.setattr(bdh_routes, 'attention', abstaining_attention)
+    app = _capture_app(monkeypatch, config, nodes, edges, collection, state)
+    server = TestServer(app)
+    client = TestClient(server)
+    await client.start_server()
+    try:
+        response = await client.post('/api/query', json={
+            'query': 'carbonara recipe', 'learn': False, 'respond': False,
+        })
+        assert response.status == 200
+        assert state['queries'] == 5
+
+        stats_response = await client.get('/api/stats')
+        stats = await stats_response.json()
+        assert stats['retrieval_telemetry']['query_count'] == 1
+        assert stats['retrieval_telemetry']['abstained_count'] == 1
+        assert stats['retrieval_telemetry']['activated_note_count'] == 0
     finally:
         await client.close()
 

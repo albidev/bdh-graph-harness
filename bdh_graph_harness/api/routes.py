@@ -161,6 +161,34 @@ async def api_health(request, app_state: dict) -> web.Response:
     return web.json_response({'status': 'ok'})
 
 
+def record_retrieval_telemetry(ctx, routing: dict, active: dict) -> None:
+    """Aggregate per-vault retrieval evidence without retaining query content."""
+    telemetry = ctx.retrieval_telemetry
+    telemetry['query_count'] = telemetry.get('query_count', 0) + 1
+    telemetry['abstained_count'] = telemetry.get('abstained_count', 0) + int(bool(routing.get('abstained')))
+    telemetry['activated_note_count'] = telemetry.get('activated_note_count', 0) + len(active)
+    telemetry['vector_top_score_sum'] = telemetry.get('vector_top_score_sum', 0.0) + float(routing.get('vector_top_score') or 0.0)
+    telemetry['bm25_matched_term_count_sum'] = telemetry.get('bm25_matched_term_count_sum', 0) + int(routing.get('bm25_matched_term_count') or 0)
+    if reason := routing.get('abstention_reason'):
+        reasons = telemetry.setdefault('abstention_reasons', {})
+        reasons[reason] = reasons.get(reason, 0) + 1
+
+
+def retrieval_telemetry_summary(telemetry: dict) -> dict:
+    """Return public aggregate retrieval health, excluding all raw inputs."""
+    query_count = telemetry.get('query_count', 0)
+    return {
+        'query_count': query_count,
+        'abstained_count': telemetry.get('abstained_count', 0),
+        'abstention_rate': round(telemetry.get('abstained_count', 0) / query_count, 4) if query_count else 0.0,
+        'activated_note_count': telemetry.get('activated_note_count', 0),
+        'mean_activated_notes': round(telemetry.get('activated_note_count', 0) / query_count, 4) if query_count else 0.0,
+        'mean_vector_top_score': round(telemetry.get('vector_top_score_sum', 0.0) / query_count, 4) if query_count else 0.0,
+        'mean_bm25_matched_terms': round(telemetry.get('bm25_matched_term_count_sum', 0) / query_count, 4) if query_count else 0.0,
+        'abstention_reasons': dict(telemetry.get('abstention_reasons', {})),
+    }
+
+
 async def api_stats(request, app_state: dict) -> web.Response:
     """Return graph stats + Hebbian summary as JSON."""
     ctx, err = _resolve_vault_ctx(app_state, _vault_id_from_query(request))
@@ -187,6 +215,7 @@ async def api_stats(request, app_state: dict) -> web.Response:
             'model': ctx.config.settings.get('llm_model'),
             'endpoint': ctx.config.settings.get('llm_endpoint'),
         },
+        'retrieval_telemetry': retrieval_telemetry_summary(ctx.retrieval_telemetry),
     }
     stats.update(hebbian_tail_stats(s, config=ctx.config.settings))
     if s['synapses']:
@@ -360,6 +389,8 @@ async def _run_attention_and_plasticity_unlocked(
             'multi_query_multivariant_hits': 0,
             'multi_query_enabled': False,
         })
+
+    record_retrieval_telemetry(ctx, routing, active)
 
     activated_notes = []
     activation_details = {
