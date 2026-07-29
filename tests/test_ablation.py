@@ -40,6 +40,24 @@ def test_cold_pass_never_updates_hebbian_state(monkeypatch):
     assert updates == []
 
 
+def test_materialized_graph_uses_configured_federated_builder(monkeypatch):
+    monkeypatch.setitem(ablation.CONFIG, "external_sources", [{"id": "projects"}])
+    expected_nodes = {"external:projects/readme": {}}
+    expected_edges = {"external:projects/readme": []}
+    calls = []
+
+    def fake_builder(config, *, use_cache):
+        calls.append((config, use_cache))
+        return expected_nodes, expected_edges, []
+
+    monkeypatch.setattr(ablation, "build_configured_graph", fake_builder)
+
+    nodes, edges, state_path = ablation._build_materialized_graph()
+
+    assert (nodes, edges, state_path) == (expected_nodes, expected_edges, None)
+    assert calls == [(ablation.CONFIG, True)]
+
+
 def test_instrumented_query_calls_attention_once(monkeypatch):
     calls = []
     monkeypatch.setattr(ablation, "attention", _fake_attention(calls))

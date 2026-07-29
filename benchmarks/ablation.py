@@ -30,7 +30,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from bdh_graph_harness.config import CONFIG, config_overlay, load_config
-from bdh_graph_harness.graph.builder import build_graph
+from bdh_graph_harness.graph.federated import build_configured_graph
 from bdh_graph_harness.memory import load_state, save_state
 from bdh_graph_harness.memory.hebbian import hebbian_update
 from bdh_graph_harness.retrieval.attention import attention
@@ -259,9 +259,8 @@ def run_eval(
 
 
 def _build_materialized_graph():
-    """Build graph using the current CONFIG. Returns (nodes, edges, state_path)."""
-    vault_path = CONFIG["vault_path"]
-    nodes, edges = build_graph(vault_path, use_cache=True)
+    """Build the graph selected by the current CONFIG."""
+    nodes, edges, _unresolved = build_configured_graph(CONFIG, use_cache=True)
     return nodes, edges, None
 
 
