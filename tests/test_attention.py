@@ -206,3 +206,61 @@ def test_attention_returns_scores(monkeypatch, mock_graph, mock_collection):
             assert 0.0 <= score <= 1.0
     finally:
         bdh_config.CONFIG['adaptive_threshold'] = orig_at
+
+
+class _LowEvidenceCollection:
+    def count(self):
+        return 3
+
+    def query(self, **_kwargs):
+        return {
+            'ids': [['alpha', 'beta', 'gamma']],
+            'distances': [[0.80, 0.85, 0.90]],
+        }
+
+
+class _NoLexicalEvidence:
+    def search(self, _query, top_k):
+        return [('alpha', 0.0)][:top_k]
+
+    def score_batch(self, _query, candidate_ids):
+        return {candidate_id: 0.0 for candidate_id in candidate_ids}
+
+    def _tokenize(self, _query):
+        return ['carbonara']
+
+    def matched_terms(self, _query, _note_id):
+        return []
+
+
+def test_attention_abstains_when_rrf_top_is_one_but_evidence_is_weak(monkeypatch):
+    nodes = {node_id: {'id': node_id, 'title': node_id} for node_id in ('alpha', 'beta', 'gamma')}
+    monkeypatch.setattr(bdh_attention_mod, 'get_embeddings', lambda _texts: [[1.0, 0.0, 0.0]])
+    monkeypatch.setitem(bdh_config.CONFIG, 'hybrid_search', True)
+    monkeypatch.setitem(bdh_config.CONFIG, 'hybrid_fusion', 'rrf')
+    monkeypatch.setitem(bdh_config.CONFIG, 'retrieval_abstention_enabled', True)
+    monkeypatch.setitem(bdh_config.CONFIG, 'retrieval_min_vector_score', 0.50)
+    monkeypatch.setitem(bdh_config.CONFIG, 'retrieval_min_bm25_matched_terms', 2)
+
+    routing = {}
+    active = bdh_attention_mod.attention(
+        'How do I make a traditional carbonara sauce?',
+        nodes,
+        {node_id: [] for node_id in nodes},
+        _LowEvidenceCollection(),
+        k=3,
+        max_hop=0,
+        bm25_index=_NoLexicalEvidence(),
+        routing_meta=routing,
+    )
+
+    assert routing['hybrid_top_score'] == 1.0
+    assert active == {}
+    assert routing['abstained'] is True
+    assert routing['abstention_reason'] == 'insufficient_retrieval_evidence'
+
+
+def test_retrieval_abstention_defaults_are_enabled_and_evidence_based():
+    assert bdh_config.CONFIG['retrieval_abstention_enabled'] is True
+    assert bdh_config.CONFIG['retrieval_min_vector_score'] == 0.50
+    assert bdh_config.CONFIG['retrieval_min_bm25_matched_terms'] == 2

@@ -107,6 +107,11 @@ CONFIG = {
     'rrf_k': 60,
     'bm25_k1': 1.5,
     'bm25_b': 0.75,
+    # Query-level abstention must run before seed selection. RRF scores are
+    # rank-normalized per query and cannot be used as absolute confidence.
+    'retrieval_abstention_enabled': True,
+    'retrieval_min_vector_score': 0.50,
+    'retrieval_min_bm25_matched_terms': 2,
     # Adaptive threshold (Phase 3.3)
     'adaptive_threshold': False,
     'threshold_floor': 0.15,

@@ -190,6 +190,21 @@ def compute_adaptive_threshold(scores, floor=0.05, min_activations=3):
     return threshold
 
 
+def should_abstain_from_retrieval(vector_top_score, bm25_matched_term_count):
+    """Reject queries lacking seed-level retrieval evidence.
+
+    RRF scores are query-local rank normalizations: their top result is 1.0 by
+    construction and must not be treated as an absolute confidence score.
+    """
+    if not CONFIG.get('retrieval_abstention_enabled', True):
+        return False
+    return (
+        vector_top_score < CONFIG.get('retrieval_min_vector_score', 0.50)
+        and bm25_matched_term_count < CONFIG.get('retrieval_min_bm25_matched_terms', 2)
+    )
+
+
+
 # ---------------------------------------------------------------------------
 # Attention: Embedding seed + Graph traversal
 # ---------------------------------------------------------------------------
@@ -455,24 +470,28 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
                 sim *= dampen
             scores[note_id] = sim
 
-    # Update routing metadata with chosen fusion and component scores.
+    # Seed evidence must be evaluated before graph expansion. In particular,
+    # RRF's per-query min-max normalization makes its top score 1.0 by design.
+    ranked = sorted(scores.values(), reverse=True)
+    vector_top_score = max(raw_vector_scores.values(), default=0.0)
+    bm25_ranked = sorted(bm25_scores.items(), key=lambda item: -item[1]) if hybrid_enabled else []
+    bm25_top_id = bm25_ranked[0][0] if bm25_ranked else None
+    bm25_query_terms = (
+        bm25_index._tokenize(query)
+        if hybrid_enabled and bm25_index is not None else []
+    )
+    bm25_matched_terms = (
+        bm25_index.matched_terms(query, bm25_top_id)
+        if hybrid_enabled and bm25_index is not None and bm25_top_id is not None else []
+    )
+    bm25_matched_term_count = len(bm25_matched_terms)
+
     if routing_meta is not None:
-        ranked = sorted(scores.values(), reverse=True)
-        bm25_ranked = sorted(bm25_scores.items(), key=lambda item: -item[1]) if hybrid_enabled else []
-        bm25_top_id = bm25_ranked[0][0] if bm25_ranked else None
-        bm25_query_terms = (
-            bm25_index._tokenize(query)
-            if hybrid_enabled and bm25_index is not None else []
-        )
-        bm25_matched_terms = (
-            bm25_index.matched_terms(query, bm25_top_id)
-            if hybrid_enabled and bm25_index is not None and bm25_top_id is not None else []
-        )
         routing_meta.update({
-            "vector_top_score": max(raw_vector_scores.values(), default=0.0),
+            "vector_top_score": vector_top_score,
             "bm25_top_score": max(bm25_scores.values(), default=0.0),
             "bm25_query_term_count": len(set(bm25_query_terms)),
-            "bm25_matched_term_count": len(bm25_matched_terms),
+            "bm25_matched_term_count": bm25_matched_term_count,
             "bm25_matched_terms": bm25_matched_terms,
             "hybrid_top_score": ranked[0] if ranked else 0.0,
             "hybrid_second_score": ranked[1] if len(ranked) > 1 else 0.0,
@@ -480,6 +499,16 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
             "hybrid_enabled": hybrid_enabled,
             "hybrid_fusion": CONFIG.get('hybrid_fusion', 'weighted') if hybrid_enabled else None,
         })
+
+    if should_abstain_from_retrieval(vector_top_score, bm25_matched_term_count):
+        if routing_meta is not None:
+            routing_meta.update({
+                "abstained": True,
+                "abstention_reason": "insufficient_retrieval_evidence",
+            })
+        return {}
+    if routing_meta is not None:
+        routing_meta.update({"abstained": False, "abstention_reason": None})
 
     # Keep retrieval-only scores separate from Hebbian and hop propagation scores.
     retrieval_scores = dict(scores)
