@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import copy
 import fnmatch
+import logging
 import os
 from collections import defaultdict
 from pathlib import PurePosixPath
@@ -31,6 +32,9 @@ from bdh_graph_harness.graph.sources import (
     sources_from_config,
 )
 from bdh_graph_harness.memory.hebbian import decode_synapse_key, encode_synapse_key
+
+
+logger = logging.getLogger("bdh.graph.federated")
 
 
 def _without_md(path: str) -> str:
@@ -329,6 +333,20 @@ def build_federated_graph(
                 "weight": 1.0,
                 "explicit": bool(_normalise_explicit_target(target)),
             })
+
+    unresolved_explicit_external = [
+        item for item in unresolved
+        if item["target"].strip().startswith("external:")
+    ]
+    if unresolved_explicit_external:
+        logger.warning(
+            "unresolved_explicit_external_wikilinks count=%d entries=%s",
+            len(unresolved_explicit_external),
+            [
+                {"source": item["source"], "target": item["target"]}
+                for item in unresolved_explicit_external
+            ],
+        )
 
     if neurogenesis_source_edges_enabled:
         _add_neurogenesis_source_edges(
