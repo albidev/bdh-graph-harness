@@ -262,5 +262,5 @@ def test_attention_abstains_when_rrf_top_is_one_but_evidence_is_weak(monkeypatch
 
 def test_retrieval_abstention_defaults_are_enabled_and_evidence_based():
     assert bdh_config.CONFIG['retrieval_abstention_enabled'] is True
-    assert bdh_config.CONFIG['retrieval_min_vector_score'] == 0.50
-    assert bdh_config.CONFIG['retrieval_min_bm25_matched_terms'] == 2
+    assert bdh_config.CONFIG['retrieval_min_vector_score'] == 0.58
+    assert bdh_config.CONFIG['retrieval_min_bm25_matched_terms'] == 5
