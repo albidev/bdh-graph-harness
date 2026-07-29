@@ -230,7 +230,7 @@ queries:
     reviewed: false
   - id: en-v4-016
     split: development
-    query: How can the BDH MCP server query the knowledge graph when the HTTP API server is not running?
+    query: How can the Graph Harness command-line interface retrieve knowledge when its HTTP API is not running?
     category: architecture
     difficulty: easy
     relevant_note_ids:
@@ -286,7 +286,7 @@ queries:
     reviewed: false
   - id: en-v4-020
     split: development
-    query: Which LoRA fine-tuning modes does mlx-lm support, and how is each selected?
+    query: Which low-rank adaptation training modes does mlx-lm support, and how is each selected?
     category: tool-usage
     difficulty: easy
     relevant_note_ids:
