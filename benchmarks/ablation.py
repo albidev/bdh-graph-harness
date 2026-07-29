@@ -53,6 +53,8 @@ class Metrics:
     config_hash: str | None = None
     hop_histogram: dict[int, int] = field(default_factory=dict)
     synapse_counts: list[int] = field(default_factory=list)
+    negative_query_count: int = 0
+    negative_nonempty_rate: float = 0.0
 
 
 def _config_hash(overrides: dict) -> str:
@@ -107,8 +109,12 @@ def validate_golden_set(queries: list[dict], nodes: dict) -> None:
         if not isinstance(query, str) or not query.strip():
             errors.append(f"query {index}: query must be a non-empty string")
             continue
-        if not isinstance(relevant_ids, list) or not 1 <= len(relevant_ids) <= 4:
-            errors.append(f"query {index}: relevant_note_ids must contain 1-4 IDs")
+        expected_empty = entry.get("expected_empty", False)
+        if not isinstance(relevant_ids, list) or (
+            not expected_empty and not 1 <= len(relevant_ids) <= 4
+        ) or (expected_empty and relevant_ids):
+            requirement = "be empty for expected_empty queries" if expected_empty else "contain 1-4 IDs"
+            errors.append(f"query {index}: relevant_note_ids must {requirement}")
             continue
         normalized_query = _normalized_text(query)
         for note_id in relevant_ids:
@@ -132,6 +138,7 @@ def _run_single_query(
     bm25_index: BM25Index,
     state: dict,
     category: str,
+    expected_empty: bool = False,
     cold: bool = True,
     collect_hops: bool = True,
 ) -> tuple[dict, dict]:
@@ -155,11 +162,13 @@ def _run_single_query(
     metrics["query"] = query
     metrics["category"] = category
     metrics["n_activated"] = len(activated_ids)
+    metrics["expected_empty"] = expected_empty
+    metrics["is_correct_rejection"] = expected_empty and not activated_ids
 
     metadata = {"latency_ms": latency_ms}
 
-    # Online plasticity: update Hebbian state in warm mode unless disabled.
-    if not cold and CONFIG.get("online_plasticity", True):
+    # Negative controls must never teach the Hebbian state.
+    if not expected_empty and not cold and CONFIG.get("online_plasticity", True):
         state, _updated_keys, _pruned = hebbian_update(active, state)
 
     if collect_hops:
@@ -270,6 +279,7 @@ def _run_pass(queries, nodes, edges, collection, bm25_index, state, *, cold: boo
             bm25_index=bm25_index,
             state=state,
             category=entry.get("category", "unknown"),
+            expected_empty=entry.get("expected_empty", False),
             cold=cold,
             collect_hops=collect_hops,
         )
@@ -279,7 +289,14 @@ def _run_pass(queries, nodes, edges, collection, bm25_index, state, *, cold: boo
         for hop, count in metadata.get("hop_histogram", {}).items():
             aggregated_meta["hop_histogram"][int(hop)] += int(count)
 
-    agg = aggregate_metrics(per_query)
+    ranking_per_query = [metrics for metrics in per_query if not metrics["expected_empty"]]
+    negative_per_query = [metrics for metrics in per_query if metrics["expected_empty"]]
+    agg = aggregate_metrics(ranking_per_query)
+    negative_nonempty_rate = (
+        sum(metrics["n_activated"] > 0 for metrics in negative_per_query) / len(negative_per_query)
+        if negative_per_query
+        else 0.0
+    )
     metrics = Metrics(
         mrr=agg.get("mrr", {}).get("mean", 0.0),
         recall_at_5=agg.get("recall@5", {}).get("mean", 0.0),
@@ -291,6 +308,8 @@ def _run_pass(queries, nodes, edges, collection, bm25_index, state, *, cold: boo
         per_query=per_query,
         hop_histogram=dict(sorted(aggregated_meta["hop_histogram"].items())),
         synapse_counts=aggregated_meta["synapse_counts"],
+        negative_query_count=len(negative_per_query),
+        negative_nonempty_rate=negative_nonempty_rate,
     )
     return metrics, aggregated_meta
 

@@ -91,6 +91,42 @@ def test_golden_set_validator_accepts_multiple_existing_semantic_targets():
     )
 
 
+def test_golden_set_validator_accepts_expected_empty_negative_query():
+    ablation.validate_golden_set(
+        [
+            {
+                "query": "What is the rainfall forecast for Rome tomorrow?",
+                "expected_empty": True,
+                "relevant_note_ids": [],
+            }
+        ],
+        {},
+    )
+
+
+def test_run_pass_excludes_expected_empty_queries_from_ranking_metrics(monkeypatch):
+    monkeypatch.setattr(ablation, "attention", lambda *_args, **_kwargs: {"target": 1.0})
+
+    metrics, _metadata = ablation._run_pass(
+        [
+            {"query": "positive", "relevant_note_ids": ["target"]},
+            {"query": "negative", "expected_empty": True, "relevant_note_ids": []},
+        ],
+        {"target": {"title": "Target"}},
+        {},
+        object(),
+        object(),
+        ablation._fresh_state(),
+        cold=True,
+        collect_hops=False,
+    )
+
+    assert metrics.mrr == 1.0
+    assert metrics.negative_query_count == 1
+    assert metrics.negative_nonempty_rate == 1.0
+    assert metrics.per_query[1]["is_correct_rejection"] is False
+
+
 def test_hebbian_trajectory_trains_only_on_training_queries(monkeypatch):
     train = [{"query": "train", "relevant_note_ids": ["a"]}]
     holdout = [{"query": "holdout", "relevant_note_ids": ["a"]}]
