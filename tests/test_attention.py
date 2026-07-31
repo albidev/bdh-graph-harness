@@ -233,6 +233,57 @@ class _NoLexicalEvidence:
         return []
 
 
+class _EntityLexicalEvidence:
+    def search(self, _query, top_k):
+        return [('alpha', 1.0)][:top_k]
+
+    def score_batch(self, _query, candidate_ids):
+        return {candidate_id: (1.0 if candidate_id == 'alpha' else 0.0)
+                for candidate_id in candidate_ids}
+
+    def _tokenize(self, _query):
+        return ['wavelength']
+
+    def matched_terms(self, _query, note_id):
+        return ['wavelength'] if note_id == 'alpha' else []
+
+
+def test_attention_accepts_exact_entity_context_with_weak_vector_evidence(monkeypatch):
+    nodes = {
+        'alpha': {
+            'id': 'alpha',
+            'title': 'README',
+            'context_label': 'Wavelength',
+        },
+        'beta': {'id': 'beta', 'title': 'Beta'},
+        'gamma': {'id': 'gamma', 'title': 'Gamma'},
+    }
+    monkeypatch.setattr(bdh_attention_mod, 'get_embeddings', lambda _texts: [[1.0, 0.0, 0.0]])
+    monkeypatch.setitem(bdh_config.CONFIG, 'hybrid_search', True)
+    monkeypatch.setitem(bdh_config.CONFIG, 'hybrid_fusion', 'rrf')
+    monkeypatch.setitem(bdh_config.CONFIG, 'adaptive_threshold', False)
+    monkeypatch.setitem(bdh_config.CONFIG, 'retrieval_abstention_enabled', True)
+    monkeypatch.setitem(bdh_config.CONFIG, 'retrieval_min_vector_score', 0.58)
+    monkeypatch.setitem(bdh_config.CONFIG, 'retrieval_min_bm25_matched_terms', 5)
+    monkeypatch.setitem(bdh_config.CONFIG, 'retrieval_entity_match_enabled', True)
+
+    routing = {}
+    active = bdh_attention_mod.attention(
+        'Spiega come funziona wavelength',
+        nodes,
+        {node_id: [] for node_id in nodes},
+        _LowEvidenceCollection(),
+        k=3,
+        max_hop=0,
+        bm25_index=_EntityLexicalEvidence(),
+        routing_meta=routing,
+    )
+
+    assert 'alpha' in active
+    assert routing['abstained'] is False
+    assert routing['entity_match'] is True
+
+
 def test_attention_abstains_when_rrf_top_is_one_but_evidence_is_weak(monkeypatch):
     nodes = {node_id: {'id': node_id, 'title': node_id} for node_id in ('alpha', 'beta', 'gamma')}
     monkeypatch.setattr(bdh_attention_mod, 'get_embeddings', lambda _texts: [[1.0, 0.0, 0.0]])
