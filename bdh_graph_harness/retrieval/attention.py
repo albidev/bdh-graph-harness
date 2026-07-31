@@ -190,13 +190,54 @@ def compute_adaptive_threshold(scores, floor=0.05, min_activations=3):
     return threshold
 
 
-def should_abstain_from_retrieval(vector_top_score, bm25_matched_term_count):
+def _has_exact_entity_match(query, candidate_ids, nodes, bm25_index):
+    """Detect lexical evidence that also names a candidate's graph entity.
+
+    Short entity queries (for example ``"Wavelength"``) can have weak vector
+    similarity and only one BM25 match while still being unambiguous.  Restrict
+    the escape hatch to terms present both in the query/candidate match and in
+    stable node identity fields; arbitrary body-text keyword matches do not
+    bypass the abstention gate.
+    """
+    if not bm25_index or not candidate_ids:
+        return False
+
+    query_terms = set(bm25_index._tokenize(query))
+    if not query_terms:
+        return False
+
+    identity_fields = ('title', 'display_label', 'context_label', 'project_group')
+    for note_id in candidate_ids:
+        matched_terms = set(bm25_index.matched_terms(query, note_id))
+        if not matched_terms:
+            continue
+        node = nodes.get(note_id, {})
+        identity_text = ' '.join(
+            str(node.get(field, ''))
+            for field in identity_fields
+            if node.get(field)
+        )
+        identity_terms = set(bm25_index._tokenize(identity_text))
+        if matched_terms & query_terms & identity_terms:
+            return True
+    return False
+
+
+def should_abstain_from_retrieval(
+    vector_top_score,
+    bm25_matched_term_count,
+    entity_match=False,
+):
     """Reject queries lacking seed-level retrieval evidence.
 
     RRF scores are query-local rank normalizations: their top result is 1.0 by
     construction and must not be treated as an absolute confidence score.
+    An exact entity match is a separate, high-precision evidence lane for
+    project/note-name queries that are intentionally short.
     """
     if not CONFIG.get('retrieval_abstention_enabled', True):
+        return False
+    if entity_match and CONFIG.get('retrieval_entity_match_enabled', True):
         return False
     return (
         vector_top_score < CONFIG.get('retrieval_min_vector_score', 0.50)
@@ -485,6 +526,12 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
         if hybrid_enabled and bm25_index is not None and bm25_top_id is not None else []
     )
     bm25_matched_term_count = len(bm25_matched_terms)
+    entity_match = _has_exact_entity_match(
+        query,
+        set(raw_vector_scores) | set(bm25_scores),
+        nodes,
+        bm25_index if hybrid_enabled else None,
+    )
 
     if routing_meta is not None:
         routing_meta.update({
@@ -493,6 +540,7 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
             "bm25_query_term_count": len(set(bm25_query_terms)),
             "bm25_matched_term_count": bm25_matched_term_count,
             "bm25_matched_terms": bm25_matched_terms,
+            "entity_match": entity_match,
             "hybrid_top_score": ranked[0] if ranked else 0.0,
             "hybrid_second_score": ranked[1] if len(ranked) > 1 else 0.0,
             "hybrid_margin": (ranked[0] - ranked[1]) if len(ranked) > 1 else ranked[0] if ranked else 0.0,
@@ -500,7 +548,11 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
             "hybrid_fusion": CONFIG.get('hybrid_fusion', 'weighted') if hybrid_enabled else None,
         })
 
-    if should_abstain_from_retrieval(vector_top_score, bm25_matched_term_count):
+    if should_abstain_from_retrieval(
+        vector_top_score,
+        bm25_matched_term_count,
+        entity_match=entity_match,
+    ):
         if routing_meta is not None:
             routing_meta.update({
                 "abstained": True,

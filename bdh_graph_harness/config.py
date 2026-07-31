@@ -112,6 +112,9 @@ CONFIG = {
     'retrieval_abstention_enabled': True,
     'retrieval_min_vector_score': 0.58,
     'retrieval_min_bm25_matched_terms': 5,
+    # Short queries that exactly name a graph entity may bypass the generic
+    # evidence gate when the match is present in stable identity metadata.
+    'retrieval_entity_match_enabled': True,
     # Adaptive threshold (Phase 3.3)
     'adaptive_threshold': False,
     'threshold_floor': 0.15,
