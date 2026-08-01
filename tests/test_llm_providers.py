@@ -88,6 +88,56 @@ def test_build_payload_ollama_cloud_uses_canonical_openai_compatible_config(
     assert 'HTTP-Referer' not in headers
 
 
+def test_per_vault_llm_config_overrides_global_without_mutating_it(monkeypatch):
+    """A local vault can override a cloud global config in isolation."""
+    monkeypatch.setattr(bdh_config, 'CONFIG', {
+        'llm_provider': 'ollama-cloud',
+        'llm_model': 'deepseek-v4-flash:cloud',
+        'llm_base_url': 'https://ollama.com/v1',
+        'llm_api_key': 'cloud-key',
+        'llm_temperature': 0.1,
+        'llm_max_ctx': 4096,
+    })
+    from bdh_graph_harness.config import resolve_llm_config
+
+    global_cfg = resolve_llm_config()
+    local_cfg = resolve_llm_config({
+        'llm': {
+            'provider': 'ollama',
+            'model': 'gemma4:26b-mlx',
+            'base_url': 'http://127.0.0.1:11434',
+        },
+    })
+
+    assert global_cfg['llm_provider'] == 'ollama-cloud'
+    assert global_cfg['llm_endpoint'] == 'https://ollama.com/v1/chat/completions'
+    assert local_cfg['llm_provider'] == 'ollama'
+    assert local_cfg['llm_model'] == 'gemma4:26b-mlx'
+    assert local_cfg['llm_endpoint'] == 'http://127.0.0.1:11434/api/chat'
+    assert local_cfg['llm_api_key'] == ''
+    assert bdh_config.CONFIG['llm_provider'] == 'ollama-cloud'
+
+
+def test_build_payload_accepts_explicit_per_vault_config(mock_active_notes, mock_nodes):
+    """Explicit vault config selects the local model even with cloud globals."""
+    data, headers = harness._build_llm_payload(
+        'test query',
+        mock_active_notes,
+        mock_nodes,
+        config={
+            'llm': {
+                'provider': 'ollama',
+                'model': 'gemma4:26b-mlx',
+                'base_url': 'http://127.0.0.1:11434',
+            },
+        },
+    )
+    payload = json.loads(data)
+    assert payload['model'] == 'gemma4:26b-mlx'
+    assert 'options' in payload
+    assert 'Authorization' not in headers
+
+
 def test_config_reports_ollama_cloud_runtime_without_openrouter_alias(monkeypatch):
     """Canonical config exposes the actual provider and endpoint semantics."""
     import tempfile, os

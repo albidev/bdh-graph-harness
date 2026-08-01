@@ -207,6 +207,116 @@ logger = logging.getLogger('bdh')
 
 
 # ---------------------------------------------------------------------------
+# Per-vault LLM routing
+# ---------------------------------------------------------------------------
+
+def _expand_env_values(value):
+    """Recursively expand ``${ENV_VAR}`` placeholders in config values."""
+    if isinstance(value, dict):
+        return {key: _expand_env_values(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_expand_env_values(item) for item in value]
+    if isinstance(value, str) and value.startswith('${') and value.endswith('}'):
+        return os.environ.get(value[2:-1], '')
+    return value
+
+
+def resolve_llm_config(base_config: dict | None = None, *, require_endpoint: bool = False) -> dict:
+    """Return an immutable effective LLM config for a vault or global config.
+
+    ``base_config`` is normally ``VaultConfig.settings``.  The optional nested
+    ``llm`` block is the preferred per-vault form::
+
+        llm:
+          provider: ollama
+          model: gemma4:26b-mlx
+          base_url: http://127.0.0.1:11434
+
+    Cloud vaults should use ``api_key_env`` rather than storing a secret in the
+    YAML file.  Legacy flat keys (``llm_provider``, ``llm_model``, etc.) remain
+    supported and continue to act as global defaults.
+
+    The function never mutates :data:`CONFIG` and derives the endpoint locally,
+    which is what prevents one vault's provider from bleeding into another.
+    """
+    effective = dict(CONFIG)
+    if base_config:
+        effective.update(_expand_env_values(base_config))
+
+        nested = base_config.get('llm')
+        if isinstance(nested, dict):
+            nested = _expand_env_values(nested)
+            provider = nested.get('provider', effective.get('llm_provider', 'ollama'))
+            effective['llm_provider'] = provider
+
+            aliases = {
+                'model': 'llm_model',
+                'temperature': 'llm_temperature',
+                'max_ctx': 'llm_max_ctx',
+                'max_tokens': 'llm_max_tokens',
+                'timeout': 'llm_timeout',
+            }
+            for nested_key, flat_key in aliases.items():
+                if nested_key in nested:
+                    effective[flat_key] = nested[nested_key]
+
+            if 'api_key' in nested:
+                effective['llm_api_key'] = nested['api_key'] or ''
+            elif 'api_key_env' in nested:
+                effective['llm_api_key'] = os.environ.get(nested['api_key_env'], '')
+            elif provider == 'ollama':
+                # A local vault must not inherit a cloud credential into its
+                # effective runtime config, even though Ollama-native calls do
+                # not send one on the wire.
+                effective['llm_api_key'] = ''
+
+            if 'base_url' in nested:
+                base_url = str(nested['base_url']).rstrip('/')
+                if provider == 'ollama':
+                    effective['ollama_url'] = base_url
+                elif provider == 'openrouter':
+                    effective['openrouter_url'] = (
+                        base_url if base_url.endswith('/chat/completions')
+                        else f'{base_url}/chat/completions'
+                    )
+                else:
+                    effective['llm_base_url'] = base_url
+
+    provider = effective.get('llm_provider', 'ollama')
+    if provider == 'ollama-cloud':
+        base_url = str(effective.get('llm_base_url') or '').rstrip('/')
+        endpoint = f'{base_url}/chat/completions' if base_url else ''
+        effective['llm_provider_label'] = 'Ollama Cloud'
+        effective['llm_transport'] = 'openai-compatible'
+        effective['llm_endpoint'] = endpoint
+        if require_endpoint and not base_url:
+            raise ValueError('ollama-cloud requires llm_base_url')
+    elif provider == 'openrouter':
+        endpoint = str(
+            effective.get('openrouter_url')
+            or 'https://openrouter.ai/api/v1/chat/completions'
+        ).rstrip('/')
+        if not endpoint.endswith('/chat/completions'):
+            endpoint += '/chat/completions'
+        if not effective.get('llm_api_key'):
+            effective['llm_api_key'] = effective.get('openrouter_key', '')
+        effective['llm_provider_label'] = 'OpenRouter'
+        effective['llm_transport'] = 'openai-compatible'
+        effective['llm_endpoint'] = endpoint
+    else:
+        base_url = str(
+            effective.get('ollama_url') or 'http://127.0.0.1:11434'
+        ).rstrip('/')
+        endpoint = base_url if base_url.endswith('/api/chat') else f'{base_url}/api/chat'
+        effective['ollama_url'] = base_url
+        effective['llm_provider_label'] = 'Ollama'
+        effective['llm_transport'] = 'ollama-native'
+        effective['llm_endpoint'] = endpoint
+
+    return effective
+
+
+# ---------------------------------------------------------------------------
 # Config loading
 # ---------------------------------------------------------------------------
 
@@ -241,56 +351,29 @@ def load_config(config_path: str | None = None):
     if not loaded:
         logger.warning("No config file found; using defaults")
 
-    # Expand vault path
+    # Expand vault path and nested ${ENV_VAR} placeholders.
+    merged = _expand_env_values(merged)
     merged['vault_path'] = os.path.expanduser(merged['vault_path'])
 
-    # Expand ${ENV_VAR} in config values (e.g. llm_api_key: ${OLLAMA_API_KEY}).
-    for key, val in merged.items():
-        if isinstance(val, str) and val.startswith('${') and val.endswith('}'):
-            env_var = val[2:-1]
-            merged[key] = os.environ.get(env_var, '')
-
-    # Derived URLs — embeddings always use local Ollama.
+    # Embeddings always use local Ollama.  Keep the safe default when a
+    # cloud-only global LLM config omits the embedding URL.
+    merged['ollama_url'] = merged.get('ollama_url') or 'http://127.0.0.1:11434'
     OLLAMA_EMBED_URL = merged['ollama_url'].rstrip('/') + '/api/embed'
-    OLLAMA_LLM_URL = merged['ollama_url'].rstrip('/') + '/api/chat'
 
-    # LLM endpoint and diagnostics depend on the actual provider. The wire
-    # protocol is deliberately separate from provider identity: Ollama Cloud
-    # speaks the same Chat Completions contract as OpenRouter, but is not
-    # OpenRouter.
+    # LLM endpoint and diagnostics depend on the actual provider.  Resolve the
+    # global config through the same code path used by per-vault requests.
+    resolved_llm = resolve_llm_config(merged, require_endpoint=True)
+    merged.update(resolved_llm)
+    OLLAMA_LLM_URL = merged['llm_endpoint']
     provider = merged.get('llm_provider', 'ollama')
-    if provider == 'ollama-cloud':
-        base_url = merged.get('llm_base_url', '').rstrip('/')
-        if not base_url:
-            raise ValueError('ollama-cloud requires llm_base_url')
-        OLLAMA_LLM_URL = base_url + '/chat/completions'
-        if not merged.get('llm_api_key'):
-            logger.warning('Ollama Cloud provider selected but no llm_api_key found!')
-        merged['llm_provider_label'] = 'Ollama Cloud'
-        merged['llm_transport'] = 'openai-compatible'
-        merged['llm_endpoint'] = OLLAMA_LLM_URL
-        logger.info(
-            'LLM provider: Ollama Cloud (%s) via OpenAI-compatible API',
-            merged.get('llm_model'),
-        )
-    elif provider == 'openrouter':
-        # Legacy provider configuration remains supported during migration.
-        OLLAMA_LLM_URL = merged.get(
-            'openrouter_url', 'https://openrouter.ai/api/v1/chat/completions',
-        )
-        if not merged.get('llm_api_key'):
-            merged['llm_api_key'] = merged.get('openrouter_key', '')
-        if not merged.get('llm_api_key'):
-            logger.warning('OpenRouter provider selected but no API key found!')
-        merged['llm_provider_label'] = 'OpenRouter'
-        merged['llm_transport'] = 'openai-compatible'
-        merged['llm_endpoint'] = OLLAMA_LLM_URL
-        logger.info('LLM provider: OpenRouter (%s)', merged.get('llm_model'))
-    else:
-        merged['llm_provider_label'] = 'Ollama'
-        merged['llm_transport'] = 'ollama-native'
-        merged['llm_endpoint'] = OLLAMA_LLM_URL
-        logger.info('LLM provider: Ollama (%s)', merged.get('llm_model'))
+    if provider in {'ollama-cloud', 'openrouter'} and not merged.get('llm_api_key'):
+        logger.warning('%s provider selected but no llm_api_key found!', provider)
+    logger.info(
+        'LLM provider: %s (%s) via %s',
+        merged.get('llm_provider_label'),
+        merged.get('llm_model'),
+        merged.get('llm_transport'),
+    )
 
     # Update CONFIG in-place so modules that did `from config import CONFIG`
     # see the merged values (reassigning CONFIG = merged would break those refs).

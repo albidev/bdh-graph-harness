@@ -15,7 +15,7 @@ from datetime import datetime
 
 from aiohttp import web
 
-from bdh_graph_harness.config import CONFIG, logger
+from bdh_graph_harness.config import CONFIG, logger, resolve_llm_config
 from bdh_graph_harness.visualization import render_viz_html, get_template_path
 from bdh_graph_harness.retrieval.attention import attention
 from bdh_graph_harness.retrieval.shadow import append_dynamic_shadow, build_dynamic_shadow
@@ -198,6 +198,7 @@ async def api_stats(request, app_state: dict) -> web.Response:
     n = ctx.nodes
     e = ctx.edges
     dormant = s.get('dormant_nodes', set())
+    runtime_llm = resolve_llm_config(ctx.config.settings)
     stats = {
         'neurons': len(n),
         'synapses': sum(len(links) for links in e.values()),
@@ -209,11 +210,11 @@ async def api_stats(request, app_state: dict) -> web.Response:
         'active_neurons': len(n) - len(dormant),
         'top_hebbian': [],
         'llm_runtime': {
-            'provider': ctx.config.settings.get('llm_provider', 'ollama'),
-            'provider_label': ctx.config.settings.get('llm_provider_label', 'Ollama'),
-            'transport': ctx.config.settings.get('llm_transport', 'ollama-native'),
-            'model': ctx.config.settings.get('llm_model'),
-            'endpoint': ctx.config.settings.get('llm_endpoint'),
+            'provider': runtime_llm.get('llm_provider', 'ollama'),
+            'provider_label': runtime_llm.get('llm_provider_label', 'Ollama'),
+            'transport': runtime_llm.get('llm_transport', 'ollama-native'),
+            'model': runtime_llm.get('llm_model'),
+            'endpoint': runtime_llm.get('llm_endpoint'),
         },
         'retrieval_telemetry': retrieval_telemetry_summary(ctx.retrieval_telemetry),
     }
@@ -565,14 +566,23 @@ def run_neurogenesis(
                 active_titles.append(n[nid]['title'])
         try:
             new_concepts = extract_new_concepts(
-                response_text, query, active, n, allow_existing=True
+                response_text, query, active, n,
+                allow_existing=True,
+                config=config,
             ) or []
         except TypeError as exc:
             # Keep compatibility with test adapters and third-party wrappers
             # that still expose the pre-merge four-argument extractor.
-            if 'allow_existing' not in str(exc):
+            if not any(token in str(exc) for token in ('allow_existing', 'config')):
                 raise
-            new_concepts = extract_new_concepts(response_text, query, active, n) or []
+            try:
+                new_concepts = extract_new_concepts(
+                    response_text, query, active, n, allow_existing=True,
+                ) or []
+            except TypeError as legacy_exc:
+                if 'allow_existing' not in str(legacy_exc):
+                    raise
+                new_concepts = extract_new_concepts(response_text, query, active, n) or []
         if max_concepts is None:
             max_concepts = int(config.get('neurogenesis_max_concepts') or 1)
         new_concepts = new_concepts[:max(0, int(max_concepts))]
@@ -683,7 +693,9 @@ async def api_query(request, app_state: dict, ws_clients: set) -> web.Response:
 
     n = ctx.nodes
     response_text = (
-        await asyncio.to_thread(llm_respond, llm_query, active, n)
+        await asyncio.to_thread(
+            llm_respond, llm_query, active, n, config=ctx.config.settings,
+        )
         if respond else ""
     )
 
@@ -805,7 +817,9 @@ async def api_stream(request, app_state: dict, ws_clients: set) -> web.StreamRes
     def _run_stream():
         tokens = []
         try:
-            for token in llm_stream(llm_query, active, n):
+            for token in llm_stream(
+                llm_query, active, n, config=ctx.config.settings,
+            ):
                 tokens.append(token)
         except Exception as exc:
             logger.warning(f"Stream interrupted: {exc}")

@@ -150,7 +150,9 @@ def show_source_scan(config: dict, vault_id: str | None = None, vault_override: 
     }
 
 
-def interactive_mode(vault_root, nodes, edges, collection, state, bm25_index=None):
+def interactive_mode(
+    vault_root, nodes, edges, collection, state, bm25_index=None, config=None,
+):
     """Interactive REPL for querying the vault."""
     print(f"\n🐉 BDH Graph Harness — Interactive Mode")
     print(f"   Vault: {vault_root}")
@@ -198,14 +200,16 @@ def interactive_mode(vault_root, nodes, edges, collection, state, bm25_index=Non
         # LLM response
         print(f"\n  🤖 LLM response:")
         print("  " + "-" * 60)
-        response = llm_respond(query, active, nodes)
+        response = llm_respond(query, active, nodes, config=config)
         for line in response.split('\n'):
             print(f"  {line}")
         print("  " + "-" * 60)
 
         # Neurogenesis
         active_titles = [nodes[nid]['title'] for nid in active if nid in nodes]
-        new_concepts = extract_new_concepts(response, query, active, nodes)
+        new_concepts = extract_new_concepts(
+            response, query, active, nodes, config=config,
+        )
 
         if new_concepts:
             print(f"\n  🧬 Neurogenesis: {len(new_concepts)} new concept(s) detected")
@@ -395,7 +399,10 @@ def main():
         return
 
     if args.interactive:
-        interactive_mode(vault_root, nodes, edges, collection, state, bm25_index=bm25_idx)
+        interactive_mode(
+            vault_root, nodes, edges, collection, state,
+            bm25_index=bm25_idx, config=effective_config,
+        )
         return
 
     # Single query mode
@@ -428,7 +435,7 @@ def main():
     # LLM response
     print(f"\n  🤖 LLM response:")
     print("  " + "-" * 60)
-    response = llm_respond(query, active, nodes)
+    response = llm_respond(query, active, nodes, config=effective_config)
     # Indent response
     for line in response.split('\n'):
         print(f"  {line}")
@@ -436,7 +443,9 @@ def main():
 
     # Neurogenesis: extract new concepts from LLM response
     active_titles = [nodes[nid]['title'] for nid in active if nid in nodes]
-    new_concepts = extract_new_concepts(response, query, active, nodes)
+    new_concepts = extract_new_concepts(
+        response, query, active, nodes, config=effective_config,
+    )
 
     if new_concepts:
         print(f"\n  🧬 Neurogenesis: {len(new_concepts)} new concept(s) detected")
