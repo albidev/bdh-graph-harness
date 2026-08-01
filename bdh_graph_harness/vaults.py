@@ -206,8 +206,16 @@ def _normalise_multi_vault(cfg: dict) -> list[VaultConfig]:
         settings['chroma_path'] = resolved_cp
         settings['chroma_collection'] = chroma_collection
         # Per-vault overrides for vault-specific keys
-        for key in ('neurogenesis_dir', 'graph_ignore', 'neurogenesis_enabled', 'external_sources'):
+        for key in (
+            'neurogenesis_dir',
+            'graph_ignore',
+            'neurogenesis_enabled',
+            'external_sources',
+            'llm',
+        ):
             if key in entry:
+                if key == 'llm' and not isinstance(entry[key], dict):
+                    raise ValueError(f"Vault '{vid}' has invalid 'llm' block — expected a mapping")
                 settings[key] = entry[key]
 
         result.append(VaultConfig(

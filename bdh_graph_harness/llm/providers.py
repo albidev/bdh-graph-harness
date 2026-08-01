@@ -8,7 +8,7 @@ import json
 import re
 import logging
 
-from bdh_graph_harness.config import retry_with_backoff
+from bdh_graph_harness.config import retry_with_backoff, resolve_llm_config
 import bdh_graph_harness.config as _config
 from bdh_graph_harness.llm.prompt import build_messages, format_context
 from bdh_graph_harness.llm.ollama import build_ollama_payload, parse_ollama_response
@@ -25,24 +25,30 @@ logger = logging.getLogger('bdh.llm')
 OPENAI_COMPATIBLE_PROVIDERS = frozenset({'openrouter', 'ollama-cloud'})
 
 
-def uses_openai_compatible_api(provider=None):
+def uses_openai_compatible_api(provider=None, config=None):
     """Return whether *provider* speaks the Chat Completions contract."""
+    if isinstance(provider, dict) and config is None:
+        config = provider
+        provider = None
+    if config is not None:
+        provider = config.get('llm_provider', 'ollama')
     provider = provider or _config.CONFIG.get('llm_provider', 'ollama')
     return provider in OPENAI_COMPATIBLE_PROVIDERS
 
 
-def _build_llm_payload(query, active_notes, nodes, stream=False):
+def _build_llm_payload(query, active_notes, nodes, stream=False, config=None):
     """Build request payload + headers for the configured LLM provider.
 
     Returns (data_bytes, headers_dict).
     """
+    runtime_config = resolve_llm_config(config)
     messages = build_messages(query, active_notes, nodes)
-    provider = _config.CONFIG.get('llm_provider', 'ollama')
+    provider = runtime_config.get('llm_provider', 'ollama')
 
-    if uses_openai_compatible_api(provider):
-        return build_openai_compatible_payload(messages, stream, _config.CONFIG)
+    if uses_openai_compatible_api(config=runtime_config):
+        return build_openai_compatible_payload(messages, stream, runtime_config)
     else:
-        return build_ollama_payload(messages, stream, _config.CONFIG)
+        return build_ollama_payload(messages, stream, runtime_config)
 
 
 def _parse_llm_response(result, provider='ollama'):
@@ -64,16 +70,23 @@ def _parse_llm_stream_token(obj, provider='ollama'):
         return obj.get('message', {}).get('content', '')
 
 
-def llm_respond(query, active_notes, nodes):
+def llm_respond(query, active_notes, nodes, config=None):
     """Send query + activated note context to LLM, get grounded response."""
     import urllib.request
 
-    data, headers = _build_llm_payload(query, active_notes, nodes, stream=False)
-    provider = _config.CONFIG.get('llm_provider', 'ollama')
+    runtime_config = resolve_llm_config(config, require_endpoint=True)
+    # Preserve the legacy global URL override used by callers/tests that do
+    # not provide an explicit vault config. Scoped calls must never use it.
+    if config is None and _config.OLLAMA_LLM_URL:
+        runtime_config['llm_endpoint'] = _config.OLLAMA_LLM_URL
+    data, headers = _build_llm_payload(
+        query, active_notes, nodes, stream=False, config=runtime_config,
+    )
+    provider = runtime_config.get('llm_provider', 'ollama')
 
     def _llm_call():
-        req = urllib.request.Request(_config.OLLAMA_LLM_URL, data=data, headers=headers)
-        timeout = _config.CONFIG.get('llm_timeout', 300)
+        req = urllib.request.Request(runtime_config['llm_endpoint'], data=data, headers=headers)
+        timeout = runtime_config.get('llm_timeout', 300)
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             result = json.loads(resp.read())
             return _parse_llm_response(result, provider)
@@ -98,7 +111,7 @@ def llm_respond(query, active_notes, nodes):
         return f"[LLM error: {e}]"
 
 
-def llm_stream(query, active_notes, nodes):
+def llm_stream(query, active_notes, nodes, config=None):
     """Stream LLM response token-by-token.
 
     Supports Ollama native NDJSON and OpenAI-compatible SSE (Ollama Cloud
@@ -110,13 +123,18 @@ def llm_stream(query, active_notes, nodes):
     """
     import urllib.request
 
-    data, headers = _build_llm_payload(query, active_notes, nodes, stream=True)
-    provider = _config.CONFIG.get('llm_provider', 'ollama')
+    runtime_config = resolve_llm_config(config, require_endpoint=True)
+    if config is None and _config.OLLAMA_LLM_URL:
+        runtime_config['llm_endpoint'] = _config.OLLAMA_LLM_URL
+    data, headers = _build_llm_payload(
+        query, active_notes, nodes, stream=True, config=runtime_config,
+    )
+    provider = runtime_config.get('llm_provider', 'ollama')
 
-    req = urllib.request.Request(_config.OLLAMA_LLM_URL, data=data, headers=headers)
+    req = urllib.request.Request(runtime_config['llm_endpoint'], data=data, headers=headers)
 
     try:
-        timeout = _config.CONFIG.get('llm_timeout', 300)
+        timeout = runtime_config.get('llm_timeout', 300)
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             buffer = b''
             for chunk in iter(lambda: resp.read(1), b''):

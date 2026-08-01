@@ -58,8 +58,8 @@ def mock_app_setup(monkeypatch):
 
     # Monkeypatch LLM and embedding calls — must patch the modules that routes.py imports from
     monkeypatch.setattr(bdh_attention_mod, 'get_embeddings', lambda texts: [[1.0, 0.0, 0.0]])
-    monkeypatch.setattr(bdh_routes, 'llm_respond', lambda q, a, n: 'Mock LLM response')
-    monkeypatch.setattr(bdh_routes, 'extract_new_concepts', lambda r, q, a, n: [])
+    monkeypatch.setattr(bdh_routes, 'llm_respond', lambda q, a, n, **kwargs: 'Mock LLM response')
+    monkeypatch.setattr(bdh_routes, 'extract_new_concepts', lambda r, q, a, n, **kwargs: [])
     monkeypatch.setattr(bdh_routes, 'save_state', lambda vr, s: None)
 
     return nodes, edges, collection, state, config, d

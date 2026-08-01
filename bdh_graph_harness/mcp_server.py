@@ -243,10 +243,12 @@ def _fallback_query(question: str, vault_id: str | None = None) -> str:
         save_state(vault_root, state)
         fb["hebbian_state"] = state
 
-    response_text = llm_respond(question, active, nodes)
+    response_text = llm_respond(question, active, nodes, config=cfg)
 
     active_titles = [nodes[nid]["title"] for nid in active if nid in nodes]
-    new_concepts_raw = extract_new_concepts(response_text, question, active, nodes)
+    new_concepts_raw = extract_new_concepts(
+        response_text, question, active, nodes, config=cfg,
+    )
     new_concepts = []
     for concept in new_concepts_raw:
         title = concept.get("title", "").strip()

@@ -84,8 +84,8 @@ def mock_app_mq_setup(monkeypatch):
     # routes.py also holds its own imported reference to attention; patch it so
     # single-query path uses the deterministic fake in tests.
     monkeypatch.setattr(bdh_routes, 'attention', fake_attention)
-    monkeypatch.setattr(bdh_routes, 'llm_respond', lambda q, a, n: 'Mock LLM response')
-    monkeypatch.setattr(bdh_routes, 'extract_new_concepts', lambda r, q, a, n: [])
+    monkeypatch.setattr(bdh_routes, 'llm_respond', lambda q, a, n, **kwargs: 'Mock LLM response')
+    monkeypatch.setattr(bdh_routes, 'extract_new_concepts', lambda r, q, a, n, **kwargs: [])
     monkeypatch.setattr(bdh_routes, 'save_state', lambda vr, s: None)
 
     return nodes, edges, collection, state, config, d
@@ -295,7 +295,7 @@ async def test_api_stream_supports_query_variants(mock_app_mq_setup, monkeypatch
 
     nodes, edges, collection, state, config, _ = mock_app_mq_setup
     app = _capture_app(monkeypatch, config, nodes, edges, collection, state)
-    monkeypatch.setattr(bdh_routes, 'llm_stream', lambda q, a, n: iter(['token']))
+    monkeypatch.setattr(bdh_routes, 'llm_stream', lambda q, a, n, **kwargs: iter(['token']))
 
     server = TestServer(app)
     client = TestClient(server)
