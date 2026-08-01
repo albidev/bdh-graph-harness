@@ -197,6 +197,32 @@ curl http://localhost:8643/api/vaults
 
 `vault_id` is also accepted by MCP tools such as `query(question="...", vault_id="research")`. Omitting it selects `default_vault` (or the first configured vault).
 
+### Per-vault LLM routing
+
+The top-level `llm_provider`, `llm_model`, `llm_base_url`, and `llm_api_key` values remain the global defaults. A vault can override them with a nested `llm` block without mutating or affecting any other vault:
+
+```yaml
+vaults:
+  - id: crossnection
+    name: Crossnection
+    path: /path/to/Crossnection
+    llm:
+      provider: ollama
+      model: gemma4:26b-mlx
+      base_url: http://127.0.0.1:11434
+      timeout: 300
+      local_only: true
+
+  - id: core
+    name: Hermes Core
+    path: /path/to/Hermes
+    # No llm block: inherits the global provider/model configuration.
+```
+
+Supported nested fields are `provider`, `model`, `base_url`, `temperature`, `max_ctx`, `max_tokens`, `timeout`, `api_key`, `api_key_env`, and `local_only`. Prefer `api_key_env` for cloud vaults; credentials are resolved from the process environment and are never required in the YAML. `base_url` maps to the native Ollama host for `ollama` and to the OpenAI-compatible base for `ollama-cloud`/`openrouter`. `local_only: true` is a hard privacy gate: it accepts only the `ollama` provider and loopback endpoints (`localhost`, `127.0.0.1`, or `::1`).
+
+The effective provider is resolved per request for REST, streaming, MCP, CLI, and neurogenesis paths. `GET /api/stats?vault_id=...` exposes the selected provider, model, transport, and endpoint for verification.
+
 ### Multi-query retrieval
 
 When `multi_query_enabled: true` in config, clients can send `query_variants` alongside the primary query. The server retrieves seed candidates for each variant, merges them via reciprocal-rank fusion (RRF) or weighted-max, then performs one canonical graph expansion for the primary query. It returns canonical notes with per-note provenance (`matched_by`, `variant_hits`). This lets callers explore a query from multiple angles (e.g. Italian + English rewrites, paraphrases, keyword decompositions) in a single round-trip. The feature is opt-in; when disabled, supplied variants are ignored and the legacy single-query path is used.
