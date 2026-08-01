@@ -1343,8 +1343,11 @@ body.panel-collapsed #expand-panel {
 
 /* Inspector v2: one job per view, with a quiet command surface. */
 .panel-heading-copy {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin-right: 8px;
   align-items: center;
-  grid-template-columns: auto auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   grid-template-areas: "eyebrow live" "title live";
   column-gap: 8px;
 }
@@ -1356,6 +1359,8 @@ body.panel-collapsed #expand-panel {
   align-items: center;
   gap: 5px;
   align-self: center;
+  justify-self: end;
+  white-space: nowrap;
   color: var(--text-dim);
   font: 500 9px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
   text-transform: uppercase;

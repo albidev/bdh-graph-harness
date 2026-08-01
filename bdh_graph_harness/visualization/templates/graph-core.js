@@ -801,12 +801,24 @@ function directionalParticleObject(link) {
     new T.SphereGeometry(1.9, 10, 8),
     new T.MeshBasicMaterial({ color, transparent: true, opacity: 0.98 }),
   );
+  disableDecorativeRaycast(particle);
   const halo = new T.Sprite(ringMaterial(color, 0.58));
   halo.scale.setScalar(8.5);
   halo.renderOrder = 4;
+  disableDecorativeRaycast(halo);
   particle.add(halo);
   particle.renderOrder = 4;
   return particle;
+}
+
+// Decorative Three.js layers must not compete with graph entities during
+// raycasting. The renderer's recursive picker can otherwise hit a particle,
+// glow sprite, or background field before it reaches the node/edge payload.
+function disableDecorativeRaycast(object) {
+  if (!object) return object;
+  object.raycast = () => {};
+  object.userData = { ...object.userData, bdhDecorative: true };
+  return object;
 }
 
 // ============================================================================
@@ -819,6 +831,7 @@ const threeResources = {
   linkMaterials: new Map(),
   ringMaterials: new Map(),
   ringTexture: null,
+  hitProxyMaterial: null,
 };
 
 let bloomPass = null;
@@ -853,7 +866,7 @@ function ensureNeuralField() {
       depthWrite: false,
       blending: T.AdditiveBlending,
     });
-    return new T.Points(geometry, material);
+    return disableDecorativeRaycast(new T.Points(geometry, material));
   };
   group.add(makeLayer('#35d9ff', -26));
   group.add(makeLayer('#a879ff', 26));
@@ -993,6 +1006,21 @@ function ringMaterial(color, opacity) {
   return resources.ringMaterials.get(key);
 }
 
+function nodeHitProxyMaterial() {
+  const resources = ensureThreeResources();
+  if (!resources.hitProxyMaterial) {
+    resources.hitProxyMaterial = new window.THREE.MeshBasicMaterial({
+      color: '#ffffff',
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+      depthTest: false,
+      colorWrite: false,
+    });
+  }
+  return resources.hitProxyMaterial;
+}
+
 function geometryForNode(node) {
   const geometries = ensureThreeResources().geometries;
   if (node._shape === 'diamond') return geometries.diamond;
@@ -1023,19 +1051,28 @@ function createNodeThreeObject(node) {
   const T = window.THREE;
   ensureThreeResources();
   const group = new T.Group();
+  // Keep interaction geometry independent from the deliberately tiny dormant
+  // visual core. This gives every visible node a stable, screen-sized target.
+  const hitProxy = new T.Mesh(threeResources.geometries.sphere, nodeHitProxyMaterial());
+  hitProxy.userData.isHitProxy = true;
+  hitProxy.renderOrder = -1;
   const body = new T.Mesh(geometryForNode(node), nodeMaterial(node.color || COLORS.inactive, 1, 0, node._dormant));
   const aura = new T.Sprite(ringMaterial(node.color || COLORS.inactive, 0.2));
   aura.visible = false;
   aura.renderOrder = 2;
+  disableDecorativeRaycast(aura);
   // Glow halo — always present for non-dormant nodes, additive blend, sized by nodeGlowRadius.
   const glow = new T.Sprite(glowMaterial(node.color || COLORS.inactive, 0.5));
   glow.renderOrder = 1;
   glow.userData.isGlow = true;
+  disableDecorativeRaycast(glow);
+  group.add(hitProxy);
   group.add(body);
   group.add(aura);
   group.add(glow);
   group.userData.nodeId = node.id;
   node._threeObject = group;
+  node._hitProxyObject = hitProxy;
   node._bodyObject = body;
   node._auraObject = aura;
   node._glowObject = glow;
@@ -1047,6 +1084,7 @@ function updateNodeThreeObject(node) {
   const group = node && node._threeObject;
   if (!group || !node._bodyObject || !node._auraObject) return;
   const body = node._bodyObject;
+  const hitProxy = node._hitProxyObject;
   const aura = node._auraObject;
   const glow = node._glowObject;
   const activationColor = nodeActivationColor.get(node.id);
@@ -1073,6 +1111,10 @@ function updateNodeThreeObject(node) {
 
   const birthScale = nodeBirthScaleState.get(node.id) || 1;
   const radius = nodeRadius(node.val || 4) * nodeWorldScale * birthScale * (selected || focused ? 1.08 : 1);
+  if (hitProxy) {
+    hitProxy.visible = !node._hidden;
+    hitProxy.scale.setScalar(radius * (node._dormant ? 1.15 : 1.05));
+  }
   // Body is a tiny bright core (0.35x), not a solid planet. The glow sprite is the visual.
   body.scale.setScalar(node._dormant ? radius * 0.2 : radius * 0.35);
 
@@ -1166,6 +1208,7 @@ function ensureNodeLabelSprite(node) {
     depthTest: false,
   });
   const sprite = new window.THREE.Sprite(material);
+  disableDecorativeRaycast(sprite);
   const width = Math.max(34, measured * 0.11);
   sprite.scale.set(width, 12, 1);
   sprite.position.set(0, nodeRadius(node.val || 4) * nodeWorldScale + 9, 0);
@@ -1184,6 +1227,7 @@ function disposeNodeVisual(node) {
   node._labelObject = null;
   node._labelTexture = null;
   node._threeObject = null;
+  node._hitProxyObject = null;
   node._bodyObject = null;
   node._auraObject = null;
   node._glowObject = null;

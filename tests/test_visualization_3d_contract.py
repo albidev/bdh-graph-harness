@@ -267,6 +267,22 @@ def test_pointer_exit_clears_tooltips_and_desktop_rendering_uses_antialiasing_bu
     assert "tooltipEl.style.display = 'block';" in core
 
 
+def test_3d_picking_separates_interaction_targets_from_decorative_layers():
+    """Tiny dormant visuals must still have reliable node/edge hover hit tests."""
+    core = (ROOT / "bdh_graph_harness/visualization/templates/graph-core.js").read_text()
+
+    assert "function disableDecorativeRaycast(object)" in core
+    assert "object.userData = { ...object.userData, bdhDecorative: true };" in core
+    assert "function nodeHitProxyMaterial()" in core
+    assert "hitProxy.userData.isHitProxy = true;" in core
+    assert "hitProxy.scale.setScalar(radius * (node._dormant ? 1.15 : 1.05));" in core
+    assert "node._hitProxyObject = hitProxy;" in core
+    assert "disableDecorativeRaycast(particle);" in core
+    assert "disableDecorativeRaycast(halo);" in core
+    assert "disableDecorativeRaycast(sprite);" in core
+    assert "return disableDecorativeRaycast(new T.Points(geometry, material));" in core
+
+
 def test_camera_model_supports_focus_restore_fit_and_orientation_reset():
     graph_init = (ROOT / "bdh_graph_harness/visualization/templates/graph-init.js").read_text()
     controls = (ROOT / "bdh_graph_harness/visualization/templates/ui-controls.js").read_text()
@@ -392,6 +408,16 @@ def test_panel_visibility_uses_one_toggle_inside_each_panel():
     assert 'body.panel-collapsed #side-panel .panel-heading' in styles
     assert 'body.controls-collapsed #control-dock .dock-heading' in styles
     assert 'function syncPanelToggleUI()' in controls
+
+
+def test_inspector_live_badge_anchors_to_the_right_of_the_header_copy():
+    styles = (ROOT / "bdh_graph_harness/visualization/templates/styles.css").read_text()
+
+    assert ".panel-heading-copy {\n  flex: 1 1 auto;" in styles
+    assert "margin-right: 8px;" in styles
+    assert "grid-template-columns: minmax(0, 1fr) auto;" in styles
+    assert "justify-self: end;" in styles
+    assert "white-space: nowrap;" in styles
 
 
 def test_retrieval_panel_exposes_grounding_status_and_next_actions():
