@@ -138,6 +138,31 @@ def test_build_payload_accepts_explicit_per_vault_config(mock_active_notes, mock
     assert 'Authorization' not in headers
 
 
+def test_local_only_gate_rejects_cloud_provider(monkeypatch):
+    monkeypatch.setattr(bdh_config, 'CONFIG', {
+        'llm_provider': 'ollama-cloud',
+        'llm_model': 'cloud-model',
+        'llm_base_url': 'https://ollama.com/v1',
+    })
+    from bdh_graph_harness.config import resolve_llm_config
+
+    with pytest.raises(ValueError, match='local_only=true'):
+        resolve_llm_config({'llm': {'local_only': True}})
+
+
+def test_local_only_gate_rejects_non_local_ollama_endpoint():
+    from bdh_graph_harness.config import resolve_llm_config
+
+    with pytest.raises(ValueError, match='localhost'):
+        resolve_llm_config({
+            'llm': {
+                'local_only': True,
+                'provider': 'ollama',
+                'base_url': 'https://remote.example/ollama',
+            },
+        })
+
+
 def test_config_reports_ollama_cloud_runtime_without_openrouter_alias(monkeypatch):
     """Canonical config exposes the actual provider and endpoint semantics."""
     import tempfile, os

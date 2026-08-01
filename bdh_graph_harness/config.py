@@ -10,6 +10,7 @@ import sys
 import json
 import time
 import logging
+from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 
@@ -245,7 +246,8 @@ def resolve_llm_config(base_config: dict | None = None, *, require_endpoint: boo
 
         nested = base_config.get('llm')
         if isinstance(nested, dict):
-            nested = _expand_env_values(nested)
+            expanded_nested = _expand_env_values(nested)
+            nested = expanded_nested if isinstance(expanded_nested, dict) else {}
             provider = nested.get('provider', effective.get('llm_provider', 'ollama'))
             effective['llm_provider'] = provider
 
@@ -263,12 +265,18 @@ def resolve_llm_config(base_config: dict | None = None, *, require_endpoint: boo
             if 'api_key' in nested:
                 effective['llm_api_key'] = nested['api_key'] or ''
             elif 'api_key_env' in nested:
-                effective['llm_api_key'] = os.environ.get(nested['api_key_env'], '')
+                api_key_env = nested.get('api_key_env')
+                effective['llm_api_key'] = (
+                    os.environ.get(str(api_key_env), '') if api_key_env else ''
+                )
             elif provider == 'ollama':
                 # A local vault must not inherit a cloud credential into its
                 # effective runtime config, even though Ollama-native calls do
                 # not send one on the wire.
                 effective['llm_api_key'] = ''
+
+            if nested.get('local_only'):
+                effective['llm_local_only'] = True
 
             if 'base_url' in nested:
                 base_url = str(nested['base_url']).rstrip('/')
@@ -283,6 +291,19 @@ def resolve_llm_config(base_config: dict | None = None, *, require_endpoint: boo
                     effective['llm_base_url'] = base_url
 
     provider = effective.get('llm_provider', 'ollama')
+    if effective.get('llm_local_only'):
+        if provider != 'ollama':
+            raise ValueError(
+                "llm.local_only=true requires the 'ollama' provider; "
+                f"refusing provider '{provider}'"
+            )
+        local_url = str(effective.get('ollama_url') or '').rstrip('/')
+        local_host = urlparse(local_url).hostname
+        if local_host not in {'127.0.0.1', 'localhost', '::1'}:
+            raise ValueError(
+                "llm.local_only=true requires an Ollama endpoint on localhost; "
+                f"got '{local_url}'"
+            )
     if provider == 'ollama-cloud':
         base_url = str(effective.get('llm_base_url') or '').rstrip('/')
         endpoint = f'{base_url}/chat/completions' if base_url else ''

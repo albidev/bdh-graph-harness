@@ -215,6 +215,7 @@ async def api_stats(request, app_state: dict) -> web.Response:
             'transport': runtime_llm.get('llm_transport', 'ollama-native'),
             'model': runtime_llm.get('llm_model'),
             'endpoint': runtime_llm.get('llm_endpoint'),
+            'local_only': bool(runtime_llm.get('llm_local_only', False)),
         },
         'retrieval_telemetry': retrieval_telemetry_summary(ctx.retrieval_telemetry),
     }
