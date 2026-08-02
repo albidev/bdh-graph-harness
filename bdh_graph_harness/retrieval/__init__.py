@@ -10,6 +10,11 @@ from bdh_graph_harness.retrieval.embeddings import (
 )
 from bdh_graph_harness.retrieval.bm25 import BM25Index
 from bdh_graph_harness.retrieval.hybrid import hybrid_score
+from bdh_graph_harness.retrieval.okf_policy import (
+    apply_okf_retrieval_policy,
+    evaluate_okf_metadata,
+    is_okf_retrieval_policy_enabled,
+)
 from bdh_graph_harness.retrieval.attention import (
     compute_adaptive_threshold,
     attention as run_attention,
@@ -22,6 +27,9 @@ __all__ = [
     'cosine_similarity',
     'BM25Index',
     'hybrid_score',
+    'apply_okf_retrieval_policy',
+    'evaluate_okf_metadata',
+    'is_okf_retrieval_policy_enabled',
     'compute_adaptive_threshold',
     'run_attention',
     'format_context',

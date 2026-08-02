@@ -41,6 +41,16 @@ CONFIG = {
     'external_sources': [],
     # OKF document/interchange read compatibility; runtime state stays BDH-owned.
     'okf_mode': False,
+    # Trust-aware retrieval is gated by okf_mode and can be disabled for A/B tests.
+    'okf_retrieval_policy_enabled': True,
+    'okf_policy_verified_bonus': 1.08,
+    'okf_policy_unverified_penalty': 0.95,
+    'okf_policy_draft_multiplier': 0.85,
+    'okf_policy_deprecated_multiplier': 0.50,
+    'okf_policy_stale_multiplier': 0.60,
+    'okf_policy_provenance_bonus': 1.03,
+    'okf_policy_min_multiplier': 0.35,
+    'okf_policy_max_multiplier': 1.20,
     'ollama_url': 'http://127.0.0.1:11434',
     # Embedding (Ollama)
     'embedding_model': 'nomic-embed-text-v2-moe',

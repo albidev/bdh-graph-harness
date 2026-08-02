@@ -183,6 +183,13 @@ okf_mode: read
 
 `okf_mode` is `false` by default. In `read` mode BDH parses typed YAML metadata, preserves unknown fields under `node["okf"]`, resolves local Markdown links alongside Obsidian wikilinks, ignores external URLs as graph edges, and keeps `index.md`/`log.md` out of the neuron graph. Hebbian synapses, embeddings, consolidation state, and neurogenesis runtime metadata remain BDH-owned and are not converted into OKF links.
 
+When `okf_mode` is enabled, the read-only OKF retrieval policy is enabled by default. It keeps the signals separate while ranking: `status: draft`/`deprecated` are demoted, verified documents receive a small bonus, explicit `stale_after` dates demote stale documents, and documents with source provenance (`sources`) receive a small evidence bonus. Legacy nodes without OKF metadata remain neutral. The applied components are returned in `routing.okf_policy` and each activation detail, without exposing raw source paths. Set `okf_retrieval_policy_enabled: false` to run an A/B comparison; the policy never mutates Hebbian state.
+
+```yaml
+okf_mode: read
+okf_retrieval_policy_enabled: true
+```
+
 The exporter and validator are separate from the vault read path. They write a new bundle and never rewrite the source vault:
 
 ```python
