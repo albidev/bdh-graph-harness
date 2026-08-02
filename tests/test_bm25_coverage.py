@@ -15,6 +15,18 @@ def test_bm25_normalization_paths_and_no_results_search():
 
     raw = index.score("retrieval", "note")
     assert index.score_normalized("retrieval", "note", max_score=raw / 2) == 1.0
+
+
+def test_bm25_accepts_typed_okf_metadata_lists():
+    index = BM25Index({
+        "note": {
+            "title": "OKF note",
+            "tags": ["retrieval", "architecture"],
+            "text": "hybrid search",
+        }
+    })
+
+    assert index.score("architecture", "note") > 0.0
     assert 0 < index.score_normalized("retrieval", "note") <= 1.0
     assert index.score_normalized("absent", "note") == 0.0
     assert index.score_batch("absent") == {}
