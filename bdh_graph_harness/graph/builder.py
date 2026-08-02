@@ -369,6 +369,12 @@ def _resolve_target(target, nodes, source_id=None):
     if not target:
         return None
 
+    # Federated graphs use canonical IDs such as ``vault:wiki/note.md`` and
+    # ``external:source/note.md``.  Those IDs are already resolved; do not
+    # normalize away ``.md`` before checking the node map.
+    if target in nodes:
+        return target
+
     candidates = []
 
     def add_candidate(value):
