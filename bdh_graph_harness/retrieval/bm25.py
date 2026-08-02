@@ -71,6 +71,20 @@ class BM25Index:
         tokens = re.findall(r'\w+', text.lower(), re.UNICODE)
         return [t for t in tokens if t not in _IT_STOP_WORDS and len(t) > 1]
 
+    @staticmethod
+    def _field_text(value):
+        """Coerce legacy scalar and typed YAML metadata into indexable text."""
+        if value is None:
+            return ''
+        if isinstance(value, dict):
+            return ' '.join(
+                f'{key} {BM25Index._field_text(item)}'
+                for key, item in value.items()
+            )
+        if isinstance(value, (list, tuple, set)):
+            return ' '.join(BM25Index._field_text(item) for item in value)
+        return str(value)
+
     def _build(self, nodes):
         """Build the BM25 index from title, metadata, and note content."""
         self.N = len(nodes)
@@ -80,11 +94,11 @@ class BM25Index:
         total_len = 0
         for note_id, node in nodes.items():
             text = " ".join(filter(None, [
-                node.get('title', ''),
-                node.get('tags', ''),
-                node.get('abstract', ''),
-                node.get('description', ''),
-                node.get('text', ''),
+                self._field_text(node.get('title', '')),
+                self._field_text(node.get('tags', '')),
+                self._field_text(node.get('abstract', '')),
+                self._field_text(node.get('description', '')),
+                self._field_text(node.get('text', '')),
             ]))
             tokens = self._tokenize(text)
             self.docs[note_id] = tokens
