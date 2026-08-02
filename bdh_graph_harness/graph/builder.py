@@ -6,6 +6,7 @@ Builds the note graph from an Obsidian vault with caching support.
 import os
 import json
 import fnmatch
+import posixpath
 from collections import defaultdict
 from datetime import datetime
 
@@ -18,6 +19,11 @@ from bdh_graph_harness.graph.parser import (
     extract_wikilinks,
 )
 from bdh_graph_harness.graph.display import add_display_label
+from bdh_graph_harness.graph.okf import (
+    extract_markdown_links,
+    is_reserved_filename,
+    parse_okf_frontmatter,
+)
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -43,7 +49,7 @@ def _is_ignored(note_id: str, ignore_list=None) -> bool:
 # Graph construction
 # ---------------------------------------------------------------------------
 
-def build_graph(vault_root, use_cache=True, graph_ignore=None):
+def build_graph(vault_root, use_cache=True, graph_ignore=None, okf_mode=False):
     """Build the note graph: nodes with text, edges from wikilinks.
 
     With use_cache=True, loads from .bdh-graph-cache.json and only re-reads
@@ -62,18 +68,25 @@ def build_graph(vault_root, use_cache=True, graph_ignore=None):
             logger.warning(f"Graph cache corrupt, full rebuild: {e}")
             cached = None
 
-    if cached:
-        nodes, edges = _incremental_graph_update(vault_root, cached, cache_path, graph_ignore)
+    okf_enabled = okf_mode not in (False, None, "off")
+    if cached and bool(cached.get('okf_mode', False)) == okf_enabled:
+        nodes, edges = _incremental_graph_update(
+            vault_root,
+            cached,
+            cache_path,
+            graph_ignore,
+            okf_mode=okf_enabled,
+        )
     else:
-        nodes, edges = _full_graph_build(vault_root, graph_ignore)
-        _save_graph_cache(vault_root, nodes, edges, cache_path)
+        nodes, edges = _full_graph_build(vault_root, graph_ignore, okf_mode=okf_enabled)
+        _save_graph_cache(vault_root, nodes, edges, cache_path, okf_mode=okf_enabled)
 
     for node in nodes.values():
         add_display_label(node)
     return nodes, edges
 
 
-def _full_graph_build(vault_root, ignore_list=None):
+def _full_graph_build(vault_root, ignore_list=None, okf_mode=False):
     """Full graph build by walking the entire vault."""
     nodes = {}  # note_id -> {text, title, tags, path, mtime}
     edges = defaultdict(list)  # note_id -> [(target_id, ...), ...]
@@ -89,7 +102,9 @@ def _full_graph_build(vault_root, ignore_list=None):
             note_id = extract_note_id(filepath, vault_root)
 
             # Skip ignored notes
-            if _is_ignored(note_id, ignore_list):
+            if _is_ignored(note_id, ignore_list) or (
+                okf_mode and is_reserved_filename(note_id + '.md')
+            ):
                 ignored.add(note_id)
                 continue
 
@@ -97,9 +112,19 @@ def _full_graph_build(vault_root, ignore_list=None):
             with open(filepath, 'r', encoding='utf-8') as fh:
                 content = fh.read()
 
-            fm = parse_frontmatter(content)
+            legacy_frontmatter = parse_frontmatter(content)
+            okf_metadata = parse_okf_frontmatter(content) if okf_mode else {}
+            fm = {**legacy_frontmatter, **okf_metadata}
             text = extract_text(content)
-            links = extract_wikilinks(content)
+            links = [
+                (target, display, 'wikilink')
+                for target, display in extract_wikilinks(content)
+            ]
+            if okf_mode:
+                links.extend(
+                    (target, display, 'markdown')
+                    for target, display in extract_markdown_links(content)
+                )
 
             nodes[note_id] = {
                 'id': note_id,
@@ -110,12 +135,20 @@ def _full_graph_build(vault_root, ignore_list=None):
                 'mtime': mtime,
                 'activated_from_ids': parse_json_frontmatter_list(fm, 'activated_from_ids'),
             }
+            if okf_mode:
+                nodes[note_id]['okf'] = okf_metadata
 
-            for target, display in links:
-                edges[note_id].append({
+            for target, display, syntax in links:
+                edge = {
                     'target': target,
                     'display': display,
-                })
+                }
+                if syntax == 'markdown':
+                    edge['syntax'] = 'markdown'
+                edges[note_id].append(edge)
+
+    if okf_mode:
+        _resolve_markdown_targets(edges, nodes)
 
     # Filter edges pointing to ignored nodes
     if ignored:
@@ -129,6 +162,17 @@ def _full_graph_build(vault_root, ignore_list=None):
         _add_neurogenesis_source_edges(nodes, edges)
 
     return nodes, dict(edges)
+
+
+def _resolve_markdown_targets(edges, nodes):
+    """Replace local Markdown paths with the graph's canonical legacy IDs."""
+    for source_id, links in edges.items():
+        for link in links:
+            if link.get('syntax') != 'markdown':
+                continue
+            resolved = _resolve_target(link.get('target', ''), nodes, source_id)
+            if resolved is not None:
+                link['target'] = resolved
 
 
 def _filter_self_links(nodes, edges):
@@ -170,7 +214,14 @@ def _add_neurogenesis_source_edges(nodes, edges):
                 })
 
 
-def _incremental_graph_update(vault_root, cached, cache_path, ignore_list=None):
+def _incremental_graph_update(
+    vault_root,
+    cached,
+    cache_path,
+    ignore_list=None,
+    *,
+    okf_mode=False,
+):
     """Update cached graph by only re-reading changed files.
 
     Compares mtimes: if a file's mtime changed, re-read it. If a file
@@ -191,7 +242,9 @@ def _incremental_graph_update(vault_root, cached, cache_path, ignore_list=None):
             filepath = os.path.join(root, f)
             note_id = extract_note_id(filepath, vault_root)
             # Skip ignored notes
-            if _is_ignored(note_id, ignore_list):
+            if _is_ignored(note_id, ignore_list) or (
+                okf_mode and is_reserved_filename(note_id + '.md')
+            ):
                 continue
             mtime = os.path.getmtime(filepath)
             current_files[note_id] = (filepath, mtime)
@@ -221,8 +274,8 @@ def _incremental_graph_update(vault_root, cached, cache_path, ignore_list=None):
     if total_changes > len(current_ids) * 0.5:
         logger.info(f"Too many changes ({total_changes}/{len(current_ids)}), full rebuild")
         print(f"   🔄 {total_changes} changes (>50%), full rebuild")
-        nodes, edges = _full_graph_build(vault_root, ignore_list)
-        _save_graph_cache(vault_root, nodes, edges, cache_path)
+        nodes, edges = _full_graph_build(vault_root, ignore_list, okf_mode=okf_mode)
+        _save_graph_cache(vault_root, nodes, edges, cache_path, okf_mode=okf_mode)
         return nodes, edges
 
     # Incremental update
@@ -245,9 +298,19 @@ def _incremental_graph_update(vault_root, cached, cache_path, ignore_list=None):
         with open(filepath, 'r', encoding='utf-8') as fh:
             content = fh.read()
 
-        fm = parse_frontmatter(content)
+        legacy_frontmatter = parse_frontmatter(content)
+        okf_metadata = parse_okf_frontmatter(content) if okf_mode else {}
+        fm = {**legacy_frontmatter, **okf_metadata}
         text = extract_text(content)
-        links = extract_wikilinks(content)
+        links = [
+            (target, display, 'wikilink')
+            for target, display in extract_wikilinks(content)
+        ]
+        if okf_mode:
+            links.extend(
+                (target, display, 'markdown')
+                for target, display in extract_markdown_links(content)
+            )
 
         nodes[nid] = {
             'id': nid,
@@ -258,8 +321,20 @@ def _incremental_graph_update(vault_root, cached, cache_path, ignore_list=None):
             'mtime': mtime,
             'activated_from_ids': parse_json_frontmatter_list(fm, 'activated_from_ids'),
         }
+        if okf_mode:
+            nodes[nid]['okf'] = okf_metadata
 
-        edges[nid] = [{'target': t, 'display': d} for t, d in links]
+        edges[nid] = [
+            {
+                'target': target,
+                'display': display,
+                **({'syntax': 'markdown'} if syntax == 'markdown' else {}),
+            }
+            for target, display, syntax in links
+        ]
+
+    if okf_mode:
+        _resolve_markdown_targets(edges, nodes)
 
     _filter_self_links(nodes, edges)
     if CONFIG.get('neurogenesis_source_edges_enabled', False):
@@ -268,17 +343,18 @@ def _incremental_graph_update(vault_root, cached, cache_path, ignore_list=None):
     print(f"   🔄 Incremental update: {len(new_notes)} new, {len(changed_notes)} changed, {len(deleted_notes)} deleted")
     logger.info(f"Graph incremental: +{len(new_notes)} ~{len(changed_notes)} -{len(deleted_notes)}")
 
-    _save_graph_cache(vault_root, nodes, edges, cache_path)
+    _save_graph_cache(vault_root, nodes, edges, cache_path, okf_mode=okf_mode)
     return nodes, edges
 
 
-def _save_graph_cache(vault_root, nodes, edges, cache_path):
+def _save_graph_cache(vault_root, nodes, edges, cache_path, *, okf_mode=False):
     """Save graph + mtimes to cache file for incremental rebuilds."""
     cache = {
         'nodes': nodes,
         'edges': edges,
         'cached_at': datetime.now().isoformat(),
         'vault_path': vault_root,
+        'okf_mode': bool(okf_mode),
     }
     try:
         with open(cache_path, 'w', encoding='utf-8') as f:
@@ -287,18 +363,38 @@ def _save_graph_cache(vault_root, nodes, edges, cache_path):
         logger.warning(f"Failed to save graph cache: {e}")
 
 
-def _resolve_target(target, nodes):
+def _resolve_target(target, nodes, source_id=None):
     """Resolve a wikilink target to an actual note ID in the graph."""
-    # Direct match
-    if target in nodes:
-        return target
-    # Try with wiki/ prefix or without
+    target = str(target or '').strip().split('#', 1)[0].split('^', 1)[0].strip()
+    if not target:
+        return None
+
+    candidates = []
+
+    def add_candidate(value):
+        value = value.replace('\\', '/').lstrip('/')
+        value = posixpath.normpath(value)
+        if value in {'.', '..'} or value.startswith('../'):
+            return
+        if value.lower().endswith('.md'):
+            value = value[:-3]
+        if value and value not in candidates:
+            candidates.append(value)
+
+    add_candidate(target)
+    if source_id:
+        add_candidate(posixpath.join(posixpath.dirname(source_id), target))
+
+    # Try with wiki/ prefix or without.
     for prefix in ['', 'wiki/', 'concepts/', 'entities/', 'comparisons/', 'queries/']:
-        candidate = f"{prefix}{target}" if prefix else target
+        add_candidate(f"{prefix}{target}" if prefix else target)
+
+    for candidate in candidates:
         if candidate in nodes:
             return candidate
-    # Try matching by basename
-    basename = os.path.basename(target)
+
+    # Try matching by basename, retaining the legacy fallback behavior.
+    basename = os.path.basename(candidates[0] if candidates else target)
     for note_id in nodes:
         if os.path.basename(note_id) == basename:
             return note_id
