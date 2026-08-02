@@ -39,6 +39,8 @@ CONFIG = {
     # Optional read-only Markdown sources merged into the primary vault graph.
     # Each entry supports id, path, include, exclude, and writable (false by default).
     'external_sources': [],
+    # OKF document/interchange read compatibility; runtime state stays BDH-owned.
+    'okf_mode': False,
     'ollama_url': 'http://127.0.0.1:11434',
     # Embedding (Ollama)
     'embedding_model': 'nomic-embed-text-v2-moe',

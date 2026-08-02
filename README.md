@@ -169,7 +169,21 @@ python -m bdh_graph_harness --refresh
 
 # Read-only source scan (no ChromaDB, embeddings, LLM, or writes)
 python -m bdh_graph_harness --config bdh-config.local.yaml --scan-sources
+```
 
+### OKF read compatibility
+
+BDH can read the [Open Knowledge Format (OKF) v0.2](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md) document conventions without replacing its runtime graph. Enable the read adapter in `bdh-config.local.yaml`:
+
+```yaml
+okf_mode: read
+```
+
+`okf_mode` is `false` by default. In `read` mode BDH parses typed YAML metadata, preserves unknown fields under `node["okf"]`, resolves local Markdown links alongside Obsidian wikilinks, ignores external URLs as graph edges, and keeps `index.md`/`log.md` out of the neuron graph. Hebbian synapses, embeddings, consolidation state, and neurogenesis runtime metadata remain BDH-owned and are not converted into OKF links.
+
+The OKF exporter and schema validator are intentionally separate follow-up work; enabling read mode does not write or rewrite the vault.
+
+```bash
 # Open visualization
 open http://localhost:8643
 
