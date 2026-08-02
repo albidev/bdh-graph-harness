@@ -17,6 +17,10 @@ from dataclasses import dataclass
 
 from bdh_graph_harness.config import CONFIG
 from bdh_graph_harness.retrieval.attention import attention
+from bdh_graph_harness.retrieval.okf_policy import (
+    evaluate_okf_metadata,
+    is_okf_retrieval_policy_enabled,
+)
 
 
 __all__ = [
@@ -329,6 +333,8 @@ def multi_query_attention(
     for detail in details_by_id.values():
         note_id = detail['id']
         enriched = dict(detail)
+        if is_okf_retrieval_policy_enabled() and "okf_policy" not in enriched:
+            enriched["okf_policy"] = evaluate_okf_metadata(nodes.get(note_id))
         if note_id in matched_by:
             enriched['matched_by'] = matched_by[note_id]
         if note_id in multivariant_hits and multivariant_hits[note_id] > 1:
