@@ -104,6 +104,8 @@ bdh_graph_harness/
 │   ├── sources.py           # Vault/external Markdown source scanners
 │   ├── federated.py         # Source-aware IDs + federated graph builder
 │   └── cache.py             # Graph cache serialization
+├── okf/
+│   └── export.py            # OKF v0.2 validator + sanitized bundle exporter
 ├── retrieval/
 │   ├── embeddings.py        # Ollama embedding client
 │   ├── chroma_store.py      # ChromaDB vector store
@@ -181,7 +183,19 @@ okf_mode: read
 
 `okf_mode` is `false` by default. In `read` mode BDH parses typed YAML metadata, preserves unknown fields under `node["okf"]`, resolves local Markdown links alongside Obsidian wikilinks, ignores external URLs as graph edges, and keeps `index.md`/`log.md` out of the neuron graph. Hebbian synapses, embeddings, consolidation state, and neurogenesis runtime metadata remain BDH-owned and are not converted into OKF links.
 
-The OKF exporter and schema validator are intentionally separate follow-up work; enabling read mode does not write or rewrite the vault.
+The exporter and validator are separate from the vault read path. They write a new bundle and never rewrite the source vault:
+
+```python
+from bdh_graph_harness import build_graph
+from bdh_graph_harness.okf import export_okf_bundle, validate_okf_bundle
+
+nodes, edges = build_graph("/path/to/vault", use_cache=False, okf_mode=True)
+export_okf_bundle(nodes, edges, "/tmp/bdh-okf-bundle")
+result = validate_okf_bundle("/tmp/bdh-okf-bundle")
+assert result.valid, result.errors
+```
+
+The bundle contains typed concept documents plus conformant root `index.md` and `log.md`. Only OKF document metadata and structural links are exported; Hebbian/phantom edges, activation history, embeddings, and local filesystem paths are excluded or redacted. Broken links and unknown `type` values remain valid according to OKF v0.2's permissive consumer contract.
 
 ```bash
 # Open visualization
