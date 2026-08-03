@@ -45,15 +45,27 @@ def guardrail_config(**overrides):
     return config
 
 
-def test_kill_switch_aborts_and_restores_state_when_candidates_exceed_ratio():
+def test_kill_switch_aborts_and_restores_state_when_planned_ratio_exceeds():
+    """A planned (budget-uncapped) prune above the safety ratio aborts + restores.
+
+    Raw candidate explosion alone is NOT an abort: the per-cycle budget caps the
+    planned mutation. The hard gate only aborts when the *planned* mutation still
+    exceeds the safety ratio.
+    """
     state, nodes = make_state(10)
     before = deepcopy(state)
 
-    result = consolidate(state, nodes, config=guardrail_config())
+    # budget 1.0 => planned == raw (1.0) > max_ratio 0.35 => abort.
+    result = consolidate(
+        state, nodes,
+        config=guardrail_config(consolidation_max_prune_per_cycle=1.0),
+    )
 
     assert result["aborted"] is True
     assert result["abort_reason"] == "candidate_prune_ratio_exceeded"
     assert result["candidate_prune_ratio"] == 1.0
+    assert result["planned_prune_ratio"] == 1.0
+    assert result["candidate_ratio_anomaly"] is True
     assert state == before
 
 
@@ -145,12 +157,14 @@ def test_consolidation_does_not_run_phantom_update_after_aborted_cycle(monkeypat
         lambda *args, **kwargs: called.append(True),
     )
 
+    # budget 1.0 => planned (1.0) > max_ratio 0.35 => abort, so phantom must not run.
     result = consolidate(
         state,
         nodes,
         edges={"n0": []},
         config=guardrail_config(
             consolidation_max_prune_ratio=0.35,
+            consolidation_max_prune_per_cycle=1.0,
             phantom_links_enabled=True,
             vault_path="/tmp/vault",
         ),

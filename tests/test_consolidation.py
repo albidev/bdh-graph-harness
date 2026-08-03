@@ -264,7 +264,7 @@ class TestConsolidate:
         assert sample_state['consolidation_cycles'] == 1
 
     def test_mass_prune_is_quarantined(self, sample_state, sample_nodes):
-        """A candidate set above the safety ratio must not be committed."""
+        """A planned prune above the safety ratio must not be committed."""
         consolidate(
             sample_state,
             sample_nodes,
@@ -274,7 +274,11 @@ class TestConsolidate:
         results = consolidate(
             sample_state,
             sample_nodes,
-            config={'consolidation_prune_dormant_nodes': False},
+            config={
+                'consolidation_prune_dormant_nodes': False,
+                'consolidation_max_prune_per_cycle': 1.0,  # planned == raw => abort
+                'consolidation_max_prune_ratio': 0.35,
+            },
         )
         assert results['synapses_before'] == len(before['synapses'])
         assert results['aborted'] is True

@@ -273,6 +273,49 @@ async def test_api_graph(mock_app_setup, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_api_graph_serializes_federated_canonical_edges(mock_app_setup, monkeypatch):
+    """Federated canonical IDs must survive API edge serialization."""
+    from aiohttp.test_utils import TestClient, TestServer
+
+    nodes, edges, collection, state, config, _ = mock_app_setup
+    first = 'vault:wiki/first.md'
+    second = 'vault:wiki/second.md'
+    nodes.clear()
+    nodes.update({
+        first: {'id': first, 'title': 'First', 'tags': 'concept', 'text': 'First content', 'path': '/fake/first.md'},
+        second: {'id': second, 'title': 'Second', 'tags': 'concept', 'text': 'Second content', 'path': '/fake/second.md'},
+    })
+    edges.clear()
+    edges.update({
+        first: [{'target': second, 'display': 'Second', 'type': 'wikilink'}],
+        second: [],
+    })
+    state['synapses'] = {}
+
+    app = _capture_app(monkeypatch, config, nodes, edges, collection, state)
+    server = TestServer(app)
+    client = TestClient(server)
+    await client.start_server()
+    try:
+        resp = await client.get('/api/graph')
+        assert resp.status == 200
+        data = await resp.json()
+        assert data['edges'] == [{
+            'source': first,
+            'target': second,
+            'display': 'Second',
+            'type': 'wikilink',
+            'weight': 1.0,
+            'explicit': True,
+            'relation': None,
+            'group_id': None,
+            'generated': False,
+        }]
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
 async def test_api_graph_exposes_source_metadata_and_unresolved_links(mock_app_setup, monkeypatch):
     from aiohttp.test_utils import TestClient, TestServer
 

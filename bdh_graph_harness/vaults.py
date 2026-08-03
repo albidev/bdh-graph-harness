@@ -212,6 +212,8 @@ def _normalise_multi_vault(cfg: dict) -> list[VaultConfig]:
             'neurogenesis_enabled',
             'external_sources',
             'llm',
+            'okf_mode',
+            'okf_retrieval_policy_enabled',
         ):
             if key in entry:
                 if key == 'llm' and not isinstance(entry[key], dict):

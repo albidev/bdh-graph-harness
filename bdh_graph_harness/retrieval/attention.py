@@ -8,6 +8,7 @@ import math
 import statistics
 from collections import defaultdict, deque
 from datetime import datetime
+from typing import Any
 
 from bdh_graph_harness.config import CONFIG, logger
 from bdh_graph_harness.memory.hebbian import (
@@ -17,6 +18,11 @@ from bdh_graph_harness.memory.hebbian import (
 from bdh_graph_harness.retrieval.embeddings import get_embeddings
 from bdh_graph_harness.retrieval.bm25 import BM25Index
 from bdh_graph_harness.retrieval.hybrid import hybrid_score
+from bdh_graph_harness.retrieval.okf_policy import (
+    apply_okf_retrieval_policy,
+    evaluate_okf_metadata,
+    is_okf_retrieval_policy_enabled,
+)
 from bdh_graph_harness.graph.builder import _resolve_target
 
 
@@ -562,8 +568,32 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
     if routing_meta is not None:
         routing_meta.update({"abstained": False, "abstention_reason": None})
 
-    # Keep retrieval-only scores separate from Hebbian and hop propagation scores.
+    # Keep raw retrieval scores separate from OKF and Hebbian adjustments.
     retrieval_scores = dict(scores)
+    okf_policy_enabled = is_okf_retrieval_policy_enabled()
+    scores, okf_policy_decisions = apply_okf_retrieval_policy(
+        scores,
+        nodes,
+        enabled=okf_policy_enabled,
+    )
+    pre_hebbian_scores = dict(scores)
+
+    def okf_decision_for(note_id):
+        if not okf_policy_enabled:
+            return None
+        if note_id not in okf_policy_decisions:
+            okf_policy_decisions[note_id] = evaluate_okf_metadata(nodes.get(note_id))
+        return okf_policy_decisions[note_id]
+
+    if routing_meta is not None:
+        routing_meta["okf_policy"] = {
+            "enabled": okf_policy_enabled,
+            "evaluated_nodes": len(okf_policy_decisions),
+            "adjusted_nodes": sum(
+                1 for decision in okf_policy_decisions.values()
+                if decision.get("applied") and decision.get("multiplier") != 1.0
+            ),
+        }
 
     # Phase 5: Hebbian-aware seed ranking
     # Boost candidates that have strong Hebbian synapses with recently active notes.
@@ -598,7 +628,8 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
     activation_details = {}
     for note_id, score in seeds:
         retrieval_score = retrieval_scores.get(note_id, 0.0)
-        boost = max(0.0, score / retrieval_score - 1.0) if retrieval_score > 0 else 0.0
+        pre_hebbian_score = pre_hebbian_scores.get(note_id, 0.0)
+        boost = max(0.0, score / pre_hebbian_score - 1.0) if pre_hebbian_score > 0 else 0.0
         activation_details[note_id] = {
             'role': 'seed',
             'hop': 0,
@@ -609,6 +640,9 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
             'hebbian_boost': round(boost, 4),
             'final_score': round(score, 4),
         }
+        if okf_policy_enabled:
+            activation_details[note_id]['okf_score'] = round(pre_hebbian_score, 4)
+            activation_details[note_id]['okf_policy'] = okf_policy_decisions[note_id]
 
     # Step 2: Graph traversal — expand from seeds via wikilinks
     active = dict(seeds)
@@ -669,12 +703,16 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
             if target_id is None:
                 continue
             relevance = neighbor_relevance.get(target_id)
+            target_decision = okf_decision_for(target_id)
+            priority = relevance if relevance is not None else 0.1
+            if target_decision:
+                priority *= target_decision["multiplier"]
             neighbors[target_id] = {
                 'matched_by': 'static_edge',
                 'hebbian_edge_weight': 0.0,
                 'hebbian_edge_trust': 0.0,
                 'query_relevance': relevance,
-                'priority': relevance if relevance is not None else 0.1,
+                'priority': priority,
             }
 
         for target_id, weight, trust in hebbian_adjacency.get(current_id, []):
@@ -683,18 +721,25 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
             # support before it enters this traversal.
             if dynamic_relevance.get(target_id, 0.0) < dynamic_relevance_floor:
                 continue
+            target_decision = okf_decision_for(target_id)
+            target_factor = target_decision["multiplier"] if target_decision else 1.0
             existing = neighbors.get(target_id)
             if existing:
                 existing['matched_by'] = 'static_and_hebbian_edge'
                 existing['hebbian_edge_weight'] = max(existing['hebbian_edge_weight'], weight)
                 existing['hebbian_edge_trust'] = max(existing['hebbian_edge_trust'], trust)
+                existing['priority'] = max(
+                    existing['priority'],
+                    weight * trust * target_factor,
+                    retrieval_scores.get(target_id, 0.0) * target_factor,
+                )
             else:
                 neighbors[target_id] = {
                     'matched_by': 'hebbian_edge',
                     'hebbian_edge_weight': weight,
                     'hebbian_edge_trust': trust,
                     'query_relevance': dynamic_relevance.get(target_id),
-                    'priority': max(scores.get(target_id, 0.0), weight * trust),
+                    'priority': max(retrieval_scores.get(target_id, 0.0), weight * trust) * target_factor,
                 }
 
         # Cap static + dynamic expansion together, preserving strong learned
@@ -705,6 +750,7 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
         for target_id, neighbor in neighbors:
             dynamic_weight = neighbor['hebbian_edge_weight']
             dynamic_trust = neighbor['hebbian_edge_trust']
+            target_decision = okf_decision_for(target_id)
 
             # Dynamic edges get an independently tunable decay. Static and
             # mixed edges preserve the existing graph traversal behavior.
@@ -727,6 +773,12 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
                               * dynamic_trust)
             elif dynamic_weight > 0:
                 new_score *= 1.0 + dynamic_weight * CONFIG.get('hebbian_dynamic_gain', 1.0)
+
+            # OKF is a retrieval-only adjustment. Seed scores were adjusted
+            # before Hebbian ranking; apply the target policy once to propagated
+            # neighbors, without changing the underlying synapse/state.
+            if target_id not in seed_ids and target_decision:
+                new_score *= target_decision["multiplier"]
 
             # Hub dampening for the target
             if CONFIG['hub_dampening'] and degree.get(target_id, 0) > CONFIG['hub_degree_threshold']:
@@ -755,6 +807,8 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
                             'query_relevance': round(query_relevance, 4) if query_relevance is not None else None,
                             'final_score': round(new_score, 4),
                         })
+                        if target_decision:
+                            activation_details[target_id]['okf_policy'] = target_decision
             elif new_score > traversal_threshold:
                 active[target_id] = new_score
                 activation_details[target_id] = {
@@ -771,9 +825,19 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
                     'hebbian_boost': 0.0,
                     'final_score': round(new_score, 4),
                 }
+                if target_decision:
+                    activation_details[target_id]['okf_policy'] = target_decision
                 queue.append((target_id, new_score, hop + 1, current_id))
 
     if routing_meta is not None:
+        if okf_policy_enabled:
+            routing_meta["okf_policy"].update({
+                "evaluated_nodes": len(okf_policy_decisions),
+                "adjusted_nodes": sum(
+                    1 for decision in okf_policy_decisions.values()
+                    if decision.get("applied") and decision.get("multiplier") != 1.0
+                ),
+            })
         if associative_context_enabled:
             routing_meta['associative_context'] = _build_associative_context(
                 seeds=seeds,
@@ -903,6 +967,15 @@ def integrate_and_fire_attention(query, nodes, edges, collection, k=None, max_ho
     else:
         seed_scores = dict(raw_vector_scores)
 
+    okf_policy_enabled = is_okf_retrieval_policy_enabled()
+    okf_policy_decisions: dict[str, dict[str, Any]] = {}
+    if okf_policy_enabled:
+        seed_scores, okf_policy_decisions = apply_okf_retrieval_policy(
+            seed_scores,
+            nodes,
+            enabled=True,
+        )
+
     # Adaptive threshold on seed scores
     if CONFIG.get('adaptive_threshold', False) and len(seed_scores) >= 5:
         threshold = compute_adaptive_threshold(
@@ -940,6 +1013,11 @@ def integrate_and_fire_attention(query, nodes, edges, collection, k=None, max_ho
         for node_id, total_input in incoming.items():
             tau_j = compute_tau(node_id, degree)
             potential = total_input - tau_j
+            if okf_policy_enabled:
+                target_decision = okf_policy_decisions.get(node_id)
+                if target_decision is None:
+                    target_decision = evaluate_okf_metadata(nodes.get(node_id))
+                potential *= target_decision["multiplier"]
 
             if potential > 0:
                 # Cap activation to prevent runaway
