@@ -538,7 +538,11 @@ def run_neurogenesis(
     """
     new_concepts_list = []
     config = ctx.config.settings
-    if source == 'cron':
+    # Issue #16 gap-2: honour source_policy.allow_neurogenesis instead of
+    # hard-coding only the 'cron' source.  None (interactive) defaults to
+    # allowing neurogenesis; unknown sources raise at the policy boundary.
+    source_pol = get_source_policy(source)
+    if source_pol is not None and not source_pol.allow_neurogenesis:
         return new_concepts_list
     if config.get('neurogenesis_enabled', True):
         n = ctx.nodes
@@ -617,14 +621,19 @@ def run_neurogenesis(
                 canonical_id = match.get('node_id') if match else None
 
             if canonical_id is not None and canonical_id in n and not looks_conflicting(definition):
+                merge_kwargs = {
+                    "source_notes": active_titles,
+                    "source_node_ids": active_source_ids,
+                    "query": query,
+                }
+                if source is not None:
+                    merge_kwargs["source"] = source
                 merged = assimilate_evidence(
                     vault_root,
                     canonical_id,
                     n[canonical_id],
                     definition,
-                    source_notes=active_titles,
-                    source_node_ids=active_source_ids,
-                    query=query,
+                    **merge_kwargs,
                 )
                 if merged['status'] in {'merged', 'already_present'}:
                     new_concepts_list.append({
@@ -641,10 +650,15 @@ def run_neurogenesis(
                     file=sys.stderr,
                 )
 
+            note_kwargs = {
+                "neurogenesis_dir": ctx.config.settings.get('neurogenesis_dir'),
+                "source_node_ids": active_source_ids,
+            }
+            if source is not None:
+                note_kwargs["source"] = source
             new_note_id = create_note(
                 vault_root, title, definition, active_titles, query,
-                neurogenesis_dir=ctx.config.settings.get('neurogenesis_dir'),
-                source_node_ids=active_source_ids,
+                **note_kwargs,
             )
             if new_note_id:
                 reported_id = new_note_id
@@ -819,6 +833,16 @@ async def api_stream(request, app_state: dict, ws_clients: set) -> web.StreamRes
     active, activated_notes, hebbian_updates, routing = await run_attention_and_plasticity(
         retrieval_query, ctx, ws_clients, source=source, query_variants=query_variants
     )
+
+    # Issue #16 gap-3: expose the same source/source_policy routing
+    # metadata as api_query so consumers can trace provenance.
+    source_pol = get_source_policy(source)
+    routing['source'] = source
+    routing['source_policy'] = {
+        'frequency_increment': get_frequency_increment(source),
+        'provenance_label': source_pol.provenance_label if source_pol else source or 'interactive_query',
+        'use_user_prompt_for_retrieval': use_user_prompt_for_retrieval(source),
+    }
 
     resp = web.StreamResponse(
         status=200,
