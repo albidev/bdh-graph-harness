@@ -461,7 +461,11 @@ def _canonical_state_id(note_id: str, nodes: dict) -> str:
 
 
 def project_runtime_state_to_persisted(
-    persisted_state: dict, runtime_state: dict, nodes: dict,
+    persisted_state: dict,
+    runtime_state: dict,
+    nodes: dict,
+    *,
+    prune_missing: bool = False,
 ) -> dict:
     """Project federated runtime updates back onto raw persisted identities.
 
@@ -469,7 +473,9 @@ def project_runtime_state_to_persisted(
     contain historical relative IDs.  Updating the runtime must therefore not
     serialize it directly: that rewrites keys and can collapse distinct legacy
     records.  This keeps each readable raw key, applies its canonical runtime
-    value, and adds only genuinely new canonical records.
+    value, and adds only genuinely new canonical records.  Consolidation can
+    opt into removing readable raw records that no longer exist in runtime,
+    while the default keeps historical records for non-destructive writers.
     """
     projected = copy.deepcopy(persisted_state)
     runtime_synapses = runtime_state.get("synapses", {})
@@ -489,6 +495,8 @@ def project_runtime_state_to_persisted(
         runtime_synapse = runtime_synapses.get(canonical_key)
         if runtime_synapse is not None:
             raw_synapses[raw_key] = copy.deepcopy(runtime_synapse)
+        elif prune_missing:
+            del raw_synapses[raw_key]
 
     for canonical_key, runtime_synapse in runtime_synapses.items():
         if canonical_key not in represented_synapses:
