@@ -78,6 +78,33 @@ def test_multi_vault_explicit_collection_overrides_default(tmp_path):
     assert vaults[0].chroma_collection == "my_custom_collection"
 
 
+def test_multi_vault_okf_mode_is_scoped_per_vault(tmp_path):
+    from bdh_graph_harness.vaults import normalize_vault_configs
+
+    (tmp_path / "Core").mkdir()
+    (tmp_path / "Archive").mkdir()
+    cfg = {
+        "okf_mode": "off",
+        "vaults": [
+            {
+                "id": "core",
+                "path": str(tmp_path / "Core"),
+                "okf_mode": "read",
+            },
+            {
+                "id": "archive",
+                "path": str(tmp_path / "Archive"),
+                "okf_mode": "off",
+            },
+        ],
+    }
+
+    vaults = normalize_vault_configs(cfg)
+
+    assert vaults[0].settings["okf_mode"] == "read"
+    assert vaults[1].settings["okf_mode"] == "off"
+
+
 def test_duplicate_vault_ids_raise_error(tmp_path):
     from bdh_graph_harness.vaults import normalize_vault_configs
 
