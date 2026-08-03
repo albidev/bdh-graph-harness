@@ -1440,6 +1440,7 @@ async def api_consolidate(request, app_state: dict, ws_clients: set) -> web.Resp
         if ctx.persisted_state is not None:
             ctx.persisted_state = project_runtime_state_to_persisted(
                 ctx.persisted_state, ctx.state, n,
+                prune_missing=True,
             )
             state_to_save = ctx.persisted_state
         else:

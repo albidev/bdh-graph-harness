@@ -5,7 +5,11 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from bdh_graph_harness.graph.federated import build_federated_graph, migrate_legacy_state_ids
+from bdh_graph_harness.graph.federated import (
+    build_federated_graph,
+    migrate_legacy_state_ids,
+    project_runtime_state_to_persisted,
+)
 from bdh_graph_harness.graph.sources import (
     CounterpartSpec,
     ExternalMarkdownSource,
@@ -434,3 +438,41 @@ def test_migrate_legacy_state_ids_to_federated_vault_ids():
     assert "wiki/concepts/bdh|wiki/concepts/other" in state["synapses"]
     assert "vault:wiki/concepts/bdh.md" in migrated["node_quality"]
     assert migrated["dormant_nodes"] == ["vault:wiki/concepts/other.md"]
+
+
+def test_projection_prune_mode_removes_runtime_deleted_synapses():
+    from bdh_graph_harness.memory.hebbian import encode_synapse_key
+
+    kept_raw = "wiki/a.md|wiki/b.md"
+    pruned_raw = "wiki/b.md|wiki/c.md"
+    kept_canonical = encode_synapse_key("vault:wiki/a.md", "vault:wiki/b.md")
+    persisted = {
+        "synapses": {
+            kept_raw: {"weight": 0.9, "frequency": 2},
+            pruned_raw: {"weight": 0.1, "frequency": 1},
+            "opaque-historical-record": {"weight": 0.2, "frequency": 1},
+        },
+    }
+    runtime = {
+        "synapses": {
+            kept_canonical: {"weight": 0.95, "frequency": 3},
+        },
+    }
+    nodes = {
+        "vault:wiki/a.md": {},
+        "vault:wiki/b.md": {},
+        "vault:wiki/c.md": {},
+    }
+
+    projected = project_runtime_state_to_persisted(
+        persisted, runtime, nodes, prune_missing=True,
+    )
+
+    assert set(projected["synapses"]) == {
+        kept_raw,
+        "opaque-historical-record",
+    }
+    assert projected["synapses"][kept_raw] == {
+        "weight": 0.95,
+        "frequency": 3,
+    }
