@@ -1445,7 +1445,12 @@ async def api_consolidate(request, app_state: dict, ws_clients: set) -> web.Resp
             state_to_save = ctx.persisted_state
         else:
             state_to_save = ctx.state
-        await asyncio.to_thread(save_state, ctx.config.path, state_to_save)
+        await asyncio.to_thread(
+            save_state,
+            ctx.config.path,
+            state_to_save,
+            replace_synapses=True,
+        )
 
     from bdh_graph_harness.api.ws import broadcast_activation
     event = {'type': 'consolidation', 'vault_id': ctx.config.id, **results}

@@ -47,3 +47,29 @@ def test_save_state_valid_node_ids_does_not_resurrect_dead_synapses(tmp_path):
     persisted = load_state(str(tmp_path))
     assert set(persisted['synapses']) == {'a|b'}
     assert persisted['queries'] == 3
+
+
+def test_save_state_replace_synapses_does_not_resurrect_pruned_disk_keys(tmp_path):
+    (tmp_path / '.bdh-state.json').write_text(json.dumps({
+        'synapses': {
+            'a|pruned': _synapse(0.1),
+            'a|b': _synapse(),
+        },
+        'queries': 2,
+    }), encoding='utf-8')
+
+    save_state(
+        str(tmp_path),
+        {
+            'synapses': {
+                'a|b': _synapse(0.9),
+                'opaque-historical-record': _synapse(0.2),
+            },
+            'queries': 3,
+        },
+        replace_synapses=True,
+    )
+
+    persisted = load_state(str(tmp_path))
+    assert set(persisted['synapses']) == {'a|b', 'opaque-historical-record'}
+    assert persisted['queries'] == 3
