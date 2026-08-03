@@ -285,6 +285,29 @@ The `routing` object in the response always includes these contract fields regar
 | `multi_query_fusion` | Fusion strategy used (`'rrb'`, `'weighted'`, or `null`) |
 | `multi_query_unique_notes` | Count of distinct notes returned |
 | `multi_query_multivariant_hits` | Notes matched by 2+ variants (0 for single-query) |
+| `source` | The `source` value from the request (or `null` for interactive queries) |
+| `source_policy` | Object with `frequency_increment`, `provenance_label`, and `use_user_prompt_for_retrieval` for the active source |
+
+### Source policy and `session_synthesis` contract
+
+Every `source` string accepted by `/api/query` is registered in an explicit policy (`bdh_graph_harness/memory/source_policy.py`). The registry controls:
+
+| Source | Frequency increment | Retrieval routing | Neurogenesis |
+|--------|-------------------|-------------------|--------------|
+| *(None / interactive)* | 1.0 | Uses `query` | Yes |
+| `user_query` | 1.0 | Uses `query` | Yes |
+| `assistant_response` | 0.3 | Uses `query` | Yes |
+| `nightly_semantic_consolidation` | 0.3 | Uses `query` | Yes |
+| `session_synthesis` | 0.2 | Uses `user_prompt` | Yes |
+| `cron` | 0.3 | Uses `query` | No |
+| `automatic_retrieval` | 1.0 | Uses `query` | Yes |
+
+**`session_synthesis`** is designed for the bridge's session-synthesis payload where the actual transcript is in `user_prompt` while `query` is a fixed generic label. The policy ensures:
+
+1. **Dampened plasticity** (0.2 increment) — synthetic/derived signals don't pollute learned associations at full interactive strength.
+2. **Correct retrieval** — the attention pass uses `user_prompt` (the real session evidence) instead of the unrelated fixed `query` string.
+3. **Provenance** — newly created synapses carry a `source: "session_synthesis"` label, and the routing response includes `source_policy` for traceability.
+4. **No silent fall-through** — unrecognised `source` strings raise `ValueError` instead of defaulting to full strength.
 
 ### Running as a service (macOS)
 
@@ -402,6 +425,7 @@ The **[bdh-hermes-bridge](https://github.com/albidev/bdh-hermes-bridge)** plugin
 - **Write path** — every Hermes response (>200 chars) is fed to BDH, triggering Hebbian reinforcement and neurogenesis from real usage
 - **Read path** — `bdh_query` tool lets Hermes pull context from the knowledge graph on demand
 - **Echo-loop dampening** — assistant responses are flagged with `source: "assistant_response"` to prevent feedback amplification
+- **Session synthesis** — session-synthesis payloads use `source: "session_synthesis"` with dampened plasticity (0.2 increment) and user_prompt-based retrieval; see [Source policy](#source-policy-and-session_synthesis-contract)
 - **User context capture** — original user prompt is included in write payloads, enabling proper question→answer synaptic associations
 
 ```bash
