@@ -262,6 +262,7 @@ def create_note(
     query,
     neurogenesis_dir=None,
     source_node_ids=None,
+    source=None,
 ):
     """Create a new atomic note in the vault (neurogenesis)."""
     from datetime import datetime
@@ -284,6 +285,7 @@ def create_note(
         _sanitize_for_note(str(s), max_len=120) for s in source_notes[:3]
     ))
     source_ids = _serialize_source_node_ids(source_node_ids)
+    safe_source = _yaml_escape(source) if source else '"interactive_query"'
 
     content = f"""---
 title: {safe_title}
@@ -295,6 +297,7 @@ sources: []
 confidence: low
 created_by: bdh-neurogenesis
 generation_query: {safe_query}
+generation_source: {safe_source}
 activated_from: {safe_sources}
 activated_from_ids: {source_ids}
 ---

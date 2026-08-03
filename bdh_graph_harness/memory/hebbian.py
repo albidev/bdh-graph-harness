@@ -19,6 +19,7 @@ from math import exp, log1p
 
 from bdh_graph_harness.config import CONFIG
 from bdh_graph_harness.memory.quality import prune_dormant, try_reactivate
+from bdh_graph_harness.memory.source_policy import get_frequency_increment, get_source_policy
 
 
 # ---------------------------------------------------------------------------
@@ -143,13 +144,11 @@ def hebbian_update(active_notes, state, nodes=None, source=None):
     """
     min_score = CONFIG.get('hebbian_min_score', 0.15)
 
-    # Dampening for derived/secondary signals.
-    if source == "assistant_response":
-        freq_increment = 0.3
-    elif source == "nightly_semantic_consolidation":
-        freq_increment = CONFIG.get('semantic_consolidation_frequency_increment', 0.3)
-    else:
-        freq_increment = 1.0
+    # Dampening for derived/secondary signals — delegated to the explicit
+    # source policy registry (issue #16).  Unknown sources now raise
+    # ValueError instead of silently falling through to full strength.
+    freq_increment = get_frequency_increment(source)
+    source_policy = get_source_policy(source)
 
     # Only notes above threshold participate.
     strong = {nid: s for nid, s in active_notes.items() if s >= min_score}
@@ -178,12 +177,17 @@ def hebbian_update(active_notes, state, nodes=None, source=None):
             updated_keys.add(key)
 
             if key not in state['synapses']:
-                state['synapses'][key] = {
+                syn_entry = {
                     'weight': 0.0,
                     'frequency': 0.0,
                     'last_coactivated': None,
                     'created': now,
                 }
+                # Provenance: store the source label so downstream
+                # consumers can trace where a synapse was born.
+                if source_policy is not None:
+                    syn_entry['source'] = source_policy.provenance_label
+                state['synapses'][key] = syn_entry
 
             syn = state['synapses'][key]
             # Increment weighted by co-activation strength.

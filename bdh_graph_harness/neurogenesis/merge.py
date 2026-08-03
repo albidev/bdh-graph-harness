@@ -84,6 +84,7 @@ def assimilate_evidence(
     source_notes: list[str] | None = None,
     source_node_ids: list[str] | None = None,
     query: str = "",
+    source: str | None = None,
 ) -> dict[str, Any]:
     """Append new evidence to an existing canonical neurogenesis note.
 
@@ -110,11 +111,13 @@ def assimilate_evidence(
 
     sources = ", ".join(str(item) for item in (source_notes or [])[:3]) or "session recovery"
     query_line = " ".join((query or "").split())[:240]
+    provenance_line = f"  - provenance: {source}\n" if source else ""
     section = (
         "\n\n## Assimilated Evidence\n"
         f"- **{date.today().isoformat()}** — {definition.strip()}\n"
         f"  - source: {sources}\n"
         f"  - query: {query_line}\n"
+        f"{provenance_line}"
     )
     updated = _merge_source_node_ids(existing.rstrip() + section + "\n", source_node_ids)
     updated = _update_frontmatter(updated)

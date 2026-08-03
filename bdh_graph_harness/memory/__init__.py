@@ -16,6 +16,12 @@ from bdh_graph_harness.memory.consolidation import (
     prune_stale_dormant,
     consolidation_stats,
 )
+from bdh_graph_harness.memory.source_policy import (
+    get_frequency_increment,
+    get_source_policy,
+    use_user_prompt_for_retrieval,
+    allowed_sources,
+)
 
 __all__ = [
     'load_state', 'save_state', 'merge_states',
@@ -24,4 +30,6 @@ __all__ = [
     'prune_dormant', 'try_reactivate', 'quality_stats',
     'consolidate', 'synaptic_downscaling', 'structural_pruning',
     'prune_stale_dormant', 'consolidation_stats',
+    'get_frequency_increment', 'get_source_policy',
+    'use_user_prompt_for_retrieval', 'allowed_sources',
 ]
