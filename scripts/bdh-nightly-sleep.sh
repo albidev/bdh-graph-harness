@@ -83,8 +83,19 @@ print(f'fonti processate: {semantic.get("sources_processed", "?")}/{semantic.get
 print(f'concetti nuovi: {len(semantic.get("new_concepts", []))}')
 print(f'Hebbian updates: {semantic.get("hebbian_updates", "?")}')
 print(f'fonti fallite: {len(semantic.get("failed_sources", []))}')
-print(f'🧹 BDH structural consolidation cycle #{structural.get("cycles", "?")} complete')
-print(f'synapses: {structural.get("synapses_before", "?")} (pruned: {structural.get("synapses_pruned", "?")})')
+if structural.get("aborted"):
+    print(
+        f'⚠️ BDH structural pruning bloccato — '
+        f'reason: {structural.get("abort_reason", "unknown")}'
+    )
+    print(
+        f'candidati: {structural.get("candidate_synapses", "?")} '
+        f'({structural.get("candidate_prune_ratio", "?")}), '
+        f'prune pianificato: {structural.get("planned_prune_ratio", "?")}'
+    )
+else:
+    print(f'🧹 BDH structural consolidation cycle #{structural.get("cycles", "?")} complete')
+    print(f'synapses: {structural.get("synapses_before", "?")} (pruned: {structural.get("synapses_pruned", "?")})')
 print(f'nodi aggiunti: {format_nodes(added)}')
 print(f'nodi rimossi: {format_nodes(removed)}')
 PY
