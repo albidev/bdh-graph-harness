@@ -64,15 +64,20 @@ def _preserve_synapse_for_persistence(key, valid_node_ids):
     return all(endpoint in valid_node_ids for endpoint in endpoints)
 
 
-def merge_states(disk_state, mem_state, *, valid_node_ids=None):
+def merge_states(
+    disk_state,
+    mem_state,
+    *,
+    valid_node_ids=None,
+    replace_synapses=False,
+):
     """Merge on-disk state with in-memory state to prevent lost updates.
 
     Merge strategy:
-    - synapses: union of keys; for shared keys keep the entry with the more
-      recent ``last_coactivated`` timestamp (falls back to higher frequency,
-      then higher weight). Synapses absent from memory but present on disk
-      are kept ONLY if they have a more recent timestamp than the memory
-      state's ``updated`` — this prevents resurrecting pruned synapses.
+    - synapses: union of keys; for shared keys keep the memory entry. Synapses
+      absent from memory but present on disk are preserved for normal writers.
+      ``replace_synapses=True`` treats memory as a complete snapshot, which is
+      required by consolidation so pruned entries cannot be resurrected.
     - queries: take the maximum of the two values.
     - any other top-level keys: take the memory version (active writer),
       preserving disk-only keys that memory doesn't override.
@@ -92,21 +97,24 @@ def merge_states(disk_state, mem_state, *, valid_node_ids=None):
             key: value for key, value in mem_syn.items()
             if _preserve_synapse_for_persistence(key, valid)
         }
-    merged_syn = {}
+    if replace_synapses:
+        merged['synapses'] = dict(mem_syn)
+    else:
+        merged_syn = {}
 
-    # Keys present in memory: always use the memory version (the active writer
-    # has the most recent state, including decay/consolidation/pruning effects).
-    # Keys only on disk: keep them (created by another writer, e.g. MCP fallback).
-    # This fixes the core bug: shared synapses no longer resurrect pre-decay
-    # weights from disk via frequency-wins. Disk-only synapses are preserved
-    # to support concurrent writers (e.g. MCP fallback writing while server runs).
-    for key in set(disk_syn) | set(mem_syn):
-        if key in mem_syn:
-            merged_syn[key] = mem_syn[key]
-        else:
-            merged_syn[key] = disk_syn[key]
+        # Keys present in memory: always use the memory version (the active writer
+        # has the most recent state, including decay/consolidation/pruning effects).
+        # Keys only on disk: keep them (created by another writer, e.g. MCP fallback).
+        # This fixes the core bug: shared synapses no longer resurrect pre-decay
+        # weights from disk via frequency-wins. Disk-only synapses are preserved
+        # to support concurrent writers (e.g. MCP fallback writing while server runs).
+        for key in set(disk_syn) | set(mem_syn):
+            if key in mem_syn:
+                merged_syn[key] = mem_syn[key]
+            else:
+                merged_syn[key] = disk_syn[key]
 
-    merged['synapses'] = merged_syn
+        merged['synapses'] = merged_syn
 
     # --- queries ------------------------------------------------------------
     merged['queries'] = max(disk_state.get('queries', 0), mem_state.get('queries', 0))
@@ -158,7 +166,13 @@ def reconcile_state_to_nodes(state, nodes):
     return prune_dormant(state, nodes)
 
 
-def save_state(vault_root, state, *, valid_node_ids=None):
+def save_state(
+    vault_root,
+    state,
+    *,
+    valid_node_ids=None,
+    replace_synapses=False,
+):
     """Persist BDH state. Uses fcntl.flock for concurrency safety.
 
     Before writing, reloads the on-disk state and merges it with the
@@ -182,6 +196,7 @@ def save_state(vault_root, state, *, valid_node_ids=None):
                 disk_state,
                 state,
                 valid_node_ids=valid_node_ids,
+                replace_synapses=replace_synapses,
             )
             with open(tmp_path, 'w') as f:
                 json.dump(merged, f, indent=2)
