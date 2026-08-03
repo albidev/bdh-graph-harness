@@ -81,7 +81,16 @@ chroma_collection: notes
 #     # chroma_collection: vault_research_notes
 #     neurogenesis_dir: concepts
 #
-# API vault selection:
+# OKF mode can be scoped per vault instead of globally:
+#   - id: hermes
+#     okf_mode: read
+#     okf_retrieval_policy_enabled: true
+#   - id: episodic
+#     okf_mode: off
+#     okf_retrieval_policy_enabled: false
+# This keeps historical/archive vaults untouched while enabling read-only
+# compatibility where the vault is curated for OKF.
+#
 #   POST /api/query        → body: {"vault_id": "hermes", "query": "..."}
 #   GET  /api/stats        → query param: ?vault_id=hermes
 #   GET  /api/vaults       → lists all configured vaults
@@ -106,6 +115,11 @@ hub_dampening: true    # dampen high-degree hub nodes
 hub_degree_threshold: 15
 max_neighbors_per_hop: 10
 attention_relevance_batch_size: 256 # Chroma embedding IDs per traversal relevance batch
+
+# OKF document compatibility and metadata-aware retrieval.
+# Set okf_mode: read to parse OKF frontmatter and apply the read-only policy.
+# okf_mode: false
+# okf_retrieval_policy_enabled: true
 
 # Integrate-and-Fire attention (Phase 4) — EXPERIMENTAL
 # When true, uses iterative accumulation + per-neuron threshold firing

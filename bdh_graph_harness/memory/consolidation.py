@@ -50,6 +50,65 @@ DEFAULT_PROTECT_BACKBONE = True
 DEFAULT_PROTECT_RECENT_HOURS = 72
 DEFAULT_DORMANT_PERSIST_CYCLES = 3    # remove nodes dormant for N+ cycles
 DEFAULT_PRUNE_DORMANT_NODES = True    # actually remove stale dormant nodes
+# Clean-room shadow state path may explicitly opt into a non-1.0 downscale factor.
+# When absent, the clean-room path uses an effective factor of 1.0 (no extra
+# persisted downscale) regardless of the inherited global default.
+DEFAULT_CLEAN_ROOM_DOWNSCALE_FACTOR = None
+
+
+def _clean_room_basename(state_file: str | None) -> bool:
+    """Return whether the state file resolves to the clean-room shadow path."""
+    if not state_file:
+        return False
+    return 'primary-seeds-v2' in str(state_file).replace('\\', '/')
+
+
+def state_mode(state_file: str | None) -> str:
+    """Classify the state-file basename into a known mode string."""
+    if not state_file:
+        return 'legacy_active'
+    basename = str(state_file).replace('\\', '/').split('/')[-1]
+    if basename == '.bdh-state.json':
+        return 'legacy_active'
+    if 'primary-seeds-v2' in basename:
+        return 'clean_room_shadow'
+    if 'legacy-curated' in basename:
+        return 'curated_experimental'
+    return 'custom'
+
+
+
+def effective_downscale_factor(config: dict | None = None) -> float:
+    """Return the downscale factor to apply for a consolidation cycle.
+
+    The clean-room shadow state path (``.bdh-state-primary-seeds-v2.json``)
+    inherits ``consolidation_downscale_factor`` from the global default when the
+    live config omits it. That 0.90 per-cycle downscale would compound on top of
+    the online Hebbian decay. To prevent this double decay, the clean-room path
+    uses an effective factor of 1.0 (no extra persisted downscale) unless the
+    profile explicitly opts into a different factor via
+    ``consolidation_clean_room_downscale_factor``.
+
+    Parameters
+    ----------
+    config : dict, optional
+        The effective config dict (per-profile merged settings). Defaults to the
+        global ``CONFIG``.
+
+    Returns
+    -------
+    float
+        The downscale factor to apply.
+    """
+    cfg = config if config is not None else CONFIG
+    state_file = cfg.get('hebbian_state_file')
+    if not _clean_room_basename(state_file):
+        return float(cfg.get('consolidation_downscale_factor', DEFAULT_DOWNSCALE_FACTOR))
+    seam = cfg.get('consolidation_clean_room_downscale_factor', DEFAULT_CLEAN_ROOM_DOWNSCALE_FACTOR)
+    if seam is not None:
+        return float(seam)
+    return 1.0
+
 
 
 # ---------------------------------------------------------------------------
@@ -484,7 +543,9 @@ def consolidate(
     nq_before = deepcopy(state.get('node_quality', {}))
     dormant_before = len(state.get('dormant_nodes', []))
     cycles = state.get('consolidation_cycles', 0) + 1
-    factor = cfg.get('consolidation_downscale_factor', DEFAULT_DOWNSCALE_FACTOR)
+    configured_factor = float(cfg.get(
+        'consolidation_downscale_factor', DEFAULT_DOWNSCALE_FACTOR,
+    ))
     floor = cfg.get('consolidation_prune_weight_floor', DEFAULT_PRUNE_WEIGHT_FLOOR)
     effective_now = datetime.now()
     phase_order = [
@@ -493,6 +554,9 @@ def consolidate(
     ]
 
     state['consolidation_cycles'] = cycles
+    # P1: the clean-room shadow path neutralises the inherited downscale factor
+    # (effective 1.0) so consolidation does not compound on top of online decay.
+    factor = effective_downscale_factor(cfg)
     state = synaptic_downscaling(state, factor)
     protected = protected_synapses(state, edges, now=effective_now, config=cfg)
     candidates, pending_confirmation, reasons = _scan_prune_candidates(
@@ -505,31 +569,60 @@ def consolidate(
     candidate_count = len(candidates)
     candidate_ratio = candidate_count / synapses_before if synapses_before else 0.0
     max_ratio = float(cfg.get('consolidation_max_prune_ratio', DEFAULT_MAX_PRUNE_RATIO))
+    max_per_cycle = float(cfg.get(
+        'consolidation_max_prune_per_cycle', DEFAULT_MAX_PRUNE_PER_CYCLE,
+    ))
+    state_target = cfg.get('hebbian_state_file', '.bdh-state.json')
     result_base = {
+        # configured_downscale_factor = inherited/configured value; downscale_factor
+        # is the effective factor actually applied (compatibility alias retained).
+        'configured_downscale_factor': configured_factor,
         'downscale_factor': factor,
         'weight_floor': floor,
         'synapses_before': synapses_before,
         'nodes_before': len(nq_before),
         'dormant_before': dormant_before,
         'cycles': cycles,
+        # Raw candidate set (before any budget cap) — observability of a spike.
         'candidate_synapses': candidate_count,
         'candidate_prune_ratio': round(candidate_ratio, 6),
+        'candidate_ratio_anomaly': bool(candidate_ratio > max_ratio),
+        # Planned mutation = raw candidates after the per-cycle budget cap.
+        'planned_prune_count': 0,
+        'planned_prune_ratio': 0.0,
+        'candidate_reasons': reasons,
         'protected_synapses': len(protected),
         'pending_confirmation': pending_confirmation,
         'phase_order': phase_order,
+        'state_target': state_target,
+        'state_mode': state_mode(state_target),
         'dry_run': dry_run,
         'aborted': False,
         'abort_reason': None,
         'would_commit': True,
+        'decision': 'dry_run' if dry_run else 'commit',
     }
 
-    # Kill switch: quarantine the whole cycle, including downscaling and
-    # candidate counters, rather than committing a suspicious mass prune.
-    if candidate_ratio > max_ratio:
+    # P0: rank raw candidates, cap planned deletion at the per-cycle budget,
+    # then apply the hard safety gate to the *planned* mutation. A raw candidate
+    # spike is surfaced as an anomaly warning, not an abort — the budget bounds
+    # what actually gets deleted.
+    prune_budget = max(1, int(synapses_before * max_per_cycle)) if candidate_count else 0
+    selected = candidates[:prune_budget]
+    planned_count = len(selected)
+    planned_ratio = planned_count / synapses_before if synapses_before else 0.0
+    planned = {**result_base, 'planned_prune_count': planned_count,
+               'planned_prune_ratio': round(planned_ratio, 6)}
+
+    # Kill switch: quarantine the whole cycle when the *planned* (budget-capped)
+    # mutation still exceeds the safety ratio. This cannot be bounded further by
+    # the budget, so committing it would be a suspicious mass prune. The abort
+    # reason keeps the historical value for API/contract compatibility.
+    if planned_ratio > max_ratio:
         state.clear()
         state.update(snapshot)
         return {
-            **result_base,
+            **planned,
             'synapses_after': synapses_before,
             'synapses_pruned': 0,
             'stale_weak_pruned': 0,
@@ -541,17 +634,13 @@ def consolidate(
             'aborted': True,
             'abort_reason': 'candidate_prune_ratio_exceeded',
             'would_commit': False,
+            'decision': 'abort',
             'timestamp': datetime.now().isoformat(),
         }
 
-    max_per_cycle = float(cfg.get(
-        'consolidation_max_prune_per_cycle', DEFAULT_MAX_PRUNE_PER_CYCLE,
-    ))
-    prune_budget = max(1, int(synapses_before * max_per_cycle)) if candidate_count else 0
-    selected = candidates[:prune_budget]
     pruned_count = _apply_prune_candidates(state, selected)
     stale_weak_pruned = sum(reasons.get(key) == 'stale_weak' for key in selected)
-    capped = len(selected) < candidate_count
+    capped = planned_count < candidate_count
 
     old_dormant_cycles = {
         nid: q.get('dormant_cycles', 0)
@@ -584,7 +673,7 @@ def consolidate(
     synapses_after = len(state.get('synapses', {}))
     nq_after = state.get('node_quality', {})
     results = {
-        **result_base,
+        **planned,
         'synapses_after': synapses_after,
         'synapses_pruned': pruned_count,
         'stale_weak_pruned': stale_weak_pruned,

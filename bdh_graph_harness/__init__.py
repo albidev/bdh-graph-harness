@@ -11,6 +11,15 @@ from bdh_graph_harness.config import CONFIG, load_config
 # Graph
 from bdh_graph_harness.graph import build_graph
 
+# OKF document layer
+from bdh_graph_harness.okf import (
+    OKFIssue,
+    OKFExportResult,
+    OKFValidationResult,
+    export_okf_bundle,
+    validate_okf_bundle,
+)
+
 # Retrieval
 from bdh_graph_harness.retrieval.attention import attention
 from bdh_graph_harness.retrieval import get_embeddings
@@ -31,6 +40,11 @@ __all__ = [
     "CONFIG",
     "load_config",
     "build_graph",
+    "OKFIssue",
+    "OKFExportResult",
+    "OKFValidationResult",
+    "export_okf_bundle",
+    "validate_okf_bundle",
     "attention",
     "get_embeddings",
     "hebbian_update",
