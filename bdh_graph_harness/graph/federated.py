@@ -12,6 +12,7 @@ import copy
 import fnmatch
 import logging
 import os
+import posixpath
 from collections import defaultdict
 from pathlib import PurePosixPath
 from typing import Iterable
@@ -23,6 +24,11 @@ from bdh_graph_harness.graph.parser import (
     extract_wikilinks,
     parse_frontmatter,
     parse_json_frontmatter_list,
+)
+from bdh_graph_harness.graph.okf import (
+    extract_markdown_links,
+    is_reserved_filename,
+    parse_okf_frontmatter,
 )
 from bdh_graph_harness.graph.sources import (
     CounterpartSpec,
@@ -45,6 +51,14 @@ def _without_md(path: str) -> str:
 def _with_md(path: str) -> str:
     path = path.replace(os.sep, "/").lstrip("/")
     return path if path.lower().endswith(".md") else f"{path}.md"
+
+
+def _normalise_local_path(path: str) -> str:
+    """Normalize a bundle-local path while rejecting traversal outside it."""
+    normalized = posixpath.normpath(path.replace("\\", "/").lstrip("/"))
+    if normalized in {".", ".."} or normalized.startswith("../"):
+        return ""
+    return _with_md(normalized)
 
 
 def _canonical_for(source_type: str, source_id: str, relative_path: str) -> str:
@@ -188,9 +202,16 @@ def _resolve_target(
     target = target.lstrip("/")
     parent_path = PurePosixPath(document.relative_path).parent
     candidates = [_with_md(target)]
+    relative_candidate = _normalise_local_path(
+        posixpath.join(str(parent_path), target)
+    )
+    if relative_candidate:
+        candidates.append(relative_candidate)
     ancestor = parent_path
     while str(ancestor) != ".":
-        candidates.append(_with_md(str(ancestor / target)))
+        candidate = _normalise_local_path(str(ancestor / target))
+        if candidate:
+            candidates.append(candidate)
         ancestor = ancestor.parent
     # Existing vault notes commonly omit the ``wiki/`` namespace. Preserve
     # those explicit structural aliases for the primary vault only; external
@@ -261,6 +282,7 @@ def build_federated_graph(
     graph_ignore: Iterable[str] | None = None,
     counterparts: Iterable[CounterpartSpec] | None = None,
     neurogenesis_source_edges_enabled: bool = True,
+    okf_mode: bool = False,
 ) -> tuple[dict, dict, list[dict]]:
     """Build a federated graph from multiple Markdown sources.
 
@@ -269,22 +291,26 @@ def build_federated_graph(
     once the source contract is stable.
     """
     ignore_patterns = tuple(graph_ignore or ())
+    okf_enabled = okf_mode not in (False, None, "off")
     documents: list[Document] = []
     for source in sources:
         documents.extend(
             document
             for document in source.scan()
             if not _is_ignored(document, ignore_patterns)
+            and not (okf_enabled and is_reserved_filename(document.relative_path))
         )
 
     documents.sort(key=lambda document: document.id)
     nodes: dict[str, dict] = {}
     by_source_path: dict[tuple[str, str, str], str] = {}
-    raw_links: dict[str, list[tuple[str, str]]] = {}
+    raw_links: dict[str, list[tuple[str, str, str]]] = {}
     frontmatter_by_id: dict[str, dict] = {}
 
     for document in documents:
-        frontmatter = parse_frontmatter(document.content)
+        legacy_frontmatter = parse_frontmatter(document.content)
+        okf_metadata = parse_okf_frontmatter(document.content) if okf_enabled else {}
+        frontmatter = {**legacy_frontmatter, **okf_metadata}
         node_id = document.id
         frontmatter_by_id[node_id] = frontmatter
         nodes[node_id] = {
@@ -303,10 +329,20 @@ def build_federated_graph(
             "writable": document.writable,
             "mtime": os.path.getmtime(document.absolute_path),
         }
+        if okf_enabled:
+            nodes[node_id]["okf"] = okf_metadata
         by_source_path[
             _source_key(document, document.relative_path)
         ] = node_id
-        raw_links[node_id] = extract_wikilinks(document.content)
+        raw_links[node_id] = [
+            (target, display, "wikilink")
+            for target, display in extract_wikilinks(document.content)
+        ]
+        if okf_enabled:
+            raw_links[node_id].extend(
+                (target, display, "markdown")
+                for target, display in extract_markdown_links(document.content)
+            )
 
     edges: dict[str, list[dict]] = defaultdict(list)
     unresolved: list[dict] = []
@@ -314,7 +350,7 @@ def build_federated_graph(
 
     for source_id, links in raw_links.items():
         document = documents_by_id[source_id]
-        for target, display in links:
+        for target, display, syntax in links:
             target_id = _resolve_target(document, target, by_source_path)
             if target_id is None:
                 unresolved.append({
@@ -326,13 +362,16 @@ def build_federated_graph(
                 continue
             if target_id == source_id:
                 continue
-            edges[source_id].append({
+            edge = {
                 "target": target_id,
                 "display": display,
                 "type": "wikilink",
                 "weight": 1.0,
                 "explicit": bool(_normalise_explicit_target(target)),
-            })
+            }
+            if syntax == "markdown":
+                edge["syntax"] = "markdown"
+            edges[source_id].append(edge)
 
     unresolved_explicit_external = [
         item for item in unresolved
@@ -407,7 +446,7 @@ def build_federated_graph(
     for document in documents:
         add_display_label(
             nodes[document.id],
-            frontmatter=parse_frontmatter(document.content),
+            frontmatter=frontmatter_by_id[document.id],
         )
 
     return nodes, dict(edges), unresolved
@@ -422,7 +461,11 @@ def _canonical_state_id(note_id: str, nodes: dict) -> str:
 
 
 def project_runtime_state_to_persisted(
-    persisted_state: dict, runtime_state: dict, nodes: dict,
+    persisted_state: dict,
+    runtime_state: dict,
+    nodes: dict,
+    *,
+    prune_missing: bool = False,
 ) -> dict:
     """Project federated runtime updates back onto raw persisted identities.
 
@@ -430,7 +473,9 @@ def project_runtime_state_to_persisted(
     contain historical relative IDs.  Updating the runtime must therefore not
     serialize it directly: that rewrites keys and can collapse distinct legacy
     records.  This keeps each readable raw key, applies its canonical runtime
-    value, and adds only genuinely new canonical records.
+    value, and adds only genuinely new canonical records.  Consolidation can
+    opt into removing readable raw records that no longer exist in runtime,
+    while the default keeps historical records for non-destructive writers.
     """
     projected = copy.deepcopy(persisted_state)
     runtime_synapses = runtime_state.get("synapses", {})
@@ -450,6 +495,8 @@ def project_runtime_state_to_persisted(
         runtime_synapse = runtime_synapses.get(canonical_key)
         if runtime_synapse is not None:
             raw_synapses[raw_key] = copy.deepcopy(runtime_synapse)
+        elif prune_missing:
+            del raw_synapses[raw_key]
 
     for canonical_key, runtime_synapse in runtime_synapses.items():
         if canonical_key not in represented_synapses:
@@ -538,11 +585,13 @@ def build_configured_graph(config: dict, *, use_cache: bool = True) -> tuple[dic
             neurogenesis_source_edges_enabled=config.get(
                 "neurogenesis_source_edges_enabled", False
             ),
+            okf_mode=config.get("okf_mode", False),
         )
     nodes, edges = build_graph(
         config["vault_path"],
         use_cache=use_cache,
         graph_ignore=config.get("graph_ignore"),
+        okf_mode=config.get("okf_mode", False),
     )
     return nodes, edges, []
 
