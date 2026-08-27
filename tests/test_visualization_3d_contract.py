@@ -259,7 +259,7 @@ def test_pointer_exit_clears_tooltips_and_desktop_rendering_uses_antialiasing_bu
     assert ".linkHoverPrecision(constrained ? 16 : 24)" in graph_init
     assert ".linkDirectionalParticleResolution(constrained ? 8 : 10)" in graph_init
     assert "Math.min(window.devicePixelRatio || 1, constrained ? 1.75 : 2)" in graph_init
-    assert "antialias: true" in graph_init
+    assert "antialias: !constrained" in graph_init
     assert "area.addEventListener('pointerleave'" in graph_init
     assert "clearHoverHighlight();\n    hideTooltip();" in graph_init
     assert "canvas.addEventListener('pointerleave', dismissHoverUI" in graph_init
