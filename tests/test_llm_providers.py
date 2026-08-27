@@ -138,6 +138,128 @@ def test_build_payload_accepts_explicit_per_vault_config(mock_active_notes, mock
     assert 'Authorization' not in headers
 
 
+def test_omlx_provider_resolves_to_local_openai_compatible_endpoint():
+    """oMLX is a local OpenAI-compatible provider with no cloud auth."""
+    from bdh_graph_harness.config import resolve_llm_config
+
+    config = resolve_llm_config({
+        'llm_provider': 'omlx',
+        'llm_model': 'qwen3.8-27b-oq4e-mtp',
+    })
+
+    assert config['llm_provider_label'] == 'oMLX'
+    assert config['llm_transport'] == 'openai-compatible'
+    assert config['llm_endpoint'] == 'http://127.0.0.1:8083/v1/chat/completions'
+    assert config['llm_api_key'] == ''
+
+
+def test_llm_respond_fails_over_to_omlx_after_cloud_429(mock_active_notes, mock_nodes, monkeypatch):
+    """A failed cloud completion is retried through the configured local oMLX fallback."""
+    import urllib.error
+    import urllib.request
+
+    config = {
+        'llm_provider': 'ollama-cloud',
+        'llm_model': 'deepseek-v4-flash:0731',
+        'llm_base_url': 'https://ollama.com/v1',
+        'llm_api_key': 'cloud-key',
+        'llm_temperature': 0.1,
+        'llm_max_ctx': 4096,
+        'llm_fallbacks': [{
+            'provider': 'omlx',
+            'model': 'qwen3.8-27b-oq4e-mtp',
+            'base_url': 'http://127.0.0.1:8083/v1',
+        }],
+    }
+    calls = []
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self):
+            return json.dumps({'choices': [{'message': {'content': 'local response'}}]}).encode()
+
+    def urlopen(req, timeout):
+        calls.append((req.full_url, req.headers.get('Authorization')))
+        if req.full_url.startswith('https://ollama.com/'):
+            raise urllib.error.HTTPError(req.full_url, 429, 'Too Many Requests', {}, None)
+        return Response()
+
+    monkeypatch.setattr(urllib.request, 'urlopen', urlopen)
+    monkeypatch.setattr(bdh_providers, 'retry_with_backoff', lambda fn: fn())
+
+    result = bdh_providers.llm_respond('test query', mock_active_notes, mock_nodes, config=config)
+
+    assert result == 'local response'
+    assert calls == [
+        ('https://ollama.com/v1/chat/completions', 'Bearer cloud-key'),
+        ('http://127.0.0.1:8083/v1/chat/completions', None),
+    ]
+
+
+def test_llm_stream_fails_over_to_omlx_before_emitting_tokens(mock_active_notes, mock_nodes, monkeypatch):
+    """Streaming switches candidates only when the primary fails before output."""
+    import urllib.error
+    import urllib.request
+
+    config = {
+        'llm_provider': 'ollama-cloud',
+        'llm_model': 'deepseek-v4-flash:0731',
+        'llm_base_url': 'https://ollama.com/v1',
+        'llm_api_key': 'cloud-key',
+        'llm_temperature': 0.1,
+        'llm_max_ctx': 4096,
+        'llm_fallbacks': [{
+            'provider': 'omlx',
+            'model': 'qwen3.8-27b-oq4e-mtp',
+            'base_url': 'http://127.0.0.1:8083/v1',
+        }],
+    }
+    calls = []
+
+    class Response:
+        def __init__(self):
+            self.data = (
+                b'data: ' + json.dumps({'choices': [{'delta': {'content': 'local'}}]}).encode()
+                + b'\n\n'
+                + b'data: ' + json.dumps({'choices': [{'delta': {'content': ' stream'}}]}).encode()
+                + b'\n\n'
+                + b'data: [DONE]\n\n'
+            )
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self, size=-1):
+            if not self.data:
+                return b''
+            chunk, self.data = self.data[:size], self.data[size:]
+            return chunk
+
+    def urlopen(req, timeout):
+        calls.append((req.full_url, req.headers.get('Authorization')))
+        if req.full_url.startswith('https://ollama.com/'):
+            raise urllib.error.HTTPError(req.full_url, 429, 'Too Many Requests', {}, None)
+        return Response()
+
+    monkeypatch.setattr(urllib.request, 'urlopen', urlopen)
+
+    result = list(bdh_providers.llm_stream('test query', mock_active_notes, mock_nodes, config=config))
+
+    assert ''.join(result) == 'local stream'
+    assert calls == [
+        ('https://ollama.com/v1/chat/completions', 'Bearer cloud-key'),
+        ('http://127.0.0.1:8083/v1/chat/completions', None),
+    ]
+
+
 def test_local_only_gate_rejects_cloud_provider(monkeypatch):
     monkeypatch.setattr(bdh_config, 'CONFIG', {
         'llm_provider': 'ollama-cloud',

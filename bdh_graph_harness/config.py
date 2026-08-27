@@ -54,9 +54,11 @@ CONFIG = {
     'ollama_url': 'http://127.0.0.1:11434',
     # Embedding (Ollama)
     'embedding_model': 'nomic-embed-text-v2-moe',
-    # LLM provider (ollama | ollama-cloud | openrouter)
+    # LLM provider (ollama | ollama-cloud | openrouter | omlx)
     'llm_provider': 'ollama',
     'llm_model': 'gemma4:12b-mlx',
+    # Ordered completion failover candidates. The primary remains llm_provider.
+    'llm_fallbacks': [],
     # Canonical OpenAI-compatible settings (used by Ollama Cloud/OpenRouter).
     'llm_base_url': '',
     'llm_api_key': '',
@@ -324,6 +326,15 @@ def resolve_llm_config(base_config: dict | None = None, *, require_endpoint: boo
         effective['llm_endpoint'] = endpoint
         if require_endpoint and not base_url:
             raise ValueError('ollama-cloud requires llm_base_url')
+    elif provider == 'omlx':
+        base_url = str(
+            effective.get('llm_base_url') or 'http://127.0.0.1:8083/v1'
+        ).rstrip('/')
+        endpoint = f'{base_url}/chat/completions'
+        effective['llm_base_url'] = base_url
+        effective['llm_provider_label'] = 'oMLX'
+        effective['llm_transport'] = 'openai-compatible'
+        effective['llm_endpoint'] = endpoint
     elif provider == 'openrouter':
         endpoint = str(
             effective.get('openrouter_url')
@@ -347,6 +358,69 @@ def resolve_llm_config(base_config: dict | None = None, *, require_endpoint: boo
         effective['llm_endpoint'] = endpoint
 
     return effective
+
+
+def resolve_llm_candidates(base_config: dict | None = None) -> list[dict]:
+    """Resolve the primary LLM and ordered failover candidates.
+
+    Failover is deliberately owned by BDH rather than Hermes' outer agent
+    loop. Each candidate is an independent OpenAI-compatible or Ollama
+    runtime config, so a cloud outage can fall through to local oMLX without
+    changing global process state.
+    """
+    primary = resolve_llm_config(base_config, require_endpoint=True)
+    candidates = [primary]
+    fallback_specs = primary.get('llm_fallbacks') or []
+    if not isinstance(fallback_specs, list):
+        logger.warning('Ignoring invalid llm_fallbacks value; expected a list')
+        return candidates
+
+    # Do not let the primary nested ``llm`` block override a flat fallback
+    # candidate. Other vault settings remain available to the candidate.
+    fallback_base = dict(base_config or {})
+    fallback_base.pop('llm', None)
+    for index, spec in enumerate(fallback_specs):
+        if not isinstance(spec, dict):
+            logger.warning('Ignoring invalid LLM fallback #%s; expected a mapping', index + 1)
+            continue
+        provider = spec.get('provider')
+        model = spec.get('model')
+        if not provider or not model:
+            logger.warning('Ignoring incomplete LLM fallback #%s', index + 1)
+            continue
+
+        candidate_input = dict(fallback_base)
+        candidate_input.update({
+            'llm_provider': provider,
+            'llm_model': model,
+            # A candidate cannot recursively expand another fallback chain.
+            'llm_fallbacks': [],
+        })
+        if 'temperature' in spec:
+            candidate_input['llm_temperature'] = spec['temperature']
+        if 'max_ctx' in spec:
+            candidate_input['llm_max_ctx'] = spec['max_ctx']
+        if 'timeout' in spec:
+            candidate_input['llm_timeout'] = spec['timeout']
+        if 'api_key' in spec:
+            candidate_input['llm_api_key'] = spec['api_key'] or ''
+        elif 'api_key_env' in spec:
+            candidate_input['llm_api_key'] = os.environ.get(str(spec['api_key_env']), '')
+        elif provider in {'omlx', 'ollama'}:
+            candidate_input['llm_api_key'] = ''
+
+        if 'base_url' in spec:
+            candidate_input['llm_base_url'] = spec['base_url']
+        elif provider == 'omlx':
+            candidate_input['llm_base_url'] = 'http://127.0.0.1:8083/v1'
+        elif provider == 'ollama':
+            candidate_input['ollama_url'] = 'http://127.0.0.1:11434'
+
+        try:
+            candidates.append(resolve_llm_config(candidate_input, require_endpoint=True))
+        except (TypeError, ValueError) as exc:
+            logger.warning('Ignoring invalid LLM fallback #%s: %s', index + 1, exc)
+    return candidates
 
 
 # ---------------------------------------------------------------------------

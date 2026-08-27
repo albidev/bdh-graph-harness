@@ -9,7 +9,7 @@ wire format.
 import json
 
 
-def build_openai_compatible_payload(messages, stream, config):
+def build_openai_compatible_payload(messages, stream, config, *, json_mode=False):
     """Build an OpenAI-compatible chat completion request."""
     payload = {
         "model": config['llm_model'],
@@ -18,12 +18,17 @@ def build_openai_compatible_payload(messages, stream, config):
         "temperature": config['llm_temperature'],
         "max_tokens": config.get('llm_max_tokens', min(config['llm_max_ctx'], 2048)),
     }
-    api_key = config.get('llm_api_key') or config.get('openrouter_key', '')
+    if json_mode:
+        payload['response_format'] = {"type": "json_object"}
+    api_key = config.get('llm_api_key', '')
+    if config.get('llm_provider') == 'openrouter' and not api_key:
+        api_key = config.get('openrouter_key', '')
     headers = {
         'Content-Type': 'application/json',
-        'Authorization': f"Bearer {api_key}",
         'User-Agent': 'BDH-Graph-Harness/1.0',
     }
+    if api_key:
+        headers['Authorization'] = f"Bearer {api_key}"
     if config.get('llm_provider') == 'openrouter':
         headers.update({
             'HTTP-Referer': 'https://github.com/bdh-graph-harness',

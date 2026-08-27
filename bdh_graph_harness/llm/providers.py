@@ -8,7 +8,11 @@ import json
 import re
 import logging
 
-from bdh_graph_harness.config import retry_with_backoff, resolve_llm_config
+from bdh_graph_harness.config import (
+    retry_with_backoff,
+    resolve_llm_candidates,
+    resolve_llm_config,
+)
 import bdh_graph_harness.config as _config
 from bdh_graph_harness.llm.prompt import build_messages, format_context
 from bdh_graph_harness.llm.ollama import build_ollama_payload, parse_ollama_response
@@ -22,7 +26,7 @@ from bdh_graph_harness.llm.openai_compatible import (
 logger = logging.getLogger('bdh.llm')
 
 
-OPENAI_COMPATIBLE_PROVIDERS = frozenset({'openrouter', 'ollama-cloud'})
+OPENAI_COMPATIBLE_PROVIDERS = frozenset({'openrouter', 'ollama-cloud', 'omlx'})
 
 
 def uses_openai_compatible_api(provider=None, config=None):
@@ -74,31 +78,68 @@ def _parse_llm_stream_token(obj, provider='ollama'):
         return obj.get('message', {}).get('content', '')
 
 
+def _request_completion(messages, config=None, *, stream=False, json_mode=False):
+    """Request one completion, falling through configured candidates on error.
+
+    Returns ``(text, runtime_config)``. Retries are applied independently to
+    each candidate; a fallback is attempted only after the candidate exhausts
+    its retries. Secrets never appear in the failover log.
+    """
+    candidates = resolve_llm_candidates(config)
+    if config is None and _config.OLLAMA_LLM_URL:
+        # Preserve the legacy global URL override for the primary only.
+        candidates[0]['llm_endpoint'] = _config.OLLAMA_LLM_URL
+
+    last_error = None
+    for index, runtime_config in enumerate(candidates):
+        provider = runtime_config.get('llm_provider', 'ollama')
+        messages_payload = messages
+        if uses_openai_compatible_api(config=runtime_config):
+            from bdh_graph_harness.llm.openai_compatible import build_openai_compatible_payload
+            data, headers = build_openai_compatible_payload(
+                messages_payload, stream, runtime_config, json_mode=json_mode,
+            )
+        else:
+            data, headers = build_ollama_payload(
+                messages_payload, stream, runtime_config, json_mode=json_mode,
+            )
+
+        def _call():
+            import urllib.request
+            req = urllib.request.Request(runtime_config['llm_endpoint'], data=data, headers=headers)
+            with urllib.request.urlopen(req, timeout=runtime_config.get('llm_timeout', 300)) as resp:
+                result = json.loads(resp.read())
+                return _parse_llm_response(result, provider)
+
+        try:
+            return retry_with_backoff(_call), runtime_config
+        except Exception as exc:
+            last_error = exc
+            if index + 1 < len(candidates):
+                next_config = candidates[index + 1]
+                logger.warning(
+                    'LLM candidate failed (%s/%s): provider=%s model=%s error=%s; '
+                    'failing over to provider=%s model=%s',
+                    index + 1, len(candidates), provider,
+                    runtime_config.get('llm_model'), exc,
+                    next_config.get('llm_provider'), next_config.get('llm_model'),
+                )
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError('No valid LLM candidates configured')
+
+
 def llm_respond(query, active_notes, nodes, config=None,
                 state=None, associative_context=None):
     """Send query + activated note context to LLM, get grounded response."""
     import urllib.request
 
-    runtime_config = resolve_llm_config(config, require_endpoint=True)
-    # Preserve the legacy global URL override used by callers/tests that do
-    # not provide an explicit vault config. Scoped calls must never use it.
-    if config is None and _config.OLLAMA_LLM_URL:
-        runtime_config['llm_endpoint'] = _config.OLLAMA_LLM_URL
-    data, headers = _build_llm_payload(
-        query, active_notes, nodes, stream=False, config=runtime_config,
-        state=state, associative_context=associative_context,
-    )
-    provider = runtime_config.get('llm_provider', 'ollama')
-
-    def _llm_call():
-        req = urllib.request.Request(runtime_config['llm_endpoint'], data=data, headers=headers)
-        timeout = runtime_config.get('llm_timeout', 300)
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            result = json.loads(resp.read())
-            return _parse_llm_response(result, provider)
-
     try:
-        raw = retry_with_backoff(_llm_call)
+        messages = build_messages(
+            query, active_notes, nodes,
+            state=state, associative_context=associative_context,
+        )
+        raw, _runtime_config = _request_completion(messages, config, stream=False)
         # Sanitize: strip <pad> tokens, whitespace-only responses, and guardrail artefacts
         raw = re.sub(r'<pad>', '', raw).strip()
         # Filter known guardrail/refusal artefacts from free models
@@ -130,53 +171,71 @@ def llm_stream(query, active_notes, nodes, config=None,
     """
     import urllib.request
 
-    runtime_config = resolve_llm_config(config, require_endpoint=True)
-    if config is None and _config.OLLAMA_LLM_URL:
-        runtime_config['llm_endpoint'] = _config.OLLAMA_LLM_URL
-    data, headers = _build_llm_payload(
-        query, active_notes, nodes, stream=True, config=runtime_config,
+    messages = build_messages(
+        query, active_notes, nodes,
         state=state, associative_context=associative_context,
     )
-    provider = runtime_config.get('llm_provider', 'ollama')
+    candidates = resolve_llm_candidates(config)
+    if config is None and _config.OLLAMA_LLM_URL:
+        candidates[0]['llm_endpoint'] = _config.OLLAMA_LLM_URL
 
-    req = urllib.request.Request(runtime_config['llm_endpoint'], data=data, headers=headers)
-
-    try:
-        timeout = runtime_config.get('llm_timeout', 300)
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            buffer = b''
-            for chunk in iter(lambda: resp.read(1), b''):
-                buffer += chunk
-                if buffer.endswith(b'\n'):
-                    line = buffer.strip()
-                    buffer = b''
-                    if not line:
-                        continue
-
-                    if uses_openai_compatible_api(provider):
-                        # OpenAI-compatible SSE: lines start with "data: "
-                        if line.startswith(b'data: '):
-                            line = line[6:]
-                        if line == b'[DONE]':
-                            break
-                        try:
-                            obj = json.loads(line)
-                            token = _parse_llm_stream_token(obj, provider)
-                            if token and token != '<pad>':
-                                yield token
-                        except json.JSONDecodeError:
+    for index, runtime_config in enumerate(candidates):
+        provider = runtime_config.get('llm_provider', 'ollama')
+        if uses_openai_compatible_api(config=runtime_config):
+            data, headers = build_openai_compatible_payload(messages, True, runtime_config)
+        else:
+            data, headers = build_ollama_payload(messages, True, runtime_config)
+        req = urllib.request.Request(runtime_config['llm_endpoint'], data=data, headers=headers)
+        yielded = False
+        try:
+            timeout = runtime_config.get('llm_timeout', 300)
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                buffer = b''
+                for chunk in iter(lambda: resp.read(1), b''):
+                    buffer += chunk
+                    if buffer.endswith(b'\n'):
+                        line = buffer.strip()
+                        buffer = b''
+                        if not line:
                             continue
-                    else:
-                        # Ollama NDJSON: one JSON object per line
-                        try:
-                            obj = json.loads(line)
-                            if obj.get('done', False):
+
+                        if uses_openai_compatible_api(provider):
+                            # OpenAI-compatible SSE: lines start with "data: "
+                            if line.startswith(b'data: '):
+                                line = line[6:]
+                            if line == b'[DONE]':
                                 break
-                            token = obj.get('message', {}).get('content', '')
-                            if token and token != '<pad>':
-                                yield token
-                        except json.JSONDecodeError:
-                            continue
-    except Exception as e:
-        logger.error(f"LLM stream failed: {e}", exc_info=True)
-        yield f"[LLM stream error: {e}]"
+                            try:
+                                obj = json.loads(line)
+                                token = _parse_llm_stream_token(obj, provider)
+                                if token and token != '<pad>':
+                                    yielded = True
+                                    yield token
+                            except json.JSONDecodeError:
+                                continue
+                        else:
+                            # Ollama NDJSON: one JSON object per line
+                            try:
+                                obj = json.loads(line)
+                                if obj.get('done', False):
+                                    break
+                                token = obj.get('message', {}).get('content', '')
+                                if token and token != '<pad>':
+                                    yielded = True
+                                    yield token
+                            except json.JSONDecodeError:
+                                continue
+            return
+        except Exception as exc:
+            if index + 1 < len(candidates) and not yielded:
+                next_config = candidates[index + 1]
+                logger.warning(
+                    'LLM stream candidate failed: provider=%s model=%s error=%s; '
+                    'failing over to provider=%s model=%s',
+                    provider, runtime_config.get('llm_model'), exc,
+                    next_config.get('llm_provider'), next_config.get('llm_model'),
+                )
+                continue
+            logger.error(f"LLM stream failed: {exc}", exc_info=True)
+            yield f"[LLM stream error: {exc}]"
+            return
