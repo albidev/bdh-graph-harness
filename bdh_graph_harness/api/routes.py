@@ -733,6 +733,8 @@ async def api_query(request, app_state: dict, ws_clients: set) -> web.Response:
     response_text = (
         await asyncio.to_thread(
             llm_respond, llm_query, active, n, config=ctx.config.settings,
+            state=ctx.state,
+            associative_context=routing.get('associative_context'),
         )
         if respond else ""
     )

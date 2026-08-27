@@ -319,3 +319,60 @@ def test_config_env_var_expansion(monkeypatch):
         config = harness.load_config(f.name)
         os.unlink(f.name)
     assert config['openrouter_key'] == 'secret-key-456'
+
+
+# ---------------------------------------------------------------------------
+# Level B: graph-aware prompt
+# ---------------------------------------------------------------------------
+
+def _build_messages(**overrides):
+    from bdh_graph_harness.llm.prompt import build_messages
+    base = {
+        "active_notes": {'wiki/apple': 0.8, 'wiki/banana': 0.6},
+        "nodes": {
+            'wiki/apple': {'id': 'wiki/apple', 'title': 'Apple', 'text': 'Apple is a fruit.'},
+            'wiki/banana': {'id': 'wiki/banana', 'title': 'Banana', 'text': 'Banana is yellow.'},
+        },
+    }
+    base.update(overrides)
+    return build_messages("what is apple?", **base)
+
+
+def test_levelb_defaults_to_legacy_when_no_extra_signals():
+    """Without state/associative_context, the prompt stays the legacy RAG prompt."""
+    msgs = _build_messages()
+    sys_prompt = msgs[0]["content"]
+    user_prompt = msgs[1]["content"]
+    # Legacy prompt does NOT contain graph-reasoning guidance.
+    assert "Associative context" not in user_prompt
+    assert "quality/dormancy" not in sys_prompt
+    assert "learned to associate" not in sys_prompt
+    # It still carries the activated notes.
+    assert "### Apple" in user_prompt
+
+
+def test_levelb_injects_associative_context_block():
+    """associative_context appears as a labelled, inferred lane in the prompt."""
+    assoc = [
+        {"id": "wiki/banana", "relationship": "co-activated", "weight": 0.9},
+        {"id": "wiki/kiwi", "weight": 0.5},
+    ]
+    msgs = _build_messages(associative_context=assoc)
+    user_prompt = msgs[1]["content"]
+    sys_prompt = msgs[0]["content"]
+    assert "## Associative context" in user_prompt
+    assert "Banana" in user_prompt
+    # Inferred-lane guidance present in system prompt.
+    assert "learned to associate" in sys_prompt
+
+
+def test_levelb_annotates_node_quality_when_state_given():
+    """dormant/quality tags are added when a state dict is supplied."""
+    state = {
+        "dormant_nodes": {"wiki/banana"},
+        "node_quality": {"wiki/apple": {"score": 0.9}},
+    }
+    msgs = _build_messages(state=state)
+    user_prompt = msgs[1]["content"]
+    assert "dormant" in user_prompt
+    assert "quality=0.9" in user_prompt
