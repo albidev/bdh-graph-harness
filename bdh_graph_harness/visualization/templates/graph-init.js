@@ -578,7 +578,15 @@ function installWebGLContextRecovery() {
   renderer.domElement.addEventListener('webglcontextrestored', () => {
     console.warn('[BDH 3D] WebGL context restored — re-syncing and redrawing.');
     graphRenderPaused = false;
+    // Rebuild everything that held GPU resources from the dead context:
+    // post-processing passes (bloom/SMAA) and the cached geometries /
+    // materials behind the custom node objects. Without this the scene
+    // renders nothing (black canvas) even though the data is intact.
     rebuildPostProcessingAfterRestore();
+    if (typeof resetThreeResources === 'function') resetThreeResources();
+    if (graph && typeof graph.refresh === 'function') {
+      try { graph.refresh(); } catch (e) { console.warn('[BDH 3D] refresh after restore failed:', e); }
+    }
     syncThreeVisualState();
     requestGraphRedraw();
     markGraphActive(1200);
