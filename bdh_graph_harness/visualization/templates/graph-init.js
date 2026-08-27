@@ -423,9 +423,11 @@ function createGraphInstance() {
   graph = new ForceGraph3D(container, {
     controlType: 'trackball',
     rendererConfig: {
-      antialias: true,
+      antialias: !constrained,
       alpha: false,
-      powerPreference: 'high-performance',
+      // high-performance can pressure mobile GPUs into context loss loops;
+      // 'default' lets the browser balance power, especially on constrained.
+      powerPreference: constrained ? 'default' : 'high-performance',
     },
   })
     .numDimensions(3)
@@ -537,6 +539,13 @@ function createGraphInstance() {
 // memory pressure, GPU process reset on mobile). Without handling the events
 // three.js keeps logging "Context Lost/Restored" in a loop while the scene
 // stays black. Recovering on 'restored' redraws everything from current state.
+// If the loss/restore cycle keeps repeating, the scene state is stale (GPU
+// resources were invalidated) and only a full reload breaks the loop.
+let _ctxLostCount = 0;
+let _ctxLostWindowStart = 0;
+const _CTX_LOST_BUDGET = 3;      // losses tolerated per window
+const _CTX_LOST_WINDOW_MS = 10000;
+
 function installWebGLContextRecovery() {
   if (!graph || window.__bdhContextRecoveryInstalled) return;
   window.__bdhContextRecoveryInstalled = true;
@@ -544,8 +553,18 @@ function installWebGLContextRecovery() {
   if (!renderer || typeof renderer.domElement.addEventListener !== 'function') return;
   renderer.domElement.addEventListener('webglcontextlost', (event) => {
     if (event) event.preventDefault();
-    console.warn('[BDH 3D] WebGL context lost — pausing graph until restore.');
+    const now = performance.now();
+    if (now - _ctxLostWindowStart > _CTX_LOST_WINDOW_MS) {
+      _ctxLostWindowStart = now;
+      _ctxLostCount = 0;
+    }
+    _ctxLostCount += 1;
+    console.warn('[BDH 3D] WebGL context lost (' + _ctxLostCount + '/' + _CTX_LOST_BUDGET + ' in window) — pausing graph until restore.');
     graph.pauseAnimation();
+    if (_ctxLostCount >= _CTX_LOST_BUDGET) {
+      console.warn('[BDH 3D] Context loss loop detected — forcing full reload.');
+      window.location.reload();
+    }
   }, false);
   renderer.domElement.addEventListener('webglcontextrestored', () => {
     console.warn('[BDH 3D] WebGL context restored — re-syncing and redrawing.');
