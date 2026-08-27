@@ -530,6 +530,30 @@ function createGraphInstance() {
   installGraphResizeObserver();
   installMouseTracking();
   hideWebGLFallback();
+  installWebGLContextRecovery();
+}
+
+// WebGL contexts can be lost and restored by the browser/GPU (tab sleep,
+// memory pressure, GPU process reset on mobile). Without handling the events
+// three.js keeps logging "Context Lost/Restored" in a loop while the scene
+// stays black. Recovering on 'restored' redraws everything from current state.
+function installWebGLContextRecovery() {
+  if (!graph || window.__bdhContextRecoveryInstalled) return;
+  window.__bdhContextRecoveryInstalled = true;
+  const renderer = graph.renderer();
+  if (!renderer || typeof renderer.domElement.addEventListener !== 'function') return;
+  renderer.domElement.addEventListener('webglcontextlost', (event) => {
+    if (event) event.preventDefault();
+    console.warn('[BDH 3D] WebGL context lost — pausing graph until restore.');
+    graph.pauseAnimation();
+  }, false);
+  renderer.domElement.addEventListener('webglcontextrestored', () => {
+    console.warn('[BDH 3D] WebGL context restored — re-syncing and redrawing.');
+    graphRenderPaused = false;
+    syncThreeVisualState();
+    requestGraphRedraw();
+    markGraphActive(1200);
+  }, false);
 }
 
 function configureForces() {
