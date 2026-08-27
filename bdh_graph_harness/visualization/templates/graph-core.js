@@ -901,6 +901,8 @@ function ensureNeuralField() {
 }
 
 function installBloomPass() {
+  if (window.__bdhPostProcessingDisabled) return false;
+  if (new URLSearchParams(window.location.search).has('noblur')) return false;
   if (!graph || bloomPass || !window.THREE || typeof window.UnrealBloomPass !== 'function') return false;
   const composer = typeof graph.postProcessingComposer === 'function'
     ? graph.postProcessingComposer()
