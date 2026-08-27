@@ -145,7 +145,7 @@ The Hebbian layer discovers relationships NOT present as wikilinks. Co-activated
 
 ## LLM Provider Configuration
 
-The harness supports two LLM providers, controlled by `llm_provider` in `bdh-config.yaml`. **Embeddings always stay on Ollama** — only the LLM inference moves.
+The harness supports Ollama, Ollama Cloud, OpenRouter, and local oMLX, controlled by `llm_provider` in `bdh-config.yaml`. **Embeddings always stay on Ollama** — only the LLM inference moves.
 
 ### Ollama (local, default)
 
@@ -170,6 +170,18 @@ llm_api_key: ${OLLAMA_API_KEY}
 - Keep the credential in the environment; do not commit it to the config
 - Embeddings remain on the local Ollama endpoint
 
+### oMLX (local, OpenAI-compatible)
+
+```yaml
+llm_provider: omlx
+llm_model: qwen3.8-27b-oq4e-mtp
+llm_base_url: http://127.0.0.1:8083/v1
+```
+
+- Uses oMLX `/v1/chat/completions`
+- Does not send an `Authorization` header
+- The default local endpoint is `http://127.0.0.1:8083/v1`
+
 ### OpenRouter (cloud, OpenAI-compatible)
 
 ```yaml
@@ -181,6 +193,21 @@ openrouter_key: ${OPENROUTER_API_KEY}  # env var expansion
 
 - Uses OpenAI-compatible `/v1/chat/completions` endpoint
 - Config env var expansion keeps credentials out of committed config
+
+### Cloud-to-local failover
+
+Use `llm_fallbacks` to try ordered candidates after the primary exhausts its
+retries. HTTP `429` is included:
+
+```yaml
+llm_fallbacks:
+  - provider: omlx
+    model: qwen3.8-27b-oq4e-mtp
+    base_url: http://127.0.0.1:8083/v1
+```
+
+This failover belongs to BDH's own runtime and is separate from Hermes'
+outer-agent `fallback_providers` setting.
 
 Start the server with the selected provider credential in the environment:
 

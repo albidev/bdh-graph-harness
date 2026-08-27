@@ -5,7 +5,7 @@ import re
 import sys
 import json
 
-from bdh_graph_harness.config import CONFIG, retry_with_backoff, resolve_llm_config
+from bdh_graph_harness.config import CONFIG, retry_with_backoff, resolve_llm_candidates
 import bdh_graph_harness.config as _config
 from bdh_graph_harness.neurogenesis.dedupe import is_duplicate, is_semantic_duplicate
 from bdh_graph_harness.llm.providers import uses_openai_compatible_api
@@ -58,14 +58,11 @@ def extract_new_concepts(
     """Ask the LLM to identify concepts in its response that aren't in the vault."""
     import urllib.request
 
-    runtime_config = resolve_llm_config(
-        config if config is not None else CONFIG,
-        require_endpoint=config is not None,
-    )
-    # Preserve the legacy test/CLI override when no explicit vault config was
-    # supplied. Scoped API calls always use the derived per-vault endpoint.
+    candidates = resolve_llm_candidates(config if config is not None else CONFIG)
+    # Preserve the legacy test/CLI override for the primary only. Scoped API
+    # calls always use the derived per-vault endpoint.
     if config is None and _config.OLLAMA_LLM_URL:
-        runtime_config['llm_endpoint'] = _config.OLLAMA_LLM_URL
+        candidates[0]['llm_endpoint'] = _config.OLLAMA_LLM_URL
 
     # List existing note titles
     existing_titles = [node['title'] for node in nodes.values()]
@@ -110,29 +107,40 @@ def extract_new_concepts(
 {query}
 """
 
-    data = json.dumps({
-        "model": runtime_config['llm_model'],
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-        "stream": False,
-        **({"format": "json", "options": {"temperature": 0.1, "num_ctx": runtime_config['llm_max_ctx']}}
-           if not uses_openai_compatible_api(config=runtime_config)
-           else {"temperature": 0.1, "max_tokens": runtime_config['llm_max_ctx'],
-                 "response_format": {"type": "json_object"}}),
-    }).encode()
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ]
 
-    provider = runtime_config.get('llm_provider', 'ollama')
-    headers = {'Content-Type': 'application/json'}
-    if uses_openai_compatible_api(config=runtime_config):
-        headers['Authorization'] = f"Bearer {runtime_config.get('llm_api_key') or runtime_config.get('openrouter_key', '')}"
-        headers['User-Agent'] = 'BDH-Graph-Harness/1.0'
-        if provider == 'openrouter':
-            headers['HTTP-Referer'] = 'https://github.com/bdh-graph-harness'
-            headers['X-Title'] = 'BDH Graph Harness'
-
-    def _extract_call():
+    def _extract_call(runtime_config):
+        provider = runtime_config.get('llm_provider', 'ollama')
+        payload = {
+            "model": runtime_config['llm_model'],
+            "messages": messages,
+            "stream": False,
+        }
+        headers = {'Content-Type': 'application/json'}
+        if uses_openai_compatible_api(config=runtime_config):
+            payload.update({
+                "temperature": 0.1,
+                "max_tokens": runtime_config['llm_max_ctx'],
+                "response_format": {"type": "json_object"},
+            })
+            api_key = runtime_config.get('llm_api_key', '')
+            if provider == 'openrouter' and not api_key:
+                api_key = runtime_config.get('openrouter_key', '')
+            if api_key:
+                headers['Authorization'] = f"Bearer {api_key}"
+            headers['User-Agent'] = 'BDH-Graph-Harness/1.0'
+            if provider == 'openrouter':
+                headers['HTTP-Referer'] = 'https://github.com/bdh-graph-harness'
+                headers['X-Title'] = 'BDH Graph Harness'
+        else:
+            payload.update({
+                "format": "json",
+                "options": {"temperature": 0.1, "num_ctx": runtime_config['llm_max_ctx']},
+            })
+        data = json.dumps(payload).encode()
         req = urllib.request.Request(runtime_config['llm_endpoint'], data=data, headers=headers)
         with urllib.request.urlopen(req, timeout=runtime_config.get('llm_timeout', 120)) as resp:
             result = json.loads(resp.read())
@@ -203,11 +211,21 @@ def extract_new_concepts(
                 filtered.append(item)
             return filtered[:5]
 
-    try:
-        return retry_with_backoff(_extract_call)
-    except Exception as e:
-        print(f"  ⚠ Neurogenesis extraction error: {e}", file=sys.stderr)
-        return []
+    for index, runtime_config in enumerate(candidates):
+        try:
+            return retry_with_backoff(lambda: _extract_call(runtime_config))
+        except Exception as e:
+            if index + 1 < len(candidates):
+                next_config = candidates[index + 1]
+                print(
+                    f"  ⚠ LLM candidate failed ({runtime_config.get('llm_provider')}/"
+                    f"{runtime_config.get('llm_model')}): {e}; failing over to "
+                    f"{next_config.get('llm_provider')}/{next_config.get('llm_model')}",
+                    file=sys.stderr,
+                )
+                continue
+            print(f"  ⚠ Neurogenesis extraction error: {e}", file=sys.stderr)
+            return []
 
 
 def slugify(title):

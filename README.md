@@ -143,6 +143,7 @@ bdh_graph_harness/
    - **OpenRouter**: set `OPENROUTER_API_KEY` env var (default config uses `openrouter/free`)
    - **Ollama Cloud**: set `OLLAMA_API_KEY` and point `openrouter_url` to `https://ollama.com/v1/chat/completions`
    - **Local Ollama**: switch `llm_provider: ollama` in config
+   - **Local oMLX**: use `llm_provider: omlx` with the OpenAI-compatible server on `http://127.0.0.1:8083/v1`
    - Any other OpenAI-compatible API works — just set `openrouter_url`, `openrouter_key`, and `llm_model`
 3. **Python 3.11+** with dependencies:
 
@@ -257,6 +258,29 @@ vaults:
 Supported nested fields are `provider`, `model`, `base_url`, `temperature`, `max_ctx`, `max_tokens`, `timeout`, `api_key`, `api_key_env`, and `local_only`. Prefer `api_key_env` for cloud vaults; credentials are resolved from the process environment and are never required in the YAML. `base_url` maps to the native Ollama host for `ollama` and to the OpenAI-compatible base for `ollama-cloud`/`openrouter`. `local_only: true` is a hard privacy gate: it accepts only the `ollama` provider and loopback endpoints (`localhost`, `127.0.0.1`, or `::1`).
 
 The effective provider is resolved per request for REST, streaming, MCP, CLI, and neurogenesis paths. `GET /api/stats?vault_id=...` exposes the selected provider, model, transport, and endpoint for verification.
+
+### LLM failover
+
+BDH can fail over through an ordered list of completion candidates when the
+current provider returns an HTTP error (including `429`) or cannot be reached.
+Retries are exhausted for one candidate before the next candidate is tried.
+For example, keep cloud inference as the primary and use local oMLX as the
+offline fallback:
+
+```yaml
+llm_provider: ollama-cloud
+llm_model: deepseek-v4-flash:0731
+llm_base_url: https://ollama.com/v1
+llm_api_key: ${OLLAMA_API_KEY}
+llm_fallbacks:
+  - provider: omlx
+    model: qwen3.8-27b-oq4e-mtp
+    base_url: http://127.0.0.1:8083/v1
+```
+
+oMLX is local and OpenAI-compatible, so it receives no cloud `Authorization`
+header. The failover is implemented inside BDH; Hermes' separate global
+`fallback_providers` chain does not control BDH subprocess calls.
 
 ### Multi-query retrieval
 

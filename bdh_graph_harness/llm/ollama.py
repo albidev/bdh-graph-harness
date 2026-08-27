@@ -3,7 +3,7 @@
 import json
 
 
-def build_ollama_payload(messages, stream, config):
+def build_ollama_payload(messages, stream, config, *, json_mode=False):
     """Build Ollama-format request payload and headers.
 
     Returns (payload_bytes, headers).
@@ -17,6 +17,8 @@ def build_ollama_payload(messages, stream, config):
             "num_ctx": config['llm_max_ctx'],
         },
     }
+    if json_mode:
+        payload['format'] = 'json'
     headers = {'Content-Type': 'application/json'}
     return json.dumps(payload).encode(), headers
 

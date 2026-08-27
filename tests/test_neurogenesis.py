@@ -351,6 +351,63 @@ def test_extract_new_concepts_accepts_openrouter_single_object(monkeypatch):
     assert result == [{'title': 'Contrastive Learning', 'definition': 'Learns by comparing pairs.'}]
 
 
+def test_extract_new_concepts_fails_over_to_omlx_after_cloud_429(monkeypatch):
+    """Neurogenesis extraction uses the same local failover as normal answers."""
+    import urllib.error
+    import urllib.request as urlreq
+
+    config = {
+        'llm_provider': 'ollama-cloud',
+        'llm_model': 'deepseek-v4-flash:0731',
+        'llm_base_url': 'https://ollama.com/v1',
+        'llm_api_key': 'cloud-key',
+        'llm_temperature': 0.1,
+        'llm_max_ctx': 4096,
+        'llm_fallbacks': [{
+            'provider': 'omlx',
+            'model': 'qwen3.8-27b-oq4e-mtp',
+            'base_url': 'http://127.0.0.1:8083/v1',
+        }],
+    }
+    calls = []
+
+    class Response:
+        def read(self):
+            content = json.dumps({'concepts': [
+                {'title': 'Local Failover', 'definition': 'Uses local inference after a cloud failure.'},
+            ]})
+            return json.dumps({'choices': [{'message': {'content': content}}]}).encode()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    def urlopen(req, timeout):
+        calls.append((req.full_url, req.headers.get('Authorization')))
+        if req.full_url.startswith('https://ollama.com/'):
+            raise urllib.error.HTTPError(req.full_url, 429, 'Too Many Requests', {}, None)
+        return Response()
+
+    monkeypatch.setattr(urlreq, 'urlopen', urlopen)
+    monkeypatch.setattr(bdh_creator, 'retry_with_backoff', lambda fn: fn())
+    monkeypatch.setattr(bdh_creator, 'is_semantic_duplicate', lambda *args: False)
+
+    result = harness.extract_new_concepts(
+        'A durable response', 'query', {}, {}, config=config,
+    )
+
+    assert result == [{
+        'title': 'Local Failover',
+        'definition': 'Uses local inference after a cloud failure.',
+    }]
+    assert calls == [
+        ('https://ollama.com/v1/chat/completions', 'Bearer cloud-key'),
+        ('http://127.0.0.1:8083/v1/chat/completions', None),
+    ]
+
+
 def test_extract_new_concepts_prompt_is_signal_first_and_bounded(monkeypatch):
     """Prompt requests explicit evidence, conservative extraction, and max five concepts."""
     captured = {}
