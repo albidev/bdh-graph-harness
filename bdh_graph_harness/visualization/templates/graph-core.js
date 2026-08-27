@@ -919,6 +919,27 @@ function scheduleBloomInstall() {
     });
 }
 
+// Called after a WebGL context restore: the composer's passes hold shader
+// programs bound to the dead context. Dispose them and null the refs so
+// installBloomPass() can rebuild everything against the new context.
+function disposePostProcessing() {
+  try {
+    if (bloomPass && typeof bloomPass.dispose === 'function') bloomPass.dispose();
+    if (smaaPass && typeof smaaPass.dispose === 'function') smaaPass.dispose();
+    const composer = typeof graph?.postProcessingComposer === 'function'
+      ? graph.postProcessingComposer()
+      : null;
+    if (composer && typeof composer.removePass === 'function') {
+      if (bloomPass) composer.removePass(bloomPass);
+      if (smaaPass) composer.removePass(smaaPass);
+    }
+  } catch (e) {
+    console.warn('[BDH 3D] Post-processing dispose failed (continuing):', e);
+  }
+  bloomPass = null;
+  smaaPass = null;
+}
+
 function ensureThreeResources() {
   if (threeResources.initialized) return threeResources;
   if (!window.THREE) throw new Error('Three.js module is not ready');
