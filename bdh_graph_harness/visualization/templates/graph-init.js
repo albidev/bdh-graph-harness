@@ -571,8 +571,24 @@ function installWebGLContextRecovery() {
     console.warn('[BDH 3D] WebGL context lost (' + _ctxLostCount + '/' + _CTX_LOST_BUDGET + ' in window) — pausing graph until restore.');
     graph.pauseAnimation();
     if (_ctxLostCount >= _CTX_LOST_BUDGET) {
-      console.warn('[BDH 3D] Context loss loop detected — forcing full reload.');
-      window.location.reload();
+      // Repeated losses mean the GPU cannot sustain the current workload
+      // (post-processing compounding with context churn). A reload just
+      // restarts the same crash cycle. Instead: shed the heaviest GPU load
+      // (bloom/SMAA post-processing) and keep rendering direct. The graph
+      // stays usable in flat mode; bloom can be re-enabled on next reload
+      // via ?noblur which skips post-processing entirely.
+      console.warn('[BDH 3D] Context loss loop detected — disabling post-processing (flat render) instead of reloading.');
+      try { if (typeof disposePostProcessing === 'function') disposePostProcessing(); } catch (e) { /* keep going */ }
+      window.__bdhPostProcessingDisabled = true;
+      if (_ctxLostCount >= _CTX_LOST_BUDGET * 4) {
+        // Even flat rendering is being killed — full page reset as last resort,
+        // with a flag so the fresh page skips post-processing entirely.
+        console.warn('[BDH 3D] Flat render still losing context — reloading with ?noblur.');
+        const url = new URL(window.location.href);
+        url.searchParams.set('noblur', '1');
+        window.location.href = url.toString();
+        return;
+      }
     }
   }, false);
   renderer.domElement.addEventListener('webglcontextrestored', () => {
