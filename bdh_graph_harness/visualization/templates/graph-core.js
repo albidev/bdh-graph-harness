@@ -881,6 +881,11 @@ function installBloomPass() {
     ? graph.postProcessingComposer()
     : null;
   if (!composer) return false;
+  // Post-processing is the heaviest GPU load and the #1 trigger of WebGL
+  // context loss on mobile/constrained devices. Render direct on those.
+  if (typeof isConstrainedDevice === 'function' && isConstrainedDevice()) {
+    return true;
+  }
   const container = document.getElementById('graph-container');
   const width = Math.max(1, container ? container.clientWidth : window.innerWidth);
   const height = Math.max(1, container ? container.clientHeight : window.innerHeight);
