@@ -546,6 +546,15 @@ let _ctxLostWindowStart = 0;
 const _CTX_LOST_BUDGET = 3;      // losses tolerated per window
 const _CTX_LOST_WINDOW_MS = 10000;
 
+// After a context restore, cached WebGLShader objects are invalid. The bloom
+// composer holds compiled shader programs that reference the old context, so
+// re-rendering through it throws "shaderSource must be an instance of
+// WebGLShader". Recreating the pass gives three.js fresh, valid programs.
+function rebuildPostProcessingAfterRestore() {
+  if (typeof disposePostProcessing === 'function') disposePostProcessing();
+  installBloomPass();
+}
+
 function installWebGLContextRecovery() {
   if (!graph || window.__bdhContextRecoveryInstalled) return;
   window.__bdhContextRecoveryInstalled = true;
@@ -569,6 +578,7 @@ function installWebGLContextRecovery() {
   renderer.domElement.addEventListener('webglcontextrestored', () => {
     console.warn('[BDH 3D] WebGL context restored — re-syncing and redrawing.');
     graphRenderPaused = false;
+    rebuildPostProcessingAfterRestore();
     syncThreeVisualState();
     requestGraphRedraw();
     markGraphActive(1200);
