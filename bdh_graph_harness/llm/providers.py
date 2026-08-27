@@ -36,13 +36,17 @@ def uses_openai_compatible_api(provider=None, config=None):
     return provider in OPENAI_COMPATIBLE_PROVIDERS
 
 
-def _build_llm_payload(query, active_notes, nodes, stream=False, config=None):
+def _build_llm_payload(query, active_notes, nodes, stream=False, config=None,
+                       state=None, associative_context=None):
     """Build request payload + headers for the configured LLM provider.
 
     Returns (data_bytes, headers_dict).
     """
     runtime_config = resolve_llm_config(config)
-    messages = build_messages(query, active_notes, nodes)
+    messages = build_messages(
+        query, active_notes, nodes,
+        state=state, associative_context=associative_context,
+    )
     provider = runtime_config.get('llm_provider', 'ollama')
 
     if uses_openai_compatible_api(config=runtime_config):
@@ -70,7 +74,8 @@ def _parse_llm_stream_token(obj, provider='ollama'):
         return obj.get('message', {}).get('content', '')
 
 
-def llm_respond(query, active_notes, nodes, config=None):
+def llm_respond(query, active_notes, nodes, config=None,
+                state=None, associative_context=None):
     """Send query + activated note context to LLM, get grounded response."""
     import urllib.request
 
@@ -81,6 +86,7 @@ def llm_respond(query, active_notes, nodes, config=None):
         runtime_config['llm_endpoint'] = _config.OLLAMA_LLM_URL
     data, headers = _build_llm_payload(
         query, active_notes, nodes, stream=False, config=runtime_config,
+        state=state, associative_context=associative_context,
     )
     provider = runtime_config.get('llm_provider', 'ollama')
 
@@ -111,7 +117,8 @@ def llm_respond(query, active_notes, nodes, config=None):
         return f"[LLM error: {e}]"
 
 
-def llm_stream(query, active_notes, nodes, config=None):
+def llm_stream(query, active_notes, nodes, config=None,
+               state=None, associative_context=None):
     """Stream LLM response token-by-token.
 
     Supports Ollama native NDJSON and OpenAI-compatible SSE (Ollama Cloud
@@ -128,6 +135,7 @@ def llm_stream(query, active_notes, nodes, config=None):
         runtime_config['llm_endpoint'] = _config.OLLAMA_LLM_URL
     data, headers = _build_llm_payload(
         query, active_notes, nodes, stream=True, config=runtime_config,
+        state=state, associative_context=associative_context,
     )
     provider = runtime_config.get('llm_provider', 'ollama')
 
