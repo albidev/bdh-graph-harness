@@ -834,6 +834,31 @@ const threeResources = {
   hitProxyMaterial: null,
 };
 
+// After a WebGL context loss, every cached geometry/material holds GPU
+// resources bound to the dead context. three.js rebuilds its own internal
+// buffers on restore, but our cached ones stay dead — meshes referencing
+// them render nothing (black canvas). Reset the cache so
+// ensureThreeResources() recreates everything against the new context.
+function resetThreeResources() {
+  try {
+    Object.values(threeResources.geometries).forEach(g => g && g.dispose && g.dispose());
+    threeResources.nodeMaterials.forEach(m => m && m.dispose && m.dispose());
+    threeResources.linkMaterials.forEach(m => m && m.dispose && m.dispose());
+    threeResources.ringMaterials.forEach(m => m && m.dispose && m.dispose());
+    if (threeResources.ringTexture && threeResources.ringTexture.dispose) threeResources.ringTexture.dispose();
+    if (threeResources.hitProxyMaterial && threeResources.hitProxyMaterial.dispose) threeResources.hitProxyMaterial.dispose();
+  } catch (e) {
+    console.warn('[BDH 3D] Resource dispose after restore failed (continuing):', e);
+  }
+  threeResources.initialized = false;
+  threeResources.geometries = {};
+  threeResources.nodeMaterials = new Map();
+  threeResources.linkMaterials = new Map();
+  threeResources.ringMaterials = new Map();
+  threeResources.ringTexture = null;
+  threeResources.hitProxyMaterial = null;
+}
+
 let bloomPass = null;
 let smaaPass = null;
 let bloomInstallPromise = null;
