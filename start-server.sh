@@ -15,11 +15,15 @@ for varname in OPENCODE_ZEN_API_KEY OPENROUTER_API_KEY OLLAMA_API_KEY; do
     done
   fi
 done
-cd "$(dirname "$0")"
-# Use local config if it exists (not committed), otherwise the public one
-CONFIG="bdh-config.yaml"
-[ -f "bdh-config.local.yaml" ] && CONFIG="bdh-config.local.yaml"
-# Prefer venv python if available, otherwise system python3
-PYTHON="python3"
-[ -x "$HOME/.hermes/hermes-agent/venv/bin/python" ] && PYTHON="$HOME/.hermes/hermes-agent/venv/bin/python"
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+cd "$SCRIPT_DIR"
+# Use local config if it exists (not committed), otherwise the public one.
+CONFIG="$SCRIPT_DIR/bdh-config.yaml"
+[ -f "$SCRIPT_DIR/bdh-config.local.yaml" ] && CONFIG="$SCRIPT_DIR/bdh-config.local.yaml"
+# Use the project venv first so the checked-out package and dependencies match.
+PYTHON="$SCRIPT_DIR/.venv/bin/python"
+if [ ! -x "$PYTHON" ] && [ -x "$HOME/.hermes/hermes-agent/venv/bin/python" ]; then
+  PYTHON="$HOME/.hermes/hermes-agent/venv/bin/python"
+fi
+[ -x "$PYTHON" ] || PYTHON="python3"
 exec "$PYTHON" -m bdh_graph_harness --config "$CONFIG" --serve
