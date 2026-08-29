@@ -784,6 +784,7 @@ async def api_query(request, app_state: dict, ws_clients: set) -> web.Response:
     }, ws_clients)
 
     return web.json_response({
+        'vault_id': ctx.config.id,
         'response': response_text,
         'activated_notes': activated_notes,
         'new_concepts': new_concepts_list,
