@@ -77,6 +77,38 @@ def test_create_note_creates_file(temp_vault):
     assert '## Origin' not in content
 
 
+def test_create_note_materializes_provenance_and_wikilinks(temp_vault):
+    """Generated proposal notes preserve status, evidence, and resolvable source links."""
+    source = os.path.join(temp_vault, 'wiki', 'entities', 'mission-control.md')
+    os.makedirs(os.path.dirname(source), exist_ok=True)
+    with open(source, 'w') as f:
+        f.write('---\ntitle: Mission Control\n---\n\nDashboard.\n')
+
+    note_id = harness.create_note(
+        temp_vault,
+        'Live Activity as Remote Agent-State Mirror',
+        'A native iOS companion mirrors bounded Hermes state through ActivityKit.',
+        ['Mission Control'],
+        'Semantic consolidation of a proposed architecture',
+        neurogenesis_dir='wiki/concepts',
+        source_node_ids=['vault:wiki/entities/mission-control.md'],
+        source='nightly_semantic_consolidation',
+        note_metadata={
+            'status': 'proposed',
+            'implementation_status': 'not_implemented',
+            'evidence': 'session 20260827_195643_143c1918',
+            'source_path': 'memory/learned/bdh-session-recovery-delta.md',
+        },
+    )
+
+    content = open(os.path.join(temp_vault, note_id + '.md')).read()
+    assert 'status: "proposed"' in content
+    assert 'implementation_status: "not_implemented"' in content
+    assert 'evidence: "session 20260827_195643_143c1918"' in content
+    assert 'source_path: "memory/learned/bdh-session-recovery-delta.md"' in content
+    assert '- [[wiki/entities/mission-control|Mission Control]]' in content
+
+
 def test_create_note_persists_canonical_source_ids_without_body_links(temp_vault):
     note_id = harness.create_note(
         temp_vault,

@@ -82,6 +82,30 @@ def test_extract_bdh_candidates_is_fail_closed():
     assert extract_bdh_candidates(content, source_path="memory/learned/other.md") == content
 
 
+def test_extract_bdh_candidates_accepts_proposed_architecture():
+    """Concrete unimplemented designs can enter BDH as explicitly proposed concepts."""
+    content = """## BDH Candidates
+
+### Candidate: Remote agent status mirror
+- kind: architecture_proposal
+- bdh_candidate: true
+- status: proposed
+- implementation_status: not_implemented
+- title: Live Activity as Remote Agent-State Mirror
+- definition: A native iOS companion can mirror bounded Hermes agent state through ActivityKit while Mission Control remains the backend.
+"""
+
+    selected = extract_bdh_candidates(
+        content,
+        source_path="memory/learned/bdh-session-recovery-delta.md",
+    )
+
+    assert "kind: architecture_proposal" in selected
+    assert "status: proposed" in selected
+    assert "implementation_status: not_implemented" in selected
+    assert "Live Activity as Remote Agent-State Mirror" in selected
+
+
 def test_select_candidate_notes_uses_content_hash_and_excludes_noise(tmp_path):
     daily = tmp_path / "wiki" / "entities"
     daily.mkdir(parents=True)
