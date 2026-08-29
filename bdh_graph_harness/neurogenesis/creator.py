@@ -272,6 +272,38 @@ def _serialize_source_node_ids(source_node_ids):
     return json.dumps(result, ensure_ascii=False)
 
 
+def _local_wikilink(source_id, vault_root):
+    """Return a resolvable vault-relative wikilink target for a local node ID."""
+    if not isinstance(source_id, str):
+        return None
+    target = source_id.strip()
+    if target.startswith('external:'):
+        return None
+    if target.startswith('vault:'):
+        target = target[len('vault:'):]
+    target = target.lstrip('/')
+    if target.endswith('.md'):
+        target = target[:-3]
+    if not target or '\n' in target or '\r' in target:
+        return None
+    if not os.path.isfile(os.path.join(vault_root, target + '.md')):
+        return None
+    return target
+
+
+def _wikilink_label(target, vault_root):
+    """Use the source note title when available, otherwise derive a readable label."""
+    path = os.path.join(vault_root, target + '.md')
+    try:
+        with open(path, encoding='utf-8') as handle:
+            for line in handle:
+                if line.startswith('title:'):
+                    return line.partition(':')[2].strip().strip('"')
+    except (OSError, UnicodeDecodeError):
+        pass
+    return target.rsplit('/', 1)[-1].replace('-', ' ').title()
+
+
 def create_note(
     vault_root,
     title,
@@ -281,6 +313,7 @@ def create_note(
     neurogenesis_dir=None,
     source_node_ids=None,
     source=None,
+    note_metadata=None,
 ):
     """Create a new atomic note in the vault (neurogenesis)."""
     from datetime import datetime
@@ -304,6 +337,41 @@ def create_note(
     ))
     source_ids = _serialize_source_node_ids(source_node_ids)
     safe_source = _yaml_escape(source) if source else '"interactive_query"'
+    metadata = note_metadata or {}
+    status = metadata.get('status')
+    implementation_status = metadata.get('implementation_status')
+    evidence = metadata.get('evidence')
+    source_path = metadata.get('source_path')
+    source_session_id = metadata.get('source_session_id')
+    local_links = []
+    for source_id in source_node_ids or []:
+        target = _local_wikilink(source_id, vault_root)
+        if target and target not in {item[0] for item in local_links}:
+            local_links.append((target, _wikilink_label(target, vault_root)))
+    metadata_lines = []
+    if status:
+        metadata_lines.append(f"status: {_yaml_escape(str(status))}")
+    if implementation_status:
+        metadata_lines.append(
+            f"implementation_status: {_yaml_escape(str(implementation_status))}"
+        )
+    if evidence:
+        metadata_lines.append(f"evidence: {_yaml_escape(str(evidence))}")
+    if source_path:
+        metadata_lines.append(f"source_path: {_yaml_escape(str(source_path))}")
+    if source_session_id:
+        metadata_lines.append(
+            f"source_session_id: {_yaml_escape(str(source_session_id))}"
+        )
+    source_entries = []
+    if source_path:
+        source_entries.append(_yaml_escape(str(source_path)))
+    sources_field = f"[{', '.join(source_entries)}]" if source_entries else "[]"
+    related_section = ""
+    if local_links:
+        related_section = "\n## Related notes\n\n" + "\n".join(
+            f"- [[{target}|{label}]]" for target, label in local_links
+        ) + "\n"
 
     content = f"""---
 title: {safe_title}
@@ -311,19 +379,20 @@ created: {now[:10]}
 updated: {now[:10]}
 type: concept
 tags: [neurogenesis, auto-generated]
-sources: []
+sources: {sources_field}
 confidence: low
 created_by: bdh-neurogenesis
 generation_query: {safe_query}
 generation_source: {safe_source}
 activated_from: {safe_sources}
 activated_from_ids: {source_ids}
+{chr(10).join(metadata_lines)}
 ---
 
 # {title}
 
 {definition}
-"""
+{related_section}"""
 
     os.makedirs(os.path.dirname(note_path), exist_ok=True)
     with open(note_path, 'w', encoding='utf-8') as f:

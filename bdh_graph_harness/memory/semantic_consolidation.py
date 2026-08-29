@@ -35,6 +35,8 @@ BDH_ALLOWED_KINDS = {
     "lesson",
     "root_cause",
     "architecture_pattern",
+    "architecture_proposal",
+    "proposed_concept",
 }
 _ACK_RE = re.compile(
     r"^(ok|okay|va bene|bene|perfetto|grazie|thanks|capito|ricevuto|fatto|done|procedi|vai)[.! ]*$",
@@ -73,15 +75,20 @@ def extract_bdh_candidates(content: str, *, source_path: str = "") -> str:
         kind = kind_match.group(1).strip().lower()
         if kind not in BDH_ALLOWED_KINDS:
             continue
-        valid.append(
-            "\n".join(
-                (
-                    f"kind: {kind}",
-                    f"title: {title_match.group(1).strip()}",
-                    f"definition: {definition_match.group(1).strip()}",
-                )
+        normalized = [
+            f"kind: {kind}",
+            f"title: {title_match.group(1).strip()}",
+            f"definition: {definition_match.group(1).strip()}",
+        ]
+        for field in ("status", "implementation_status", "evidence", "source_session"):
+            field_match = re.search(
+                rf"^[-*]\s*{field}:\s*(.+?)\s*$",
+                block,
+                re.MULTILINE | re.IGNORECASE,
             )
-        )
+            if field_match:
+                normalized.append(f"{field}: {field_match.group(1).strip()}")
+        valid.append("\n".join(normalized))
     return "\n\n".join(valid)
 
 
