@@ -454,6 +454,7 @@ async def test_api_query_success(mock_app_setup, monkeypatch):
         assert isinstance(data['activated_notes'], list)
         assert 'new_concepts' in data
         assert 'hebbian_synapses' in data
+        assert data['vault_id'] == 'default'
     finally:
         await client.close()
 
