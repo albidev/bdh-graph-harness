@@ -158,7 +158,7 @@ def test_resolve_nous_portal_runtime_config(monkeypatch):
     monkeypatch.setenv('NOUS_API_KEY', 'nous-test-key')
     config = bdh_config.resolve_llm_config({
         'llm_provider': 'nous',
-        'llm_model': 'stepfun/step-3.7-flash:free',
+        'llm_model': 'upstage/solar-pro4:free',
     })
     assert config['llm_provider_label'] == 'Nous Portal'
     assert config['llm_transport'] == 'openai-compatible'
@@ -182,7 +182,7 @@ def test_resolve_nous_portal_from_hermes_auth_file(monkeypatch, tmp_path):
     monkeypatch.setenv('NOUS_AUTH_FILE', str(auth_path))
     config = bdh_config.resolve_llm_config({
         'llm_provider': 'nous',
-        'llm_model': 'stepfun/step-3.7-flash:free',
+        'llm_model': 'upstage/solar-pro4:free',
     })
     assert config['llm_api_key'] == 'agent-key-from-hermes'
 
@@ -193,13 +193,13 @@ def test_build_payload_nous_omits_undeclared_response_format(mock_active_notes, 
         'test query', mock_active_notes, mock_nodes, stream=False,
         config={
             'llm_provider': 'nous',
-            'llm_model': 'stepfun/step-3.7-flash:free',
+            'llm_model': 'upstage/solar-pro4:free',
             'llm_temperature': 0.1,
             'llm_max_ctx': 4096,
         },
     )
     payload = json.loads(data)
-    assert payload['model'] == 'stepfun/step-3.7-flash:free'
+    assert payload['model'] == 'upstage/solar-pro4:free'
     assert 'response_format' not in payload
     assert headers['Authorization'] == 'Bearer nous-test-key'
     assert headers['User-Agent'].startswith('BDH-Graph-Harness/')
@@ -219,7 +219,7 @@ def test_llm_respond_fails_over_cloud_nous_openrouter_then_omlx(mock_active_note
         'llm_temperature': 0.1,
         'llm_max_ctx': 4096,
         'llm_fallbacks': [
-            {'provider': 'nous', 'model': 'stepfun/step-3.7-flash:free'},
+            {'provider': 'nous', 'model': 'upstage/solar-pro4:free'},
             {'provider': 'openrouter', 'model': 'nvidia/nemotron-3-ultra-550b-a55b:free', 'api_key_env': 'OPENROUTER_API_KEY'},
             {'provider': 'omlx', 'model': 'qwen3.8-27b-oq4e-mtp', 'base_url': 'http://127.0.0.1:8083/v1'},
         ],
