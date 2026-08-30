@@ -30,16 +30,24 @@ vault_path: ./wiki  # path to your Obsidian vault
 
 # LLM
 # Provider values: ollama (local native API), ollama-cloud (Ollama Cloud
-# OpenAI-compatible API), or openrouter (legacy OpenAI-compatible provider).
+# OpenAI-compatible API), openrouter, or omlx (local OpenAI-compatible API).
 ollama_url: http://127.0.0.1:11434
 embedding_model: nomic-embed-text-v2-moe
 llm_provider: ollama
 llm_model: gemma4:12b-mlx
-# Ollama Cloud example:
+# Cloud-first generation with ordered independent fallbacks:
 # llm_provider: ollama-cloud
-# llm_model: deepseek-v4-flash:cloud
+# llm_model: deepseek-v4-pro
 # llm_base_url: https://ollama.com/v1
 # llm_api_key: ${OLLAMA_API_KEY}
+# llm_fallbacks:
+#   - provider: openrouter
+#     model: z-ai/glm-5.2:free
+#     api_key_env: OPENROUTER_API_KEY
+#     base_url: https://openrouter.ai/api/v1
+#   - provider: omlx
+#     model: qwen3.8-27b-oq4e-mtp
+#     base_url: http://127.0.0.1:8083/v1
 # OpenRouter legacy example:
 # llm_provider: openrouter
 # llm_model: openrouter/free
