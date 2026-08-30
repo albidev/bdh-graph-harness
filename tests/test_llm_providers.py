@@ -153,6 +153,105 @@ def test_omlx_provider_resolves_to_local_openai_compatible_endpoint():
     assert config['llm_api_key'] == ''
 
 
+def test_resolve_nous_portal_runtime_config(monkeypatch):
+    """Nous Portal uses its OpenAI-compatible inference endpoint and bearer auth."""
+    monkeypatch.setenv('NOUS_API_KEY', 'nous-test-key')
+    config = bdh_config.resolve_llm_config({
+        'llm_provider': 'nous',
+        'llm_model': 'stepfun/step-3.7-flash:free',
+    })
+    assert config['llm_provider_label'] == 'Nous Portal'
+    assert config['llm_transport'] == 'openai-compatible'
+    assert config['llm_base_url'] == 'https://inference-api.nousresearch.com/v1'
+    assert config['llm_endpoint'] == 'https://inference-api.nousresearch.com/v1/chat/completions'
+    assert config['llm_api_key'] == 'nous-test-key'
+
+
+def test_resolve_nous_portal_from_hermes_auth_file(monkeypatch, tmp_path):
+    """Standalone BDH can consume the short-lived Nous agent key without copying it."""
+    auth_path = tmp_path / 'auth.json'
+    auth_path.write_text(json.dumps({
+        'providers': {
+            'nous': {
+                'agent_key': 'agent-key-from-hermes',
+                'inference_base_url': 'https://inference-api.nousresearch.com/v1',
+            },
+        },
+    }))
+    monkeypatch.delenv('NOUS_API_KEY', raising=False)
+    monkeypatch.setenv('NOUS_AUTH_FILE', str(auth_path))
+    config = bdh_config.resolve_llm_config({
+        'llm_provider': 'nous',
+        'llm_model': 'stepfun/step-3.7-flash:free',
+    })
+    assert config['llm_api_key'] == 'agent-key-from-hermes'
+
+def test_build_payload_nous_omits_undeclared_response_format(mock_active_notes, mock_nodes, monkeypatch):
+    """Nous's documented API is OpenAI-compatible but does not declare JSON mode."""
+    monkeypatch.setenv('NOUS_API_KEY', 'nous-test-key')
+    data, headers = harness._build_llm_payload(
+        'test query', mock_active_notes, mock_nodes, stream=False,
+        config={
+            'llm_provider': 'nous',
+            'llm_model': 'stepfun/step-3.7-flash:free',
+            'llm_temperature': 0.1,
+            'llm_max_ctx': 4096,
+        },
+    )
+    payload = json.loads(data)
+    assert payload['model'] == 'stepfun/step-3.7-flash:free'
+    assert 'response_format' not in payload
+    assert headers['Authorization'] == 'Bearer nous-test-key'
+    assert headers['User-Agent'].startswith('BDH-Graph-Harness/')
+
+
+def test_llm_respond_fails_over_cloud_nous_openrouter_then_omlx(mock_active_notes, mock_nodes, monkeypatch):
+    """BDH walks the full cloud/provider/local chain in order."""
+    import urllib.error
+    import urllib.request
+
+    monkeypatch.setenv('NOUS_API_KEY', 'nous-key')
+    config = {
+        'llm_provider': 'ollama-cloud',
+        'llm_model': 'deepseek-v4-flash:0731',
+        'llm_base_url': 'https://ollama.com/v1',
+        'llm_api_key': 'cloud-key',
+        'llm_temperature': 0.1,
+        'llm_max_ctx': 4096,
+        'llm_fallbacks': [
+            {'provider': 'nous', 'model': 'stepfun/step-3.7-flash:free'},
+            {'provider': 'openrouter', 'model': 'nvidia/nemotron-3-ultra-550b-a55b:free', 'api_key_env': 'OPENROUTER_API_KEY'},
+            {'provider': 'omlx', 'model': 'qwen3.8-27b-oq4e-mtp', 'base_url': 'http://127.0.0.1:8083/v1'},
+        ],
+    }
+    monkeypatch.setenv('OPENROUTER_API_KEY', 'openrouter-key')
+    calls = []
+
+    class Response:
+        def __enter__(self): return self
+        def __exit__(self, *args): return False
+        def read(self):
+            return json.dumps({'choices': [{'message': {'content': 'local response'}}]}).encode()
+
+    def urlopen(req, timeout):
+        calls.append((req.full_url, req.headers.get('Authorization')))
+        if any(req.full_url.startswith(prefix) for prefix in ('https://ollama.com/', 'https://inference-api.nousresearch.com/', 'https://openrouter.ai/')):
+            raise urllib.error.HTTPError(req.full_url, 429, 'Too Many Requests', {}, None)
+        return Response()
+
+    monkeypatch.setattr(urllib.request, 'urlopen', urlopen)
+    monkeypatch.setattr(bdh_providers, 'retry_with_backoff', lambda fn: fn())
+
+    result = bdh_providers.llm_respond('test query', mock_active_notes, mock_nodes, config=config)
+    assert result == 'local response'
+    assert calls == [
+        ('https://ollama.com/v1/chat/completions', 'Bearer cloud-key'),
+        ('https://inference-api.nousresearch.com/v1/chat/completions', 'Bearer nous-key'),
+        ('https://openrouter.ai/api/v1/chat/completions', 'Bearer openrouter-key'),
+        ('http://127.0.0.1:8083/v1/chat/completions', None),
+    ]
+
+
 def test_llm_respond_fails_over_to_omlx_after_cloud_429(mock_active_notes, mock_nodes, monkeypatch):
     """A failed cloud completion is retried through the configured local oMLX fallback."""
     import urllib.error

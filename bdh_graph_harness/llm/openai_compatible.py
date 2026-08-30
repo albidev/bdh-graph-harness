@@ -18,7 +18,9 @@ def build_openai_compatible_payload(messages, stream, config, *, json_mode=False
         "temperature": config['llm_temperature'],
         "max_tokens": config.get('llm_max_tokens', min(config['llm_max_ctx'], 2048)),
     }
-    if json_mode:
+    if json_mode and config.get('llm_provider') != 'nous':
+        # Nous documents the OpenAI chat contract but does not advertise
+        # response_format support; rely on the JSON instruction in the prompt.
         payload['response_format'] = {"type": "json_object"}
     api_key = config.get('llm_api_key', '')
     if config.get('llm_provider') == 'openrouter' and not api_key:
