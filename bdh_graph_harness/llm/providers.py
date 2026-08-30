@@ -61,6 +61,9 @@ def _build_llm_payload(query, active_notes, nodes, stream=False, config=None,
 
 def _parse_llm_response(result, provider='ollama'):
     """Parse LLM response from either provider format."""
+    # Tests/mocks may hand us an already-parsed string; pass it through.
+    if isinstance(result, str):
+        return result
     if uses_openai_compatible_api(provider):
         return parse_openai_compatible_response(result)
     else:
@@ -109,10 +112,17 @@ def _request_completion(messages, config=None, *, stream=False, json_mode=False)
             req = urllib.request.Request(runtime_config['llm_endpoint'], data=data, headers=headers)
             with urllib.request.urlopen(req, timeout=runtime_config.get('llm_timeout', 300)) as resp:
                 result = json.loads(resp.read())
-                return _parse_llm_response(result, provider)
+                return result
 
         try:
-            return retry_with_backoff(_call), runtime_config
+            result = retry_with_backoff(_call)
+            text = _parse_llm_response(result, provider)
+            # A candidate that returned an empty/placeholder body is not a
+            # success: advance to the next provider instead of surfacing a
+            # hollow answer as if it were valid.
+            if not isinstance(text, str) or not text.strip() or text == '[no response]':
+                raise ValueError('provider returned empty content')
+            return text, runtime_config
         except Exception as exc:
             last_error = exc
             if index + 1 < len(candidates):
@@ -141,6 +151,7 @@ def llm_respond(query, active_notes, nodes, config=None,
         )
         raw, _runtime_config = _request_completion(messages, config, stream=False)
         # Sanitize: strip <pad> tokens, whitespace-only responses, and guardrail artefacts
+        raw = raw or ''
         raw = re.sub(r'<pad>', '', raw).strip()
         # Filter known guardrail/refusal artefacts from free models
         guardrail_patterns = [
