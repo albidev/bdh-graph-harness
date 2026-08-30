@@ -26,7 +26,7 @@ from bdh_graph_harness.llm.openai_compatible import (
 logger = logging.getLogger('bdh.llm')
 
 
-OPENAI_COMPATIBLE_PROVIDERS = frozenset({'openrouter', 'ollama-cloud', 'omlx'})
+OPENAI_COMPATIBLE_PROVIDERS = frozenset({'openrouter', 'ollama-cloud', 'nous', 'omlx'})
 
 
 def uses_openai_compatible_api(provider=None, config=None):

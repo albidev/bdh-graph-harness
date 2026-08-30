@@ -10,6 +10,7 @@ import sys
 import json
 import time
 import logging
+from pathlib import Path
 from urllib.parse import urlparse
 
 from dotenv import load_dotenv
@@ -54,7 +55,7 @@ CONFIG = {
     'ollama_url': 'http://127.0.0.1:11434',
     # Embedding (Ollama)
     'embedding_model': 'nomic-embed-text-v2-moe',
-    # LLM provider (ollama | ollama-cloud | openrouter | omlx)
+    # LLM provider (ollama | ollama-cloud | nous | openrouter | omlx)
     'llm_provider': 'ollama',
     'llm_model': 'gemma4:12b-mlx',
     # Ordered completion failover candidates. The primary remains llm_provider.
@@ -236,6 +237,47 @@ def _expand_env_values(value):
     return value
 
 
+
+
+def _resolve_nous_api_key() -> str:
+    """Resolve a Nous Portal inference key without persisting or logging it.
+
+    Prefer an explicit API key for standalone deployments.  When BDH runs next
+    to Hermes, reuse the short-lived agent key from Hermes' auth store so the
+    local config never needs to contain a bearer credential.
+    """
+    for env_name in ('NOUS_API_KEY', 'NOUS_AGENT_KEY', 'NOUS_ACCESS_TOKEN'):
+        value = os.environ.get(env_name, '').strip()
+        if value:
+            return value
+
+    auth_file = os.environ.get('NOUS_AUTH_FILE', '').strip()
+    if auth_file:
+        candidates = [Path(auth_file)]
+    else:
+        hermes_home = os.environ.get('HERMES_HOME', '').strip()
+        candidates = [
+            Path(hermes_home) / 'auth.json' if hermes_home else Path.home() / '.hermes' / 'auth.json',
+            Path.home() / '.hermes' / 'auth.json',
+        ]
+
+    seen = set()
+    for path in candidates:
+        if path in seen or not path.is_file():
+            continue
+        seen.add(path)
+        try:
+            data = json.loads(path.read_text(encoding='utf-8-sig'))
+            provider = (data.get('providers') or {}).get('nous') or {}
+            for key_name in ('agent_key', 'access_token'):
+                value = provider.get(key_name, '')
+                if isinstance(value, str) and value.strip():
+                    return value.strip()
+        except (OSError, ValueError, TypeError):
+            continue
+    return ''
+
+
 def resolve_llm_config(base_config: dict | None = None, *, require_endpoint: bool = False) -> dict:
     """Return an immutable effective LLM config for a vault or global config.
 
@@ -326,6 +368,17 @@ def resolve_llm_config(base_config: dict | None = None, *, require_endpoint: boo
         effective['llm_endpoint'] = endpoint
         if require_endpoint and not base_url:
             raise ValueError('ollama-cloud requires llm_base_url')
+    elif provider == 'nous':
+        base_url = str(
+            effective.get('llm_base_url') or 'https://inference-api.nousresearch.com/v1'
+        ).rstrip('/')
+        effective['llm_base_url'] = base_url
+        effective['llm_api_key'] = effective.get('llm_api_key') or _resolve_nous_api_key()
+        effective['llm_provider_label'] = 'Nous Portal'
+        effective['llm_transport'] = 'openai-compatible'
+        effective['llm_endpoint'] = f'{base_url}/chat/completions'
+        if require_endpoint and not effective['llm_api_key']:
+            raise ValueError('nous requires a runtime API key or Hermes auth file')
     elif provider == 'omlx':
         base_url = str(
             effective.get('llm_base_url') or 'http://127.0.0.1:8083/v1'
@@ -406,11 +459,15 @@ def resolve_llm_candidates(base_config: dict | None = None) -> list[dict]:
             candidate_input['llm_api_key'] = spec['api_key'] or ''
         elif 'api_key_env' in spec:
             candidate_input['llm_api_key'] = os.environ.get(str(spec['api_key_env']), '')
+        elif provider == 'nous':
+            candidate_input['llm_api_key'] = _resolve_nous_api_key()
         elif provider in {'omlx', 'ollama'}:
             candidate_input['llm_api_key'] = ''
 
         if 'base_url' in spec:
             candidate_input['llm_base_url'] = spec['base_url']
+        elif provider == 'nous':
+            candidate_input['llm_base_url'] = 'https://inference-api.nousresearch.com/v1'
         elif provider == 'omlx':
             candidate_input['llm_base_url'] = 'http://127.0.0.1:8083/v1'
         elif provider == 'ollama':
@@ -473,7 +530,7 @@ def load_config(config_path: str | None = None):
     merged.update(resolved_llm)
     OLLAMA_LLM_URL = merged['llm_endpoint']
     provider = merged.get('llm_provider', 'ollama')
-    if provider in {'ollama-cloud', 'openrouter'} and not merged.get('llm_api_key'):
+    if provider in {'ollama-cloud', 'nous', 'openrouter'} and not merged.get('llm_api_key'):
         logger.warning('%s provider selected but no llm_api_key found!', provider)
     logger.info(
         'LLM provider: %s (%s) via %s',
