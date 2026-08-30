@@ -43,7 +43,12 @@ def parse_openai_compatible_response(result):
     """Parse a non-streaming Chat Completions response."""
     choices = result.get('choices', [])
     if choices:
-        return choices[0].get('message', {}).get('content', '[no response]')
+        content = choices[0].get('message', {}).get('content', '[no response]')
+        # Some free/reasoning models return content=None with the payload
+        # in reasoning_content or an empty body. Never feed None downstream.
+        if not isinstance(content, str) or not content.strip():
+            return '[no response]'
+        return content
     return '[no response]'
 
 
