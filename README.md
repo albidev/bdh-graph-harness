@@ -464,13 +464,22 @@ plugins:
 
 ### Hermes skill (CLI)
 
-The harness also ships with a [Hermes Agent](https://hermes-agent.nousresearch.com) skill that lets you query the graph from chat. The skill definition is in [`docs/hermes-skill.md`](docs/hermes-skill.md) — copy it to `~/.hermes/skills/research/bdh-graph-harness/SKILL.md` to activate it.
+The harness ships a canonical, standards-compliant [Hermes Agent skill](https://hermes-agent.nousresearch.com) at [`skills/research/bdh-graph-harness/SKILL.md`](skills/research/bdh-graph-harness/SKILL.md). Install it directly — no manual copy from `docs/` is needed:
 
-Once installed, your Hermes agent can:
-- Query the graph via natural language ("bdh query: how does Hebbian learning work?")
-- Show graph stats and Hebbian synaptic state
-- Start/stop the API server
-- Present answers with source citations
+```bash
+hermes skills install https://raw.githubusercontent.com/albidev/bdh-graph-harness/main/skills/research/bdh-graph-harness/SKILL.md
+hermes skills list
+```
+
+The skill and the **[bdh-hermes-bridge](https://github.com/albidev/bdh-hermes-bridge)** plugin are separate components. The plugin must be installed and enabled independently; it supplies the Hermes-native `bdh_query` and `bdh_stats` tools. The skill does not start BDH or change graph state.
+
+Once the skill and bridge are available, Hermes can:
+- Query the graph through `bdh_query` with source citations
+- Read graph metrics through the read-only `bdh_stats` tool
+- Fall back to the configured BDH CLI/API when native bridge tools are unavailable
+- Inspect Hebbian state and explain the difference between read-only operations and state-mutating retrieval/maintenance
+
+The effective BDH API host and port are deployment-specific. Resolve them from the active configuration or bridge setup; examples elsewhere in this README are not universal defaults.
 
 ## Obsidian Sync Plugin
 
