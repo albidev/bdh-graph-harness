@@ -239,19 +239,9 @@ The top-level `llm_provider`, `llm_model`, `llm_base_url`, and `llm_api_key` val
 
 ```yaml
 vaults:
-  - id: crossnection
-    name: Crossnection
-    path: /path/to/Crossnection
-    llm:
-      provider: ollama
-      model: gemma4:26b-mlx
-      base_url: http://127.0.0.1:11434
-      timeout: 300
-      local_only: true
-
-  - id: core
-    name: Hermes Core
-    path: /path/to/Hermes
+  - id: default
+    name: Default Vault
+    path: /path/to/vault
     # No llm block: inherits the global provider/model configuration.
 ```
 
