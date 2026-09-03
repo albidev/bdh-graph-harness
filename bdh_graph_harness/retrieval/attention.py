@@ -363,6 +363,8 @@ def _get_recently_active_notes(hebbian_state, valid_node_ids=None):
         if last_co:
             try:
                 co_time = datetime.fromisoformat(last_co)
+                if co_time.tzinfo is None:
+                    co_time = co_time.replace(tzinfo=timezone.utc)
                 if co_time > recent_cutoff:
                     pair = safe_decode_synapse_key(key)
                     if pair is None:
