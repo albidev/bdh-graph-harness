@@ -70,6 +70,7 @@ CONFIG = {
     'llm_temperature': 0.3,
     'llm_max_ctx': 4096,
     'llm_timeout': 300,
+    'llm_chat_template_kwargs': {},  # e.g. {"thinking": false} for oMLX
     'embed_timeout': 120,  # also used by ChromaDB Ollama embedding function
     'chroma_path': '.bdh-chroma',
     'chroma_collection': 'notes',
@@ -315,6 +316,7 @@ def resolve_llm_config(base_config: dict | None = None, *, require_endpoint: boo
                 'timeout': 'llm_timeout',
                 'reasoning_effort': 'llm_reasoning_effort',
                 'thinking': 'llm_thinking',
+                'chat_template_kwargs': 'llm_chat_template_kwargs',
             }
             for nested_key, flat_key in aliases.items():
                 if nested_key in nested:
@@ -350,16 +352,19 @@ def resolve_llm_config(base_config: dict | None = None, *, require_endpoint: boo
 
     provider = effective.get('llm_provider', 'ollama')
     if effective.get('llm_local_only'):
-        if provider != 'ollama':
+        if provider not in {'ollama', 'omlx'}:
             raise ValueError(
-                "llm.local_only=true requires the 'ollama' provider; "
+                "llm.local_only=true requires the 'ollama' or 'omlx' provider; "
                 f"refusing provider '{provider}'"
             )
-        local_url = str(effective.get('ollama_url') or '').rstrip('/')
+        if provider == 'ollama':
+            local_url = str(effective.get('ollama_url') or '').rstrip('/')
+        else:
+            local_url = str(effective.get('llm_base_url') or '').rstrip('/')
         local_host = urlparse(local_url).hostname
         if local_host not in {'127.0.0.1', 'localhost', '::1'}:
             raise ValueError(
-                "llm.local_only=true requires an Ollama endpoint on localhost; "
+                "llm.local_only=true requires a localhost endpoint; "
                 f"got '{local_url}'"
             )
     if provider == 'ollama-cloud':
@@ -442,11 +447,34 @@ def resolve_llm_config_for_source(
 
     override = overrides.get(source)
     if not isinstance(override, dict):
+        # No explicit override for this source, but session_synthesis still
+        # defaults to local oMLX to prevent accidental Cloud fallback.
+        if source == 'session_synthesis':
+            nested = dict(source_config.get('llm') or {})
+            nested['provider'] = 'omlx'
+            nested['model'] = nested.get('model', 'qwen3.8-27b-oq4e-mtp')
+            nested['base_url'] = nested.get('base_url', 'http://127.0.0.1:8083/v1')
+            nested['local_only'] = True
+            nested['chat_template_kwargs'] = nested.get('chat_template_kwargs', {'enable_thinking': False, 'thinking': False})
+            nested['llm_fallbacks'] = []
+            source_config['llm'] = nested
+            source_config['llm_fallbacks'] = []
         return resolve_llm_config(source_config)
 
     nested = dict(source_config.get('llm') or {})
     nested.update(override)
     source_config['llm'] = nested
+    # session_synthesis: hard-force local-only oMLX with empty fallback chain.
+    # Even an explicit cloud override must not redirect this bounded workflow
+    # to Nous/OpenRouter. local_only is an extra validation gate only.
+    if source == 'session_synthesis':
+        nested['provider'] = 'omlx'
+        nested['model'] = 'qwen3.8-27b-oq4e-mtp'
+        nested['base_url'] = 'http://127.0.0.1:8083/v1'
+        nested['local_only'] = True
+        nested['chat_template_kwargs'] = {'enable_thinking': False, 'thinking': False}
+        nested['llm_fallbacks'] = []
+        source_config['llm_fallbacks'] = []
     return resolve_llm_config(source_config)
 
 

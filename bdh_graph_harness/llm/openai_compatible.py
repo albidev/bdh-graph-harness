@@ -25,6 +25,11 @@ def build_openai_compatible_payload(messages, stream, config, *, json_mode=False
     if thinking is not None:
         enabled = str(thinking).strip().casefold() in {'1', 'true', 'yes', 'on', 'enabled'}
         payload['thinking'] = {'type': 'enabled' if enabled else 'disabled'}
+    # Forward chat_template_kwargs (e.g. {"thinking": false}) to the
+    # OpenAI-compatible endpoint. Used by oMLX to disable reasoning.
+    chat_kwargs = config.get('llm_chat_template_kwargs')
+    if chat_kwargs and isinstance(chat_kwargs, dict):
+        payload['chat_template_kwargs'] = chat_kwargs
     if json_mode and config.get('llm_provider') != 'nous':
         # Nous documents the OpenAI chat contract but does not advertise
         # response_format support; rely on the JSON instruction in the prompt.

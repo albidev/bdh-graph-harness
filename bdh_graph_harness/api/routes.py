@@ -31,6 +31,9 @@ from bdh_graph_harness.memory.source_policy import (
     use_user_prompt_for_retrieval,
     get_frequency_increment,
 )
+from bdh_graph_harness.memory.synthesis_audit import (
+    record_synthesis_audit,
+)
 from bdh_graph_harness.memory.hebbian import safe_decode_synapse_key
 from bdh_graph_harness.memory.state_store import reconcile_state_to_nodes
 from bdh_graph_harness.memory.consolidation import (
@@ -48,6 +51,7 @@ from bdh_graph_harness.memory.semantic_consolidation import (
 )
 from bdh_graph_harness.llm import llm_respond, llm_stream
 from bdh_graph_harness.neurogenesis import extract_new_concepts, create_note
+from bdh_graph_harness.neurogenesis.creator import append_to_vault_log
 from bdh_graph_harness.neurogenesis.dedupe import find_semantic_match
 from bdh_graph_harness.neurogenesis.merge import (
     MERGE_SIMILARITY_THRESHOLD,
@@ -536,6 +540,7 @@ def run_neurogenesis(
     source: str | None = None,
     note_metadata: dict | None = None,
     llm_config: dict | None = None,
+    synthesis_meta: dict | None = None,
 ) -> list:
     """Run neurogenesis on a completed LLM response.
 
@@ -544,6 +549,9 @@ def run_neurogenesis(
 
     ``llm_config`` optionally selects a source-specific extractor runtime while
     vault persistence and neurogenesis policy continue to use the vault config.
+
+    ``synthesis_meta`` carries session-synthesis audit metadata (session_id,
+    synthesis_id, transcript_sha256) for traceability.
 
     Returns the ``new_concepts_list`` (list of ``{'id', 'title'}`` dicts).
     """
@@ -640,6 +648,8 @@ def run_neurogenesis(
                 }
                 if source is not None:
                     merge_kwargs["source"] = source
+                if synthesis_meta is not None:
+                    merge_kwargs["synthesis_meta"] = synthesis_meta
                 merged = assimilate_evidence(
                     vault_root,
                     canonical_id,
@@ -655,6 +665,11 @@ def run_neurogenesis(
                         'merged': merged['status'] == 'merged',
                         'similarity': match.get('similarity') if match else 1.0,
                     })
+                    # Log merge to vault log
+                    append_to_vault_log(
+                        vault_root,
+                        f"Merge: '{title}' → '{canonical_id}' (source={source})",
+                    )
                     continue
             elif canonical_id is not None and canonical_id in n:
                 print(
@@ -670,6 +685,8 @@ def run_neurogenesis(
                 note_kwargs["note_metadata"] = note_metadata
             if source is not None:
                 note_kwargs["source"] = source
+            if synthesis_meta is not None:
+                note_kwargs["synthesis_meta"] = synthesis_meta
             new_note_id = create_note(
                 vault_root, title, definition, active_titles, query,
                 **note_kwargs,
@@ -719,6 +736,53 @@ async def api_query(request, app_state: dict, ws_clients: set) -> web.Response:
     query_variants = data.get('query_variants') or None
     llm_config = resolve_llm_config_for_source(ctx.config.settings, source)
 
+    # Parse synthesis metadata from the request body.
+    # The bridge sends audit metadata under data['metadata'] as:
+    #   { session_id, synthesis_id, transcript_sha256 }
+    # We accept the pre-computed hash directly — the graph side never
+    # requests or hashes raw transcript.
+    synthesis_meta = None
+    raw_metadata = data.get('metadata')
+    if source == 'session_synthesis' and raw_metadata is not None and not isinstance(raw_metadata, dict):
+        return web.json_response({'error': 'Invalid session synthesis metadata'}, status=400)
+    if source == 'session_synthesis' and isinstance(raw_metadata, dict):
+        raw_session_id = raw_metadata.get('session_id')
+        raw_synthesis_id = raw_metadata.get('synthesis_id')
+        raw_transcript_sha = raw_metadata.get('transcript_sha256')
+        raw_queued_at = raw_metadata.get('queued_at')
+        metadata_errors = []
+        session_id = raw_session_id.strip() if isinstance(raw_session_id, str) else ''
+        synthesis_id = raw_synthesis_id.strip() if isinstance(raw_synthesis_id, str) else ''
+        transcript_sha = raw_transcript_sha if isinstance(raw_transcript_sha, str) else ''
+        if not session_id:
+            metadata_errors.append('session_id')
+        if not synthesis_id:
+            metadata_errors.append('synthesis_id')
+        if not re.fullmatch(r'[0-9a-fA-F]{64}', transcript_sha):
+            metadata_errors.append('transcript_sha256')
+        if metadata_errors:
+            record_synthesis_audit(
+                ctx.config.path,
+                session_id=session_id,
+                synthesis_id=synthesis_id,
+                transcript_sha256=transcript_sha if re.fullmatch(r'[0-9a-fA-F]{64}', transcript_sha) else '',
+                source=source,
+                vault=ctx.config.id,
+                provider=llm_config.get('llm_provider', 'unknown'),
+                model=llm_config.get('llm_model', 'unknown'),
+                hebbian_updates=0,
+                outcome='invalid',
+                reason='invalid metadata fields: ' + ', '.join(metadata_errors),
+                queued_at=str(raw_queued_at) if raw_queued_at is not None else '',
+            )
+            return web.json_response({'error': 'Invalid session synthesis metadata'}, status=400)
+        synthesis_meta = {
+            'session_id': session_id,
+            'synthesis_id': synthesis_id,
+            'transcript_sha256': transcript_sha,
+            'queued_at': str(raw_queued_at) if raw_queued_at is not None else '',
+        }
+
     llm_query = query
     if user_prompt:
         llm_query = f"{user_prompt}\n\n---\n\n{query}"
@@ -755,13 +819,67 @@ async def api_query(request, app_state: dict, ws_clients: set) -> web.Response:
         if respond else ""
     )
 
-    new_concepts_list = (
-        run_neurogenesis(
-            response_text, query, active, ctx, source=source,
-            llm_config=llm_config,
-        )
-        if learn and respond else []
+    new_concepts_list = []
+    synthesis_failed = (
+        source == 'session_synthesis'
+        and synthesis_meta is not None
+        and isinstance(response_text, str)
+        and (response_text.startswith('[LLM error:') or response_text == '[no response from LLM]')
     )
+    if learn and respond and not synthesis_failed:
+        try:
+            new_concepts_list = run_neurogenesis(
+                response_text, query, active, ctx, source=source,
+                llm_config=llm_config, synthesis_meta=synthesis_meta,
+            )
+        except Exception as exc:
+            if synthesis_meta and source == 'session_synthesis':
+                record_synthesis_audit(
+                    ctx.config.path,
+                    session_id=synthesis_meta['session_id'],
+                    synthesis_id=synthesis_meta['synthesis_id'],
+                    transcript_sha256=synthesis_meta.get('transcript_sha256', ''),
+                    source=source,
+                    vault=ctx.config.id,
+                    provider=llm_config.get('llm_provider', 'unknown'),
+                    model=llm_config.get('llm_model', 'unknown'),
+                    hebbian_updates=len(hebbian_updates),
+                    outcome='failed',
+                    reason=f'neurogenesis {type(exc).__name__}',
+                    queued_at=synthesis_meta.get('queued_at', ''),
+                )
+            raise
+
+    # Record synthesis audit entry when synthesis metadata is present
+    if synthesis_meta and source == 'session_synthesis':
+        concept_ids = [c.get('id', '') for c in new_concepts_list if c.get('id')]
+        merged_ids = [c['id'] for c in new_concepts_list if c.get('merged')]
+        created_ids = [c['id'] for c in new_concepts_list if not c.get('merged')]
+        if synthesis_failed:
+            outcome = 'failed'
+        elif new_concepts_list:
+            if merged_ids and not created_ids:
+                outcome = 'merged'
+            else:
+                outcome = 'created'
+        else:
+            outcome = 'noop'
+            if not concept_ids:
+                outcome = 'noop'
+        record_synthesis_audit(
+            ctx.config.path,
+            session_id=synthesis_meta['session_id'],
+            synthesis_id=synthesis_meta['synthesis_id'],
+            transcript_sha256=synthesis_meta.get('transcript_sha256', ''),
+            source=source or 'session_synthesis',
+            vault=ctx.config.id,
+            provider=llm_config.get('llm_provider', 'unknown'),
+            model=llm_config.get('llm_model', 'unknown'),
+            hebbian_updates=len(hebbian_updates),
+            outcome=outcome,
+            concept_ids=concept_ids,
+            queued_at=synthesis_meta.get('queued_at', ''),
+        )
 
     # Neurogenesis runs after the initial activation broadcast. Send a second
     # ordered activation event so WebSocket clients render newly created notes
