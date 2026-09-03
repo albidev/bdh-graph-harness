@@ -314,8 +314,14 @@ def create_note(
     source_node_ids=None,
     source=None,
     note_metadata=None,
+    synthesis_meta=None,
 ):
-    """Create a new atomic note in the vault (neurogenesis)."""
+    """Create a new atomic note in the vault (neurogenesis).
+
+    ``synthesis_meta`` carries session-synthesis audit metadata:
+    session_id, synthesis_id, transcript_sha256. It is persisted in
+    frontmatter for traceability without storing the raw transcript.
+    """
     from datetime import datetime
 
     neurogenesis_dir = neurogenesis_dir or CONFIG['neurogenesis_dir']
@@ -343,6 +349,13 @@ def create_note(
     evidence = metadata.get('evidence')
     source_path = metadata.get('source_path')
     source_session_id = metadata.get('source_session_id')
+
+    # Synthesis audit metadata (session_id, synthesis_id, transcript hash)
+    synth_session_id = synthesis_meta.get('session_id') if synthesis_meta else None
+    synth_id = synthesis_meta.get('synthesis_id') if synthesis_meta else None
+    transcript_sha = synthesis_meta.get('transcript_sha256') if synthesis_meta else None
+    queued_at = synthesis_meta.get('queued_at') if synthesis_meta else None
+
     local_links = []
     for source_id in source_node_ids or []:
         target = _local_wikilink(source_id, vault_root)
@@ -362,6 +375,22 @@ def create_note(
     if source_session_id:
         metadata_lines.append(
             f"source_session_id: {_yaml_escape(str(source_session_id))}"
+        )
+    if synth_session_id:
+        metadata_lines.append(
+            f"synthesis_session_id: {_yaml_escape(str(synth_session_id))}"
+        )
+    if synth_id:
+        metadata_lines.append(
+            f"synthesis_id: {_yaml_escape(str(synth_id))}"
+        )
+    if transcript_sha:
+        metadata_lines.append(
+            f"transcript_sha256: {_yaml_escape(str(transcript_sha))}"
+        )
+    if queued_at:
+        metadata_lines.append(
+            f"queued_at: {_yaml_escape(str(queued_at))}"
         )
     source_entries = []
     if source_path:
