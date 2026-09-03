@@ -48,6 +48,16 @@ def load_state(vault_root):
             fcntl.flock(lock_f, fcntl.LOCK_UN)
 
 
+def _endpoint_exists_in_nodes(endpoint: str, valid_node_ids: set[str]) -> bool:
+    """Accept both canonical federated and vault-relative persisted IDs."""
+    if endpoint in valid_node_ids:
+        return True
+    if endpoint.startswith('vault:'):
+        relative = endpoint.removeprefix('vault:')
+        return relative in valid_node_ids or relative.removesuffix('.md') in valid_node_ids
+    return False
+
+
 def _preserve_synapse_for_persistence(key, valid_node_ids):
     """Keep opaque synapses; prune decodable state with missing endpoints.
 
@@ -61,7 +71,7 @@ def _preserve_synapse_for_persistence(key, valid_node_ids):
     endpoints = safe_decode_synapse_key(key)
     if endpoints is None:
         return True
-    return all(endpoint in valid_node_ids for endpoint in endpoints)
+    return all(_endpoint_exists_in_nodes(endpoint, valid_node_ids) for endpoint in endpoints)
 
 
 def merge_states(
