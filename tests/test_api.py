@@ -603,9 +603,10 @@ async def test_api_query_broadcasts_neurogenesis_after_activation(mock_app_setup
 
 
 @pytest.mark.asyncio
-async def test_api_query_uses_source_llm_override_without_mutating_global(
+async def test_api_query_session_synthesis_forced_to_omlx(
     mock_app_setup, monkeypatch,
 ):
+    """session_synthesis source is forced to local-only oMLX at the API layer."""
     from aiohttp.test_utils import TestClient, TestServer
 
     nodes, edges, collection, state, config, _ = mock_app_setup
@@ -618,8 +619,6 @@ async def test_api_query_uses_source_llm_override_without_mutating_global(
             "provider": "ollama-cloud",
             "model": "deepseek-v4-flash:cloud",
             "temperature": 0.1,
-            "reasoning_effort": "low",
-            "thinking": "enabled",
         },
     }
     observed = []
@@ -641,10 +640,11 @@ async def test_api_query_uses_source_llm_override_without_mutating_global(
             json={"query": "session synthesis test", "source": "session_synthesis"},
         )
         assert response.status == 200
-        assert observed[0]["llm_model"] == "deepseek-v4-flash:cloud"
-        assert observed[0]["llm_temperature"] == 0.1
-        assert observed[0]["llm_reasoning_effort"] == "low"
-        assert observed[0]["llm_thinking"] == "enabled"
+        # session_synthesis always resolves to local oMLX
+        assert observed[0]["llm_provider"] == "omlx"
+        assert observed[0]["llm_model"] == "qwen3.8-27b-oq4e-mtp"
+        assert observed[0]["llm_local_only"] is True
+        # Global config NOT mutated
         assert config["llm_model"] == "deepseek-v4-pro"
         assert config["llm_temperature"] == 0.3
     finally:
