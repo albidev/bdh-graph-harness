@@ -342,6 +342,7 @@ def test_attention_traverses_strong_hebbian_edge_without_static_wikilink(monkeyp
     monkeypatch.setitem(config.CONFIG, "hebbian_dynamic_top_n", 3)
     monkeypatch.setitem(config.CONFIG, "hebbian_dynamic_gain", 1.0)
     monkeypatch.setitem(config.CONFIG, "hebbian_dynamic_hop_decay", 0.5)
+    monkeypatch.setitem(config.CONFIG, "hebbian_seed_boost", False)
 
     active = attention.attention(
         "q",
