@@ -346,8 +346,8 @@ def _get_recently_active_notes(hebbian_state, valid_node_ids=None):
     if not synapses:
         return set()
 
-    from datetime import datetime, timedelta
-    now = datetime.now()
+    from datetime import datetime, timedelta, timezone
+    now = datetime.now(timezone.utc)
     window_minutes = CONFIG.get('hebbian_boost_window_minutes', 10)
     recent_cutoff = now - timedelta(minutes=window_minutes)
     min_weight = CONFIG.get('hebbian_boost_min_weight', 0.15)
