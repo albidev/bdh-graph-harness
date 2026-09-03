@@ -600,3 +600,52 @@ async def test_api_query_broadcasts_neurogenesis_after_activation(mock_app_setup
         assert events[2]['sequence'] > events[1]['sequence']
     finally:
         await client.close()
+
+
+@pytest.mark.asyncio
+async def test_api_query_uses_source_llm_override_without_mutating_global(
+    mock_app_setup, monkeypatch,
+):
+    from aiohttp.test_utils import TestClient, TestServer
+
+    nodes, edges, collection, state, config, _ = mock_app_setup
+    config["llm_provider"] = "ollama-cloud"
+    config["llm_model"] = "deepseek-v4-pro"
+    config["llm_temperature"] = 0.3
+    config["llm_base_url"] = "https://ollama.com/v1"
+    config["llm_source_overrides"] = {
+        "session_synthesis": {
+            "provider": "ollama-cloud",
+            "model": "deepseek-v4-flash:cloud",
+            "temperature": 0.1,
+            "reasoning_effort": "low",
+            "thinking": "enabled",
+        },
+    }
+    observed = []
+    monkeypatch.setattr(
+        bdh_routes,
+        "llm_respond",
+        lambda query, active, graph_nodes, **kwargs: (
+            observed.append(kwargs["config"]) or "Mock LLM response"
+        ),
+    )
+    app = _capture_app(monkeypatch, config, nodes, edges, collection, state)
+    server = TestServer(app)
+    client = TestClient(server)
+    await client.start_server()
+
+    try:
+        response = await client.post(
+            "/api/query",
+            json={"query": "session synthesis test", "source": "session_synthesis"},
+        )
+        assert response.status == 200
+        assert observed[0]["llm_model"] == "deepseek-v4-flash:cloud"
+        assert observed[0]["llm_temperature"] == 0.1
+        assert observed[0]["llm_reasoning_effort"] == "low"
+        assert observed[0]["llm_thinking"] == "enabled"
+        assert config["llm_model"] == "deepseek-v4-pro"
+        assert config["llm_temperature"] == 0.3
+    finally:
+        await client.close()
