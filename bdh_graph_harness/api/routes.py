@@ -16,7 +16,12 @@ from datetime import datetime
 
 from aiohttp import web
 
-from bdh_graph_harness.config import CONFIG, logger, resolve_llm_config
+from bdh_graph_harness.config import (
+    CONFIG,
+    logger,
+    resolve_llm_config,
+    resolve_llm_config_for_source,
+)
 from bdh_graph_harness.visualization import render_viz_html, get_template_path
 from bdh_graph_harness.retrieval.attention import attention
 from bdh_graph_harness.retrieval.shadow import append_dynamic_shadow, build_dynamic_shadow
@@ -530,16 +535,21 @@ def run_neurogenesis(
     response_text: str, query: str, active: dict, ctx, max_concepts: int | None = None,
     source: str | None = None,
     note_metadata: dict | None = None,
+    llm_config: dict | None = None,
 ) -> list:
     """Run neurogenesis on a completed LLM response.
 
     If ``neurogenesis_enabled`` is True in the vault config, extracts new
     concepts from the response and creates notes in the vault.
 
+    ``llm_config`` optionally selects a source-specific extractor runtime while
+    vault persistence and neurogenesis policy continue to use the vault config.
+
     Returns the ``new_concepts_list`` (list of ``{'id', 'title'}`` dicts).
     """
     new_concepts_list = []
     config = ctx.config.settings
+    extractor_config = llm_config if llm_config is not None else config
     # Issue #16 gap-2: honour source_policy.allow_neurogenesis instead of
     # hard-coding only the 'cron' source.  None (interactive) defaults to
     # allowing neurogenesis; unknown sources raise at the policy boundary.
@@ -580,7 +590,7 @@ def run_neurogenesis(
             new_concepts = extract_new_concepts(
                 response_text, query, active, n,
                 allow_existing=True,
-                config=config,
+                config=extractor_config,
             ) or []
         except TypeError as exc:
             # Keep compatibility with test adapters and third-party wrappers
@@ -700,12 +710,14 @@ async def api_query(request, app_state: dict, ws_clients: set) -> web.Response:
     ctx, err = _resolve_vault_ctx(app_state, _vault_id_from_body(data))
     if err:
         return err
+    assert ctx is not None
 
     source = data.get('source')
     learn = data.get('learn', True) is not False
     respond = data.get('respond', True) is not False
     user_prompt = data.get('user_prompt', '').strip()
     query_variants = data.get('query_variants') or None
+    llm_config = resolve_llm_config_for_source(ctx.config.settings, source)
 
     llm_query = query
     if user_prompt:
@@ -736,7 +748,7 @@ async def api_query(request, app_state: dict, ws_clients: set) -> web.Response:
     n = ctx.nodes
     response_text = (
         await asyncio.to_thread(
-            llm_respond, llm_query, active, n, config=ctx.config.settings,
+            llm_respond, llm_query, active, n, config=llm_config,
             state=ctx.state,
             associative_context=routing.get('associative_context'),
         )
@@ -744,7 +756,10 @@ async def api_query(request, app_state: dict, ws_clients: set) -> web.Response:
     )
 
     new_concepts_list = (
-        run_neurogenesis(response_text, query, active, ctx, source=source)
+        run_neurogenesis(
+            response_text, query, active, ctx, source=source,
+            llm_config=llm_config,
+        )
         if learn and respond else []
     )
 

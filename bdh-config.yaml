@@ -55,6 +55,14 @@ llm_model: gemma4:12b-mlx
 # openrouter_key: ${OPENROUTER_API_KEY}
 llm_temperature: 0.3
 llm_max_ctx: 4096
+# Optional source-specific LLM overrides. These do not change the global model.
+# llm_source_overrides:
+#   session_synthesis:
+#     provider: ollama-cloud
+#     model: deepseek-v4-flash:cloud
+#     temperature: 0.1
+#     reasoning_effort: low
+#     thinking: enabled
 llm_timeout: 300
 
 # ChromaDB
