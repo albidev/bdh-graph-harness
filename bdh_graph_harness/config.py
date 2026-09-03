@@ -313,6 +313,8 @@ def resolve_llm_config(base_config: dict | None = None, *, require_endpoint: boo
                 'max_ctx': 'llm_max_ctx',
                 'max_tokens': 'llm_max_tokens',
                 'timeout': 'llm_timeout',
+                'reasoning_effort': 'llm_reasoning_effort',
+                'thinking': 'llm_thinking',
             }
             for nested_key, flat_key in aliases.items():
                 if nested_key in nested:
@@ -411,6 +413,41 @@ def resolve_llm_config(base_config: dict | None = None, *, require_endpoint: boo
         effective['llm_endpoint'] = endpoint
 
     return effective
+
+
+def resolve_llm_config_for_source(
+    base_config: dict | None = None,
+    source: str | None = None,
+) -> dict:
+    """Resolve an LLM config with an optional source-specific override.
+
+    Overrides are operator configuration, not request-controlled model names.
+    They are useful for bounded workflows such as ``session_synthesis`` while
+    preserving the global runtime model for normal interactive queries.
+
+    Example::
+
+        llm_source_overrides:
+          session_synthesis:
+            provider: ollama-cloud
+            model: deepseek-v4-flash:cloud
+            temperature: 0.1
+            reasoning_effort: low
+            thinking: enabled
+    """
+    source_config = dict(base_config or CONFIG)
+    overrides = source_config.pop('llm_source_overrides', {})
+    if not source or not isinstance(overrides, dict):
+        return resolve_llm_config(source_config)
+
+    override = overrides.get(source)
+    if not isinstance(override, dict):
+        return resolve_llm_config(source_config)
+
+    nested = dict(source_config.get('llm') or {})
+    nested.update(override)
+    source_config['llm'] = nested
+    return resolve_llm_config(source_config)
 
 
 def resolve_llm_candidates(base_config: dict | None = None) -> list[dict]:

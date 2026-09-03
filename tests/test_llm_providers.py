@@ -597,3 +597,56 @@ def test_levelb_annotates_node_quality_when_state_given():
     user_prompt = msgs[1]["content"]
     assert "dormant" in user_prompt
     assert "quality=0.9" in user_prompt
+
+def test_source_llm_override_isolated_from_global_config(monkeypatch):
+    """A source override changes only the selected runtime configuration."""
+    from bdh_graph_harness.config import resolve_llm_config_for_source
+
+    base = {
+        "llm_provider": "ollama-cloud",
+        "llm_model": "deepseek-v4-pro",
+        "llm_base_url": "https://ollama.com/v1",
+        "llm_temperature": 0.3,
+        "llm_max_ctx": 4096,
+        "llm_source_overrides": {
+            "session_synthesis": {
+                "provider": "ollama-cloud",
+                "model": "deepseek-v4-flash:cloud",
+                "temperature": 0.1,
+                "reasoning_effort": "low",
+                "thinking": "enabled",
+            },
+        },
+    }
+
+    synthesis = resolve_llm_config_for_source(base, "session_synthesis")
+    normal = resolve_llm_config_for_source(base, "assistant_response")
+
+    assert synthesis["llm_model"] == "deepseek-v4-flash:cloud"
+    assert synthesis["llm_temperature"] == 0.1
+    assert synthesis["llm_reasoning_effort"] == "low"
+    assert synthesis["llm_thinking"] == "enabled"
+    assert normal["llm_model"] == "deepseek-v4-pro"
+    assert base["llm_model"] == "deepseek-v4-pro"
+
+
+def test_openai_payload_carries_low_reasoning_for_source_override(
+    mock_active_notes, mock_nodes,
+):
+    """DeepSeek source overrides produce the explicit low-effort wire fields."""
+    config = {
+        "llm_provider": "ollama-cloud",
+        "llm_model": "deepseek-v4-flash:cloud",
+        "llm_temperature": 0.1,
+        "llm_max_ctx": 4096,
+        "llm_reasoning_effort": "low",
+        "llm_thinking": "enabled",
+    }
+    data, _ = bdh_providers._build_llm_payload(
+        "synthesis", mock_active_notes, mock_nodes, config=config,
+    )
+    payload = json.loads(data)
+    assert payload["model"] == "deepseek-v4-flash:cloud"
+    assert payload["temperature"] == 0.1
+    assert payload["reasoning_effort"] == "low"
+    assert payload["thinking"] == {"type": "enabled"}

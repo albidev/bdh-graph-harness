@@ -18,6 +18,13 @@ def build_openai_compatible_payload(messages, stream, config, *, json_mode=False
         "temperature": config['llm_temperature'],
         "max_tokens": config.get('llm_max_tokens', min(config['llm_max_ctx'], 2048)),
     }
+    reasoning_effort = config.get('llm_reasoning_effort')
+    if reasoning_effort:
+        payload['reasoning_effort'] = reasoning_effort
+    thinking = config.get('llm_thinking')
+    if thinking is not None:
+        enabled = str(thinking).strip().casefold() in {'1', 'true', 'yes', 'on', 'enabled'}
+        payload['thinking'] = {'type': 'enabled' if enabled else 'disabled'}
     if json_mode and config.get('llm_provider') != 'nous':
         # Nous documents the OpenAI chat contract but does not advertise
         # response_format support; rely on the JSON instruction in the prompt.
