@@ -85,11 +85,14 @@ def assimilate_evidence(
     source_node_ids: list[str] | None = None,
     query: str = "",
     source: str | None = None,
+    synthesis_meta: dict | None = None,
 ) -> dict[str, Any]:
     """Append new evidence to an existing canonical neurogenesis note.
 
-    Returns a structured result. Existing content is never replaced; repeated
-    evidence is detected by normalized text and becomes a no-op.
+    ``synthesis_meta`` carries session-synthesis audit metadata
+    (session_id, synthesis_id, transcript_sha256). It is recorded in
+    the evidence section for traceability without storing the raw
+    transcript.
     """
     raw_path = node.get("absolute_path")
     if raw_path:
@@ -112,12 +115,29 @@ def assimilate_evidence(
     sources = ", ".join(str(item) for item in (source_notes or [])[:3]) or "session recovery"
     query_line = " ".join((query or "").split())[:240]
     provenance_line = f"  - provenance: {source}\n" if source else ""
+
+    # Synthesis audit metadata lines
+    synth_session_id = synthesis_meta.get("session_id") if synthesis_meta else None
+    synth_id = synthesis_meta.get("synthesis_id") if synthesis_meta else None
+    transcript_sha = synthesis_meta.get("transcript_sha256") if synthesis_meta else None
+    queued_at = synthesis_meta.get("queued_at") if synthesis_meta else None
+    synth_lines = ""
+    if synth_session_id:
+        synth_lines += f"  - synthesis_session_id: {synth_session_id}\n"
+    if synth_id:
+        synth_lines += f"  - synthesis_id: {synth_id}\n"
+    if transcript_sha:
+        synth_lines += f"  - transcript_sha256: {transcript_sha}\n"
+    if queued_at:
+        synth_lines += f"  - queued_at: {queued_at}\n"
+
     section = (
         "\n\n## Assimilated Evidence\n"
         f"- **{date.today().isoformat()}** — {definition.strip()}\n"
         f"  - source: {sources}\n"
         f"  - query: {query_line}\n"
         f"{provenance_line}"
+        f"{synth_lines}"
     )
     updated = _merge_source_node_ids(existing.rstrip() + section + "\n", source_node_ids)
     updated = _update_frontmatter(updated)

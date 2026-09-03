@@ -599,7 +599,7 @@ def test_levelb_annotates_node_quality_when_state_given():
     assert "quality=0.9" in user_prompt
 
 def test_source_llm_override_isolated_from_global_config(monkeypatch):
-    """A source override changes only the selected runtime configuration."""
+    """session_synthesis forces local-only oMLX even with explicit cloud override."""
     from bdh_graph_harness.config import resolve_llm_config_for_source
 
     base = {
@@ -622,10 +622,14 @@ def test_source_llm_override_isolated_from_global_config(monkeypatch):
     synthesis = resolve_llm_config_for_source(base, "session_synthesis")
     normal = resolve_llm_config_for_source(base, "assistant_response")
 
-    assert synthesis["llm_model"] == "deepseek-v4-flash:cloud"
-    assert synthesis["llm_temperature"] == 0.1
-    assert synthesis["llm_reasoning_effort"] == "low"
-    assert synthesis["llm_thinking"] == "enabled"
+    # session_synthesis always forces local-only oMLX
+    assert synthesis["llm_provider"] == "omlx"
+    assert synthesis["llm_model"] == "qwen3.8-27b-oq4e-mtp"
+    assert synthesis["llm_base_url"] == "http://127.0.0.1:8083/v1"
+    assert synthesis["llm_local_only"] is True
+    assert synthesis["llm_fallbacks"] == []
+    assert synthesis["llm_chat_template_kwargs"] == {"enable_thinking": False, "thinking": False}
+    # Other sources unaffected
     assert normal["llm_model"] == "deepseek-v4-pro"
     assert base["llm_model"] == "deepseek-v4-pro"
 
