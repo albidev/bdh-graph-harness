@@ -9,6 +9,10 @@ from bdh_graph_harness.config import CONFIG, retry_with_backoff, resolve_llm_can
 import bdh_graph_harness.config as _config
 from bdh_graph_harness.neurogenesis.dedupe import is_duplicate, is_semantic_duplicate
 from bdh_graph_harness.llm.providers import uses_openai_compatible_api
+from bdh_graph_harness.neurogenesis.operation_journal import (
+    complete_operation,
+    prepare_operation,
+)
 
 
 # --- Noise filters (deterministic, applied before LLM and after) ---
@@ -424,8 +428,26 @@ activated_from_ids: {source_ids}
 {related_section}"""
 
     os.makedirs(os.path.dirname(note_path), exist_ok=True)
-    with open(note_path, 'w', encoding='utf-8') as f:
-        f.write(content)
+    operation = None
+    if synthesis_meta and synthesis_meta.get('synthesis_id'):
+        operation = prepare_operation(
+            vault_root,
+            synthesis_meta=synthesis_meta,
+            action='created',
+            note_path=note_path,
+        )
+
+    try:
+        with open(note_path, 'w', encoding='utf-8') as f:
+            f.write(content)
+        if operation is not None:
+            complete_operation(vault_root, operation, note_path=note_path)
+    except Exception:
+        try:
+            os.unlink(note_path)
+        except OSError:
+            pass
+        raise
 
     note_id = f"{neurogenesis_dir}/{slug}"
 

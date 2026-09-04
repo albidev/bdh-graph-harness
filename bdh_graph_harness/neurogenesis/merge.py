@@ -11,6 +11,10 @@ from pathlib import Path
 from typing import Any
 
 from bdh_graph_harness.graph.parser import parse_frontmatter, parse_json_frontmatter_list
+from bdh_graph_harness.neurogenesis.operation_journal import (
+    complete_operation,
+    prepare_operation,
+)
 
 MERGE_SIMILARITY_THRESHOLD = 0.82
 
@@ -144,16 +148,44 @@ def assimilate_evidence(
     if updated == existing:
         return {"status": "already_present", "node_id": node_id, "path": str(note_path)}
 
+    operation = None
+    if synthesis_meta and synthesis_meta.get("synthesis_id"):
+        operation = prepare_operation(
+            vault_root,
+            synthesis_meta=synthesis_meta,
+            action="merged",
+            note_path=note_path,
+            before_content=existing,
+        )
+
     fd, tmp_name = tempfile.mkstemp(prefix=f".{note_path.name}.", dir=str(note_path.parent), text=True)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             handle.write(updated)
         os.replace(tmp_name, note_path)
+        if operation is not None:
+            complete_operation(vault_root, operation, note_path=note_path)
     except Exception:
         try:
             os.unlink(tmp_name)
         except OSError:
             pass
+        if operation is not None:
+            rollback_fd, rollback_name = tempfile.mkstemp(
+                prefix=f".{note_path.name}.rollback.", dir=str(note_path.parent), text=True
+            )
+            try:
+                with os.fdopen(rollback_fd, "w", encoding="utf-8") as handle:
+                    handle.write(existing)
+                os.replace(rollback_name, note_path)
+            except Exception:
+                try:
+                    os.unlink(rollback_name)
+                except OSError:
+                    pass
         raise
 
-    return {"status": "merged", "node_id": node_id, "path": str(note_path)}
+    result = {"status": "merged", "node_id": node_id, "path": str(note_path)}
+    if operation is not None:
+        result["operation_id"] = operation["operation_id"]
+    return result
