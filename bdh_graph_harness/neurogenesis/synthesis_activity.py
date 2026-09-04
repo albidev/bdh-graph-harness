@@ -56,8 +56,13 @@ def build_synthesis_activity(
     """Build Curate's vault-scoped session synthesis activity payload."""
     root = Path(vault_root).resolve()
     operations = list_operation_records(root)
-    operations_by_synthesis: dict[str, list[dict[str, Any]]] = {}
+    latest_operations: dict[str, dict[str, Any]] = {}
     for operation in operations:
+        operation_id = str(operation.get("operation_id") or "")
+        if operation_id:
+            latest_operations[operation_id] = operation
+    operations_by_synthesis: dict[str, list[dict[str, Any]]] = {}
+    for operation in latest_operations.values():
         synthesis_id = str(operation.get("synthesis_id") or "")
         if synthesis_id:
             operations_by_synthesis.setdefault(synthesis_id, []).append(operation)

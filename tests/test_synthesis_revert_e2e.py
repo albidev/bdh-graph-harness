@@ -50,5 +50,6 @@ def test_created_synthesis_activity_can_be_reverted_end_to_end(tmp_path):
     assert result["index_entry_removed"] is True
 
     activity_after = build_synthesis_activity(tmp_path, vault_id="core")
-    assert activity_after["activities"][0]["operations"][-1]["status"] == "reverted"
+    assert len(activity_after["activities"][0]["operations"]) == 1
+    assert activity_after["activities"][0]["operations"][0]["status"] == "reverted"
     assert not note.exists()
