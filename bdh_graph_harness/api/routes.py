@@ -58,6 +58,8 @@ from bdh_graph_harness.neurogenesis.merge import (
     assimilate_evidence,
     looks_conflicting,
 )
+from bdh_graph_harness.neurogenesis.operation_journal import revert_operation
+from bdh_graph_harness.neurogenesis.synthesis_activity import build_synthesis_activity
 from bdh_graph_harness.graph import _resolve_target
 from bdh_graph_harness.graph.federated import project_runtime_state_to_persisted
 from bdh_graph_harness.api.ws import broadcast_activation
@@ -75,6 +77,8 @@ __all__ = [
     "api_semantic_consolidate",
     "api_consolidation_stats",
     "api_vaults",
+    "api_synthesis_activity",
+    "api_synthesis_revert",
     "run_attention_and_plasticity",
     "run_neurogenesis",
     "setup_routes",
@@ -1729,6 +1733,44 @@ async def api_vaults(request, app_state: dict) -> web.Response:
     })
 
 
+async def api_synthesis_activity(request, app_state: dict) -> web.Response:
+    """Return vault-scoped session_synthesis activity and reversible operations."""
+    ctx, err = _resolve_vault_ctx(app_state, _vault_id_from_query(request))
+    if err:
+        return err
+    assert ctx is not None
+    return web.json_response(build_synthesis_activity(
+        ctx.config.path,
+        vault_id=ctx.config.id,
+        nodes=ctx.nodes,
+    ))
+
+
+async def api_synthesis_revert(request, app_state: dict) -> web.Response:
+    """Revert one journaled synthesis operation within the selected vault."""
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response({"error": "Invalid JSON body"}, status=400)
+    operation_id = str(data.get("operation_id") or "").strip() if isinstance(data, dict) else ""
+    if not operation_id:
+        return web.json_response({"error": "Missing operation_id"}, status=400)
+    ctx, err = _resolve_vault_ctx(app_state, data.get("vault_id") if isinstance(data, dict) else None)
+    if err:
+        return err
+    assert ctx is not None
+    result = revert_operation(ctx.config.path, operation_id)
+    if result.get("status") == "not_found":
+        return web.json_response(result, status=404)
+    if result.get("status") == "conflict":
+        return web.json_response(result, status=409)
+    if result.get("status") == "already_reverted":
+        return web.json_response(result, status=409)
+    result["vault_id"] = ctx.config.id
+    result["refresh_required"] = True
+    return web.json_response(result)
+
+
 # ---------------------------------------------------------------------------
 # Route registration
 # ---------------------------------------------------------------------------
@@ -1786,6 +1828,12 @@ def setup_routes(app: web.Application, app_state: dict, ws_clients: set) -> None
     async def _vaults(request):
         return await api_vaults(request, app_state)
 
+    async def _synthesis_activity(request):
+        return await api_synthesis_activity(request, app_state)
+
+    async def _synthesis_revert(request):
+        return await api_synthesis_revert(request, app_state)
+
     app.router.add_get('/', _index)
     app.router.add_get('/ws', _ws)
     app.router.add_get('/health', _health)
@@ -1800,6 +1848,8 @@ def setup_routes(app: web.Application, app_state: dict, ws_clients: set) -> None
     app.router.add_get('/api/quality', _quality)
     app.router.add_get('/api/consolidation-stats', _consolidation_stats)
     app.router.add_get('/api/vaults', _vaults)
+    app.router.add_get('/api/synthesis-activity', _synthesis_activity)
+    app.router.add_post('/api/synthesis/revert', _synthesis_revert)
     app.router.add_post('/api/query', _query)
     app.router.add_post('/api/stream', _stream)
     app.router.add_post('/api/refresh', _refresh)
