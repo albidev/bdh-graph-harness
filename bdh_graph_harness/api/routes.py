@@ -2057,6 +2057,8 @@ async def api_synthesis_apply(request, app_state: dict) -> web.Response:
             {"error": "Missing candidate_id, synthesis_id, or session_id"},
             status=400,
         )
+    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}", candidate_id) is None:
+        return web.json_response({"error": "Invalid candidate_id"}, status=400)
     if source != "session_synthesis":
         return web.json_response(
             {"error": "source must be 'session_synthesis'"},
