@@ -45,7 +45,7 @@ _FINAL_STATES: frozenset[str] = frozenset(
 # Valid transitions.  Anything not listed here is rejected so the log stays
 # a faithful, append-only history of the candidate lifecycle.
 _VALID_TRANSITIONS: dict[str, frozenset[str]] = {
-    "pending_review": frozenset({"rejected", "created", "merged", "noop", "failed"}),
+    "pending_review": frozenset({"rejected", "created", "merged", "noop", "failed", "conflict"}),
     "created": frozenset({"reverted", "conflict"}),
     "merged": frozenset({"reverted", "conflict"}),
 }
