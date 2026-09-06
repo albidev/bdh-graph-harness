@@ -44,7 +44,14 @@ def _candidates_dir(vault_path: str | os.PathLike[str]) -> Path:
     return Path(vault_path) / ".bdh-candidates"
 
 
+_CANDIDATE_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}")
+
+
 def _candidate_path(vault_path: str | os.PathLike[str], candidate_id: str) -> Path:
+    """Return a candidate path after rejecting traversal/absolute IDs."""
+    candidate_id = str(candidate_id)
+    if _CANDIDATE_ID_RE.fullmatch(candidate_id) is None:
+        raise ValueError("invalid candidate_id")
     return _candidates_dir(vault_path) / f"{candidate_id}.json"
 
 

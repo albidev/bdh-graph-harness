@@ -188,6 +188,26 @@ class TestApplyHttpContract:
             await client.close()
 
     @pytest.mark.asyncio
+    async def test_invalid_candidate_id_returns_400(self, mock_app_setup, monkeypatch):
+        nodes, edges, collection, state, config, d = mock_app_setup
+        app = _capture_app(monkeypatch, config, nodes, edges, collection, state)
+        from aiohttp.test_utils import TestClient, TestServer
+        server = TestServer(app)
+        client = TestClient(server)
+        await client.start_server()
+        try:
+            resp = await client.post('/api/synthesis/apply', json={
+                'candidate_id': '../curate.json',
+                'synthesis_id': 'syn-1',
+                'session_id': 'sess-1',
+                'source': 'session_synthesis',
+            })
+            assert resp.status == 400
+            assert not (Path(d).parent / 'curate.json').exists()
+        finally:
+            await client.close()
+
+    @pytest.mark.asyncio
     async def test_wrong_source_returns_400(self, mock_app_setup, monkeypatch):
         nodes, edges, collection, state, config, d = mock_app_setup
         app = _capture_app(monkeypatch, config, nodes, edges, collection, state)
