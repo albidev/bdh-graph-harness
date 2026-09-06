@@ -23,7 +23,17 @@ SHA = "a" * 64
 
 
 class TestStageSessionSynthesisCandidates:
-    def test_dry_run_returns_candidates_without_files(self, tmp_path):
+    def test_dry_run_returns_candidates_without_files(self, tmp_path, monkeypatch):
+        # Stub the live extractor so the dry-run count is deterministic and
+        # does not depend on a running Ollama/LLM endpoint (CI is offline).
+        monkeypatch.setattr(
+            staging,
+            "extract_new_concepts",
+            lambda *a, **k: [
+                {"title": "Sparse Attention", "definition": "A technique.", "confidence": "low"},
+                {"title": "KV Caching", "definition": "A technique.", "confidence": "low"},
+            ],
+        )
         result = staging.stage_session_synthesis_candidates(
             str(tmp_path),
             synthesis_id="syn-1",
