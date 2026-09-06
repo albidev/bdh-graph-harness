@@ -50,6 +50,9 @@ from bdh_graph_harness.memory.semantic_consolidation import (
     extract_bdh_candidates,
 )
 from bdh_graph_harness.llm import llm_respond, llm_stream
+from bdh_graph_harness.memory.session_synthesis_staging import (
+    stage_from_api_response,
+)
 from bdh_graph_harness.neurogenesis import extract_new_concepts, create_note
 from bdh_graph_harness.neurogenesis.creator import append_to_vault_log
 from bdh_graph_harness.neurogenesis.dedupe import find_semantic_match
@@ -77,11 +80,13 @@ __all__ = [
     "api_semantic_consolidate",
     "api_consolidation_stats",
     "api_vaults",
-    "api_synthesis_activity",
-    "api_synthesis_revert",
-    "run_attention_and_plasticity",
-    "run_neurogenesis",
-    "setup_routes",
+    'api_synthesis_activity',
+    'api_synthesis_revert',
+    'api_synthesis_stage',
+    'api_synthesis_candidates',
+    'run_attention_and_plasticity',
+    'run_neurogenesis',
+    'setup_routes',
 ]
 
 
@@ -884,6 +889,40 @@ async def api_query(request, app_state: dict, ws_clients: set) -> web.Response:
             concept_ids=concept_ids,
             queued_at=synthesis_meta.get('queued_at', ''),
         )
+
+    # If staging is enabled, also produce pending candidate files for Curate review.
+    # This path is additive: the existing direct apply path above remains active
+    # so the server can operate in either mode depending on config/source policy.
+    staging_enabled = ctx.config.settings.get('session_synthesis_staging_enabled', False)
+    if (
+        staging_enabled
+        and synthesis_meta
+        and source == 'session_synthesis'
+        and respond
+        and not synthesis_failed
+    ):
+        try:
+            stage_from_api_response(
+                ctx.config.path,
+                synthesis_id=synthesis_meta['synthesis_id'],
+                vault_id=ctx.config.id,
+                session_id=synthesis_meta['session_id'],
+                transcript_sha256=synthesis_meta['transcript_sha256'],
+                response_text=response_text,
+                query=query,
+                active=active,
+                nodes=n,
+                activated_notes=activated_notes,
+                source=source,
+                llm_config=llm_config,
+                dry_run=False,
+                config=ctx.config.settings,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Session synthesis staging failed for %s: %s",
+                synthesis_meta.get('synthesis_id'), exc,
+            )
 
     # Neurogenesis runs after the initial activation broadcast. Send a second
     # ordered activation event so WebSocket clients render newly created notes
@@ -1771,6 +1810,104 @@ async def api_synthesis_revert(request, app_state: dict) -> web.Response:
     return web.json_response(result)
 
 
+async def api_synthesis_stage(request, app_state: dict) -> web.Response:
+    """Dry-run extraction: stage session_synthesis candidates without side effects.
+
+    POST /api/synthesis/stage
+
+    Body:
+      {
+        "vault_id": "...",
+        "synthesis_id": "...",
+        "session_id": "...",
+        "transcript_sha256": "...",
+        "response_text": "...",
+        "query": "...",
+        "activated_notes": [...],
+        "dry_run": true
+      }
+
+    Returns staged candidates and creates pending candidate files (unless dry_run).
+    """
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response({"error": "Invalid JSON body"}, status=400)
+
+    vault_id = _vault_id_from_body(data)
+    ctx, err = _resolve_vault_ctx(app_state, vault_id)
+    if err:
+        return err
+    assert ctx is not None
+
+    synthesis_id = str(data.get("synthesis_id") or "").strip()
+    session_id = str(data.get("session_id") or "").strip()
+    transcript_sha256 = str(data.get("transcript_sha256") or "").strip()
+    response_text = str(data.get("response_text") or "").strip()
+    query = str(data.get("query") or "").strip()
+    activated_notes = data.get("activated_notes") or []
+    dry_run = bool(data.get("dry_run", True))
+
+    if not synthesis_id or not session_id or not re.fullmatch(r"[0-9a-fA-F]{64}", transcript_sha256):
+        return web.json_response(
+            {"error": "Missing or invalid synthesis_id, session_id, or transcript_sha256"},
+            status=400,
+        )
+    if not response_text:
+        return web.json_response({"error": "Missing response_text"}, status=400)
+
+    try:
+        result = stage_from_api_response(
+            ctx.config.path,
+            synthesis_id=synthesis_id,
+            vault_id=ctx.config.id,
+            session_id=session_id,
+            transcript_sha256=transcript_sha256,
+            response_text=response_text,
+            query=query,
+            active={},
+            nodes=ctx.nodes,
+            activated_notes=activated_notes,
+            source="session_synthesis",
+            llm_config=resolve_llm_config_for_source(ctx.config.settings, "session_synthesis"),
+            dry_run=dry_run,
+            config=ctx.config.settings,
+        )
+    except ValueError as exc:
+        return web.json_response({"error": str(exc)}, status=400)
+    except Exception as exc:
+        logger.warning("api_synthesis_stage failed: %s", exc)
+        return web.json_response({"error": f"staging failed: {exc}"}, status=500)
+
+    return web.json_response(result)
+
+
+async def api_synthesis_candidates(request, app_state: dict) -> web.Response:
+    """List staged session_synthesis candidates for Curate review.
+
+    GET /api/synthesis/candidates?vault_id=...&status=...&synthesis_id=...
+    """
+    ctx, err = _resolve_vault_ctx(app_state, _vault_id_from_query(request))
+    if err:
+        return err
+    assert ctx is not None
+
+    from bdh_graph_harness.memory.session_synthesis_staging import list_candidates
+
+    status = request.query.get("status")
+    synthesis_id = request.query.get("synthesis_id")
+    candidates = list_candidates(
+        ctx.config.path,
+        status=status,
+        synthesis_id=synthesis_id,
+    )
+    return web.json_response({
+        "vault_id": ctx.config.id,
+        "count": len(candidates),
+        "candidates": [c.to_dict() for c in candidates],
+    })
+
+
 # ---------------------------------------------------------------------------
 # Route registration
 # ---------------------------------------------------------------------------
@@ -1834,6 +1971,12 @@ def setup_routes(app: web.Application, app_state: dict, ws_clients: set) -> None
     async def _synthesis_revert(request):
         return await api_synthesis_revert(request, app_state)
 
+    async def _synthesis_stage(request):
+        return await api_synthesis_stage(request, app_state)
+
+    async def _synthesis_candidates(request):
+        return await api_synthesis_candidates(request, app_state)
+
     app.router.add_get('/', _index)
     app.router.add_get('/ws', _ws)
     app.router.add_get('/health', _health)
@@ -1850,6 +1993,8 @@ def setup_routes(app: web.Application, app_state: dict, ws_clients: set) -> None
     app.router.add_get('/api/vaults', _vaults)
     app.router.add_get('/api/synthesis-activity', _synthesis_activity)
     app.router.add_post('/api/synthesis/revert', _synthesis_revert)
+    app.router.add_post('/api/synthesis/stage', _synthesis_stage)
+    app.router.add_get('/api/synthesis/candidates', _synthesis_candidates)
     app.router.add_post('/api/query', _query)
     app.router.add_post('/api/stream', _stream)
     app.router.add_post('/api/refresh', _refresh)

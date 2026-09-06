@@ -94,6 +94,12 @@ CONFIG = {
     'hebbian_associative_context_enabled': False,
     'hebbian_associative_context_max_items': 2,
     'hebbian_associative_context_max_per_seed': 1,
+    # Session synthesis Curate staging. When enabled, session_synthesis
+    # extracts concepts into pending candidate files in .bdh-candidates
+    # without creating vault notes or mutating Hebbian state.
+    'session_synthesis_staging_enabled': False,
+    'session_synthesis_staging_dir': '.bdh-candidates',
+    'session_synthesis_staging_max_concepts': 5,
     # Dynamic associations need query-local semantic evidence before they may
     # compete with declared wikilinks in retrieval.
     'hebbian_dynamic_query_relevance_floor': 0.35,
