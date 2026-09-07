@@ -84,6 +84,7 @@ __all__ = [
     'api_synthesis_revert',
     'api_synthesis_stage',
     'api_synthesis_candidates',
+    'api_synthesis_approve',
     'api_synthesis_apply',
     'run_attention_and_plasticity',
     'run_neurogenesis',
@@ -2025,6 +2026,59 @@ def _apply_approved_candidate(ctx, candidate) -> dict:
     return {"status": "noop", "reason": "note already exists at target path"}
 
 
+async def api_synthesis_approve(request, app_state: dict) -> web.Response:
+    """Approve a pending session_synthesis candidate without applying it.
+
+    POST /api/synthesis/approve
+
+    BDH remains the source of truth for the approval gate. Mission Control
+    records the human action locally, then calls this endpoint before apply.
+    """
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response({"error": "Invalid JSON body"}, status=400)
+    if not isinstance(data, dict):
+        return web.json_response({"error": "Invalid JSON body"}, status=400)
+
+    candidate_id = str(data.get("candidate_id") or "").strip()
+    synthesis_id = str(data.get("synthesis_id") or "").strip()
+    session_id = str(data.get("session_id") or "").strip()
+    source = str(data.get("source") or "").strip()
+    if not candidate_id or not synthesis_id or not session_id:
+        return web.json_response({"error": "Missing candidate_id, synthesis_id, or session_id"}, status=400)
+    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}", candidate_id) is None:
+        return web.json_response({"error": "Invalid candidate_id"}, status=400)
+    if source != "session_synthesis":
+        return web.json_response({"error": "source must be 'session_synthesis'"}, status=400)
+
+    ctx, err = _resolve_vault_ctx(app_state, _vault_id_from_body(data))
+    if err:
+        return err
+    assert ctx is not None
+    from bdh_graph_harness.memory.session_synthesis_staging import load_candidate, update_candidate_status
+
+    candidate = load_candidate(ctx.config.path, candidate_id)
+    if candidate is None:
+        return web.json_response({"error": f"Unknown candidate '{candidate_id}'"}, status=404)
+    if (
+        candidate.vault_id != ctx.config.id
+        or candidate.synthesis_id != synthesis_id
+        or candidate.session_id != session_id
+        or candidate.source != source
+    ):
+        return web.json_response({"error": "candidate correlation does not match request"}, status=400)
+    if candidate.status == "approved":
+        return web.json_response({"candidate_id": candidate_id, "status": "approved", "idempotent": True})
+    if candidate.status != "pending_review":
+        return web.json_response({"error": f"candidate '{candidate_id}' is not pending_review (status={candidate.status})"}, status=400)
+
+    approved = update_candidate_status(ctx.config.path, candidate_id, "approved", reason="approved in Mission Control Curate")
+    if approved is None:
+        return web.json_response({"error": f"Unknown candidate '{candidate_id}'"}, status=404)
+    return web.json_response({"candidate_id": candidate_id, "status": approved.status, "idempotent": False})
+
+
 async def api_synthesis_apply(request, app_state: dict) -> web.Response:
     """Apply an approved session_synthesis candidate to the vault (idempotent).
 
@@ -2264,6 +2318,9 @@ def setup_routes(app: web.Application, app_state: dict, ws_clients: set) -> None
     async def _synthesis_candidates(request):
         return await api_synthesis_candidates(request, app_state)
 
+    async def _synthesis_approve(request):
+        return await api_synthesis_approve(request, app_state)
+
     async def _synthesis_apply(request):
         return await api_synthesis_apply(request, app_state)
 
@@ -2285,6 +2342,7 @@ def setup_routes(app: web.Application, app_state: dict, ws_clients: set) -> None
     app.router.add_post('/api/synthesis/revert', _synthesis_revert)
     app.router.add_post('/api/synthesis/stage', _synthesis_stage)
     app.router.add_get('/api/synthesis/candidates', _synthesis_candidates)
+    app.router.add_post('/api/synthesis/approve', _synthesis_approve)
     app.router.add_post('/api/synthesis/apply', _synthesis_apply)
     app.router.add_post('/api/query', _query)
     app.router.add_post('/api/stream', _stream)
