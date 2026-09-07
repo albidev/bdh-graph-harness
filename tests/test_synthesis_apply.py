@@ -257,6 +257,31 @@ class TestApplyHttpContract:
             await client.close()
 
     @pytest.mark.asyncio
+    async def test_approve_transitions_pending_candidate(self, mock_app_setup, monkeypatch):
+        nodes, edges, collection, state, config, d = mock_app_setup
+        staging.stage_session_synthesis_candidates(
+            str(d), synthesis_id="syn-approve", vault_id="default", session_id="sess-approve",
+            transcript_sha256=SHA, response_text="A pending concept.", dry_run=False,
+        )
+        candidate = staging.list_candidates(str(d))[0]
+        app = _capture_app(monkeypatch, config, nodes, edges, collection, state)
+        from aiohttp.test_utils import TestClient, TestServer
+        server = TestServer(app)
+        client = TestClient(server)
+        await client.start_server()
+        try:
+            body = _apply_body(candidate)
+            resp = await client.post('/api/synthesis/approve', json=body)
+            assert resp.status == 200
+            data = await resp.json()
+            assert data["status"] == "approved"
+            assert staging.load_candidate(str(d), candidate.candidate_id).status == "approved"
+            repeat = await client.post('/api/synthesis/approve', json=body)
+            assert (await repeat.json())["idempotent"] is True
+        finally:
+            await client.close()
+
+    @pytest.mark.asyncio
     async def test_non_approved_candidate_returns_400(self, mock_app_setup, monkeypatch):
         nodes, edges, collection, state, config, d = mock_app_setup
         # Stage but do NOT approve (stays pending_review).
