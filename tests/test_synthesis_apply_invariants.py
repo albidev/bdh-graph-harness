@@ -255,9 +255,53 @@ class TestWrongTargetNoMutation:
             await client.close()
 
 
+
+
 # ---------------------------------------------------------------------------
-# 3. Non-session sources are unaffected by the staging/apply gate
+# 3. Session synthesis staging is a strict pre-write gate
 # ---------------------------------------------------------------------------
+
+class TestSessionSynthesisStrictStaging:
+    @pytest.mark.asyncio
+    async def test_staging_disables_learning_before_neurogenesis(self, mock_app_setup, monkeypatch):
+        nodes, edges, collection, state, config, d = mock_app_setup
+        config['session_synthesis_staging_enabled'] = True
+        captured = {}
+
+        async def fake_attention(query, ctx, ws_clients, **kwargs):
+            captured['learn'] = kwargs['learn']
+            return {}, [], [], {}
+
+        monkeypatch.setattr(bdh_routes, 'run_attention_and_plasticity', fake_attention)
+        monkeypatch.setattr(bdh_routes, 'llm_respond', lambda *a, **k: 'Staged response')
+        monkeypatch.setattr(bdh_routes, 'run_neurogenesis', lambda *a, **k: (_ for _ in ()).throw(AssertionError('must not run before approval')))
+        monkeypatch.setattr(bdh_routes, 'stage_from_api_response', lambda *a, **k: captured.setdefault('staged', True))
+
+        app = _capture_app(monkeypatch, config, nodes, edges, collection, state)
+        from aiohttp.test_utils import TestClient, TestServer
+        client = TestClient(TestServer(app))
+        await client.start_server()
+        try:
+            resp = await client.post('/api/query', json={
+                'query': 'session synthesis query',
+                'user_prompt': 'USER: durable architecture\nASSISTANT: Staged response',
+                'source': 'session_synthesis',
+                'learn': True,
+                'respond': True,
+                'metadata': {
+                    'session_id': 'sess-1',
+                    'synthesis_id': 'syn-1',
+                    'transcript_sha256': SHA,
+                    'queued_at': '1.0',
+                },
+            })
+            assert resp.status == 200
+            assert captured['learn'] is False
+            assert captured['staged'] is True
+        finally:
+            await client.close()
+
+
 
 class TestNonSessionSourcesUnaffected:
     @pytest.mark.asyncio

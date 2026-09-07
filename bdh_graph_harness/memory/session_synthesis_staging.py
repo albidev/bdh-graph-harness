@@ -299,6 +299,28 @@ def stage_session_synthesis_candidates(
     if not _valid_sha256(transcript_sha256):
         raise ValueError("transcript_sha256 must be a 64-character hex SHA-256 digest")
 
+    # Candidate files are the durable idempotency ledger. A retry after a
+    # successful stage must return the original candidates before invoking the
+    # extractor or touching any graph state. Reusing a synthesis id with a
+    # different correlation tuple is rejected rather than silently conflated.
+    if not dry_run:
+        existing = list_candidates(vault_path, synthesis_id=synthesis_id)
+        if existing:
+            if any(
+                candidate.vault_id != vault_id
+                or candidate.session_id != session_id
+                or candidate.transcript_sha256.casefold() != transcript_sha256.casefold()
+                for candidate in existing
+            ):
+                raise ValueError("synthesis_id already exists with different correlation metadata")
+            return {
+                "candidates": [candidate.to_dict() for candidate in existing],
+                "count": len(existing),
+                "dry_run": False,
+                "synthesis_id": synthesis_id,
+                "idempotent": True,
+            }
+
     active = active or {}
     nodes = nodes or {}
     source_notes = source_notes or []
@@ -424,6 +446,7 @@ def stage_session_synthesis_candidates(
         "count": len(candidates),
         "dry_run": dry_run,
         "synthesis_id": synthesis_id,
+        "idempotent": False,
     }
 
 
