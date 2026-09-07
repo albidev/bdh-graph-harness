@@ -226,7 +226,7 @@ def _fallback_extract_concepts(response_text: str) -> list[dict[str, Any]]:
         seen.add(key)
         concepts.append({
             "title": raw,
-            "definition": f"A durable concept related to {raw.lower()} extracted from session synthesis.",
+            "definition": f"{raw} was discussed in the session synthesis response.",
             "confidence": "low",
         })
         if len(concepts) >= 3:
