@@ -368,12 +368,14 @@ def stage_session_synthesis_candidates(
     )
     # If the real extractor produced nothing (common in tests/offline), fall back
     # to the deterministic local extractor so staging is always testable.
-    if not concepts:
+    if not concepts and not bool(cfg.get("session_synthesis_staging_enabled", False)):
         concepts = _fallback_extract_concepts(response_text)
+    filtered_count = 0
     concepts, filtered_count = _filter_session_synthesis_concepts(concepts)
-    # Keep the legacy audit noop only when extraction genuinely produced no
-    # concepts. Never turn filtered placeholders into a Curate candidate.
-    if not concepts and filtered_count == 0 and not dry_run:
+    # Production staging is fail-closed: an extractor failure must not become
+    # a fake Curate candidate. The offline fallback remains available for the
+    # legacy unit-test config where staging is explicitly disabled.
+    if not concepts and filtered_count == 0 and not dry_run and not bool(cfg.get("session_synthesis_staging_enabled", False)):
         concepts = [{
             'title': 'Unclassified durable concept',
             'definition': 'No durable concept was confidently extracted; requires human review.',

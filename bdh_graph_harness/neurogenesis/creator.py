@@ -130,6 +130,10 @@ def extract_new_concepts(
                 "max_tokens": runtime_config['llm_max_ctx'],
                 "response_format": {"type": "json_object"},
             })
+            if provider == "omlx" or "127.0.0.1:8083" in str(runtime_config.get("llm_endpoint", "")):
+                # Qwen3.8 emits reasoning into the response unless thinking is
+                # explicitly disabled; that corrupts the strict JSON extractor.
+                payload["chat_template_kwargs"] = {"enable_thinking": False, "thinking": False}
             api_key = runtime_config.get('llm_api_key', '')
             if provider == 'openrouter' and not api_key:
                 api_key = runtime_config.get('openrouter_key', '')
@@ -150,7 +154,9 @@ def extract_new_concepts(
             result = json.loads(resp.read())
             if uses_openai_compatible_api(provider):
                 choices = result.get('choices', [])
-                content = choices[0].get('message', {}).get('content', '[]') if choices else '[]'
+                content = choices[0].get('message', {}).get('content', '') if choices else ''
+                if choices and not content:
+                    content = choices[0].get('message', {}).get('reasoning', '')
             else:
                 content = result.get('message', {}).get('content', '[]')
             # Handle LLM returning text with embedded JSON
