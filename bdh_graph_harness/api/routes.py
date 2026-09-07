@@ -793,6 +793,13 @@ async def api_query(request, app_state: dict, ws_clients: set) -> web.Response:
             'queued_at': str(raw_queued_at) if raw_queued_at is not None else '',
         }
 
+    # Session synthesis staging is a strict pre-write gate. Retrieval remains
+    # available, but Hebbian plasticity and neurogenesis stay disabled until a
+    # Curate approval explicitly applies the persisted candidate.
+    staging_enabled = ctx.config.settings.get('session_synthesis_staging_enabled', False)
+    if staging_enabled and synthesis_meta and source == 'session_synthesis':
+        learn = False
+
     llm_query = query
     if user_prompt:
         llm_query = f"{user_prompt}\n\n---\n\n{query}"
@@ -891,10 +898,8 @@ async def api_query(request, app_state: dict, ws_clients: set) -> web.Response:
             queued_at=synthesis_meta.get('queued_at', ''),
         )
 
-    # If staging is enabled, also produce pending candidate files for Curate review.
-    # This path is additive: the existing direct apply path above remains active
-    # so the server can operate in either mode depending on config/source policy.
-    staging_enabled = ctx.config.settings.get('session_synthesis_staging_enabled', False)
+    # If staging is enabled, produce pending candidate files for Curate review.
+    # Direct graph mutation was disabled above; approval is the only write path.
     if (
         staging_enabled
         and synthesis_meta

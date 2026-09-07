@@ -79,6 +79,32 @@ class TestStageSessionSynthesisCandidates:
         assert audit[0].state == "pending_review"
         assert audit[0].candidate_id == data["candidate_id"]
 
+    def test_repeated_synthesis_correlation_is_idempotent(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(
+            staging,
+            "extract_new_concepts",
+            lambda *a, **k: [{"title": "Durable Epoch", "definition": "A persisted synthesis unit.", "confidence": "low"}],
+        )
+        kwargs = {
+            "synthesis_id": "syn-idempotent",
+            "vault_id": "vault-1",
+            "session_id": "sess-1",
+            "transcript_sha256": SHA,
+            "response_text": "Durable Epoch is a persisted synthesis unit.",
+            "query": "session synthesis",
+            "active": {},
+            "nodes": {},
+            "dry_run": False,
+        }
+        first = staging.stage_session_synthesis_candidates(str(tmp_path), **kwargs)
+        second = staging.stage_session_synthesis_candidates(str(tmp_path), **kwargs)
+
+        assert first["count"] == 1
+        assert second["idempotent"] is True
+        assert second["candidates"] == first["candidates"]
+        assert len(list((tmp_path / ".bdh-candidates").glob("*.json"))) == 1
+        assert len(ca.read_curate_audit(str(tmp_path))) == 1
+
     def test_candidate_has_required_metadata(self, tmp_path):
         result = staging.stage_session_synthesis_candidates(
             str(tmp_path),
