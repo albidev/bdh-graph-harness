@@ -239,6 +239,32 @@ def _fallback_extract_concepts(response_text: str) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 
+_PLACEHOLDER_SYNTHESIS_DEFINITION = re.compile(
+    r"^a durable concept related to .+ extracted from session synthesis\.?$",
+    re.IGNORECASE,
+)
+
+
+def _filter_session_synthesis_concepts(concepts: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
+    """Drop extractor placeholders and repeated concept loops before Curate."""
+    accepted: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    filtered = 0
+    for concept in concepts:
+        title = str(concept.get("title") or "").strip()
+        definition = str(concept.get("definition") or "").strip()
+        normalized = (re.sub(r"\s+", " ", title).casefold(), re.sub(r"\s+", " ", definition).casefold())
+        if not title or not definition or normalized in seen:
+            filtered += 1
+            continue
+        if _PLACEHOLDER_SYNTHESIS_DEFINITION.fullmatch(definition):
+            filtered += 1
+            continue
+        seen.add(normalized)
+        accepted.append(concept)
+    return accepted, filtered
+
+
 
 def stage_session_synthesis_candidates(
     vault_path: str | os.PathLike[str],
@@ -344,9 +370,10 @@ def stage_session_synthesis_candidates(
     # to the deterministic local extractor so staging is always testable.
     if not concepts:
         concepts = _fallback_extract_concepts(response_text)
-    # Force at least one candidate when the extractor returns nothing, so callers
-    # can still record a pending noop candidate for audit purposes.
-    if not concepts and not dry_run:
+    concepts, filtered_count = _filter_session_synthesis_concepts(concepts)
+    # Keep the legacy audit noop only when extraction genuinely produced no
+    # concepts. Never turn filtered placeholders into a Curate candidate.
+    if not concepts and filtered_count == 0 and not dry_run:
         concepts = [{
             'title': 'Unclassified durable concept',
             'definition': 'No durable concept was confidently extracted; requires human review.',
@@ -447,6 +474,7 @@ def stage_session_synthesis_candidates(
         "dry_run": dry_run,
         "synthesis_id": synthesis_id,
         "idempotent": False,
+        "filtered_count": filtered_count,
     }
 
 

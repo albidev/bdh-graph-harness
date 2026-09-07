@@ -51,6 +51,43 @@ class TestStageSessionSynthesisCandidates:
         assert not (tmp_path / ".bdh-candidates").exists()
         assert not (tmp_path / ".bdh-audit").exists()
 
+    def test_placeholder_and_duplicate_loop_concepts_are_filtered(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(
+            staging,
+            "extract_new_concepts",
+            lambda *a, **k: [
+                {"title": "A Hermes", "definition": "A durable concept related to Hermes extracted from session synthesis."},
+                {"title": "A Hermes", "definition": "A durable concept related to Hermes extracted from session synthesis."},
+                {"title": "Real concept", "definition": "A useful durable concept from the actual discussion."},
+                {"title": "Real concept", "definition": "A useful durable concept from the actual discussion."},
+            ],
+        )
+        result = staging.stage_session_synthesis_candidates(
+            str(tmp_path), synthesis_id="syn-filter", vault_id="v", session_id="s",
+            transcript_sha256=SHA, response_text="discussion", query="session synthesis",
+            active={}, nodes={}, dry_run=False,
+        )
+        assert result["count"] == 1
+        assert result["filtered_count"] == 3
+        data = json.loads(next((tmp_path / ".bdh-candidates").glob("*.json")).read_text())
+        assert data["title"] == "Real concept"
+        assert "extracted from session synthesis" not in data["definition"]
+
+    def test_only_placeholder_concepts_do_not_enter_curate(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(
+            staging,
+            "extract_new_concepts",
+            lambda *a, **k: [{"title": "A Hermes", "definition": "A durable concept related to Hermes extracted from session synthesis."}],
+        )
+        result = staging.stage_session_synthesis_candidates(
+            str(tmp_path), synthesis_id="syn-placeholder", vault_id="v", session_id="s",
+            transcript_sha256=SHA, response_text="discussion", query="session synthesis",
+            active={}, nodes={}, dry_run=False,
+        )
+        assert result["count"] == 0
+        assert result["filtered_count"] == 1
+        assert not (tmp_path / ".bdh-candidates").exists()
+
     def test_non_dry_run_writes_candidate_files_and_audit(self, tmp_path):
         result = staging.stage_session_synthesis_candidates(
             str(tmp_path),
