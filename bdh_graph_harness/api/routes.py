@@ -31,6 +31,9 @@ from bdh_graph_harness.memory.source_policy import (
     use_user_prompt_for_retrieval,
     get_frequency_increment,
 )
+from bdh_graph_harness.memory.synthesis_audit import (
+    record_synthesis_audit,
+)
 from bdh_graph_harness.memory.hebbian import safe_decode_synapse_key
 from bdh_graph_harness.memory.state_store import reconcile_state_to_nodes
 from bdh_graph_harness.memory.consolidation import (
@@ -47,13 +50,19 @@ from bdh_graph_harness.memory.semantic_consolidation import (
     extract_bdh_candidates,
 )
 from bdh_graph_harness.llm import llm_respond, llm_stream
+from bdh_graph_harness.memory.session_synthesis_staging import (
+    stage_from_api_response,
+)
 from bdh_graph_harness.neurogenesis import extract_new_concepts, create_note
+from bdh_graph_harness.neurogenesis.creator import append_to_vault_log
 from bdh_graph_harness.neurogenesis.dedupe import find_semantic_match
 from bdh_graph_harness.neurogenesis.merge import (
     MERGE_SIMILARITY_THRESHOLD,
     assimilate_evidence,
     looks_conflicting,
 )
+from bdh_graph_harness.neurogenesis.operation_journal import revert_operation
+from bdh_graph_harness.neurogenesis.synthesis_activity import build_synthesis_activity
 from bdh_graph_harness.graph import _resolve_target
 from bdh_graph_harness.graph.federated import project_runtime_state_to_persisted
 from bdh_graph_harness.api.ws import broadcast_activation
@@ -71,9 +80,15 @@ __all__ = [
     "api_semantic_consolidate",
     "api_consolidation_stats",
     "api_vaults",
-    "run_attention_and_plasticity",
-    "run_neurogenesis",
-    "setup_routes",
+    'api_synthesis_activity',
+    'api_synthesis_revert',
+    'api_synthesis_stage',
+    'api_synthesis_candidates',
+    'api_synthesis_approve',
+    'api_synthesis_apply',
+    'run_attention_and_plasticity',
+    'run_neurogenesis',
+    'setup_routes',
 ]
 
 
@@ -536,6 +551,7 @@ def run_neurogenesis(
     source: str | None = None,
     note_metadata: dict | None = None,
     llm_config: dict | None = None,
+    synthesis_meta: dict | None = None,
 ) -> list:
     """Run neurogenesis on a completed LLM response.
 
@@ -544,6 +560,9 @@ def run_neurogenesis(
 
     ``llm_config`` optionally selects a source-specific extractor runtime while
     vault persistence and neurogenesis policy continue to use the vault config.
+
+    ``synthesis_meta`` carries session-synthesis audit metadata (session_id,
+    synthesis_id, transcript_sha256) for traceability.
 
     Returns the ``new_concepts_list`` (list of ``{'id', 'title'}`` dicts).
     """
@@ -640,6 +659,8 @@ def run_neurogenesis(
                 }
                 if source is not None:
                     merge_kwargs["source"] = source
+                if synthesis_meta is not None:
+                    merge_kwargs["synthesis_meta"] = synthesis_meta
                 merged = assimilate_evidence(
                     vault_root,
                     canonical_id,
@@ -655,6 +676,11 @@ def run_neurogenesis(
                         'merged': merged['status'] == 'merged',
                         'similarity': match.get('similarity') if match else 1.0,
                     })
+                    # Log merge to vault log
+                    append_to_vault_log(
+                        vault_root,
+                        f"Merge: '{title}' → '{canonical_id}' (source={source})",
+                    )
                     continue
             elif canonical_id is not None and canonical_id in n:
                 print(
@@ -670,6 +696,8 @@ def run_neurogenesis(
                 note_kwargs["note_metadata"] = note_metadata
             if source is not None:
                 note_kwargs["source"] = source
+            if synthesis_meta is not None:
+                note_kwargs["synthesis_meta"] = synthesis_meta
             new_note_id = create_note(
                 vault_root, title, definition, active_titles, query,
                 **note_kwargs,
@@ -719,6 +747,60 @@ async def api_query(request, app_state: dict, ws_clients: set) -> web.Response:
     query_variants = data.get('query_variants') or None
     llm_config = resolve_llm_config_for_source(ctx.config.settings, source)
 
+    # Parse synthesis metadata from the request body.
+    # The bridge sends audit metadata under data['metadata'] as:
+    #   { session_id, synthesis_id, transcript_sha256 }
+    # We accept the pre-computed hash directly — the graph side never
+    # requests or hashes raw transcript.
+    synthesis_meta = None
+    raw_metadata = data.get('metadata')
+    if source == 'session_synthesis' and raw_metadata is not None and not isinstance(raw_metadata, dict):
+        return web.json_response({'error': 'Invalid session synthesis metadata'}, status=400)
+    if source == 'session_synthesis' and isinstance(raw_metadata, dict):
+        raw_session_id = raw_metadata.get('session_id')
+        raw_synthesis_id = raw_metadata.get('synthesis_id')
+        raw_transcript_sha = raw_metadata.get('transcript_sha256')
+        raw_queued_at = raw_metadata.get('queued_at')
+        metadata_errors = []
+        session_id = raw_session_id.strip() if isinstance(raw_session_id, str) else ''
+        synthesis_id = raw_synthesis_id.strip() if isinstance(raw_synthesis_id, str) else ''
+        transcript_sha = raw_transcript_sha if isinstance(raw_transcript_sha, str) else ''
+        if not session_id:
+            metadata_errors.append('session_id')
+        if not synthesis_id:
+            metadata_errors.append('synthesis_id')
+        if not re.fullmatch(r'[0-9a-fA-F]{64}', transcript_sha):
+            metadata_errors.append('transcript_sha256')
+        if metadata_errors:
+            record_synthesis_audit(
+                ctx.config.path,
+                session_id=session_id,
+                synthesis_id=synthesis_id,
+                transcript_sha256=transcript_sha if re.fullmatch(r'[0-9a-fA-F]{64}', transcript_sha) else '',
+                source=source,
+                vault=ctx.config.id,
+                provider=llm_config.get('llm_provider', 'unknown'),
+                model=llm_config.get('llm_model', 'unknown'),
+                hebbian_updates=0,
+                outcome='invalid',
+                reason='invalid metadata fields: ' + ', '.join(metadata_errors),
+                queued_at=str(raw_queued_at) if raw_queued_at is not None else '',
+            )
+            return web.json_response({'error': 'Invalid session synthesis metadata'}, status=400)
+        synthesis_meta = {
+            'session_id': session_id,
+            'synthesis_id': synthesis_id,
+            'transcript_sha256': transcript_sha,
+            'queued_at': str(raw_queued_at) if raw_queued_at is not None else '',
+        }
+
+    # Session synthesis staging is a strict pre-write gate. Retrieval remains
+    # available, but Hebbian plasticity and neurogenesis stay disabled until a
+    # Curate approval explicitly applies the persisted candidate.
+    staging_enabled = ctx.config.settings.get('session_synthesis_staging_enabled', False)
+    if staging_enabled and synthesis_meta and source == 'session_synthesis':
+        learn = False
+
     llm_query = query
     if user_prompt:
         llm_query = f"{user_prompt}\n\n---\n\n{query}"
@@ -755,13 +837,99 @@ async def api_query(request, app_state: dict, ws_clients: set) -> web.Response:
         if respond else ""
     )
 
-    new_concepts_list = (
-        run_neurogenesis(
-            response_text, query, active, ctx, source=source,
-            llm_config=llm_config,
-        )
-        if learn and respond else []
+    new_concepts_list = []
+    synthesis_failed = (
+        source == 'session_synthesis'
+        and synthesis_meta is not None
+        and isinstance(response_text, str)
+        and (response_text.startswith('[LLM error:') or response_text == '[no response from LLM]')
     )
+    if learn and respond and not synthesis_failed:
+        try:
+            new_concepts_list = run_neurogenesis(
+                response_text, query, active, ctx, source=source,
+                llm_config=llm_config, synthesis_meta=synthesis_meta,
+            )
+        except Exception as exc:
+            if synthesis_meta and source == 'session_synthesis':
+                record_synthesis_audit(
+                    ctx.config.path,
+                    session_id=synthesis_meta['session_id'],
+                    synthesis_id=synthesis_meta['synthesis_id'],
+                    transcript_sha256=synthesis_meta.get('transcript_sha256', ''),
+                    source=source,
+                    vault=ctx.config.id,
+                    provider=llm_config.get('llm_provider', 'unknown'),
+                    model=llm_config.get('llm_model', 'unknown'),
+                    hebbian_updates=len(hebbian_updates),
+                    outcome='failed',
+                    reason=f'neurogenesis {type(exc).__name__}',
+                    queued_at=synthesis_meta.get('queued_at', ''),
+                )
+            raise
+
+    # Record synthesis audit entry when synthesis metadata is present
+    if synthesis_meta and source == 'session_synthesis':
+        concept_ids = [c.get('id', '') for c in new_concepts_list if c.get('id')]
+        merged_ids = [c['id'] for c in new_concepts_list if c.get('merged')]
+        created_ids = [c['id'] for c in new_concepts_list if not c.get('merged')]
+        if synthesis_failed:
+            outcome = 'failed'
+        elif new_concepts_list:
+            if merged_ids and not created_ids:
+                outcome = 'merged'
+            else:
+                outcome = 'created'
+        else:
+            outcome = 'noop'
+            if not concept_ids:
+                outcome = 'noop'
+        record_synthesis_audit(
+            ctx.config.path,
+            session_id=synthesis_meta['session_id'],
+            synthesis_id=synthesis_meta['synthesis_id'],
+            transcript_sha256=synthesis_meta.get('transcript_sha256', ''),
+            source=source or 'session_synthesis',
+            vault=ctx.config.id,
+            provider=llm_config.get('llm_provider', 'unknown'),
+            model=llm_config.get('llm_model', 'unknown'),
+            hebbian_updates=len(hebbian_updates),
+            outcome=outcome,
+            concept_ids=concept_ids,
+            queued_at=synthesis_meta.get('queued_at', ''),
+        )
+
+    # If staging is enabled, produce pending candidate files for Curate review.
+    # Direct graph mutation was disabled above; approval is the only write path.
+    if (
+        staging_enabled
+        and synthesis_meta
+        and source == 'session_synthesis'
+        and respond
+        and not synthesis_failed
+    ):
+        try:
+            stage_from_api_response(
+                ctx.config.path,
+                synthesis_id=synthesis_meta['synthesis_id'],
+                vault_id=ctx.config.id,
+                session_id=synthesis_meta['session_id'],
+                transcript_sha256=synthesis_meta['transcript_sha256'],
+                response_text=response_text,
+                query=query,
+                active=active,
+                nodes=n,
+                activated_notes=activated_notes,
+                source=source,
+                llm_config=llm_config,
+                dry_run=False,
+                config=ctx.config.settings,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Session synthesis staging failed for %s: %s",
+                synthesis_meta.get('synthesis_id'), exc,
+            )
 
     # Neurogenesis runs after the initial activation broadcast. Send a second
     # ordered activation event so WebSocket clients render newly created notes
@@ -1611,6 +1779,476 @@ async def api_vaults(request, app_state: dict) -> web.Response:
     })
 
 
+async def api_synthesis_activity(request, app_state: dict) -> web.Response:
+    """Return vault-scoped session_synthesis activity and reversible operations."""
+    ctx, err = _resolve_vault_ctx(app_state, _vault_id_from_query(request))
+    if err:
+        return err
+    assert ctx is not None
+    return web.json_response(build_synthesis_activity(
+        ctx.config.path,
+        vault_id=ctx.config.id,
+        nodes=ctx.nodes,
+    ))
+
+
+async def api_synthesis_revert(request, app_state: dict) -> web.Response:
+    """Revert one journaled synthesis operation within the selected vault."""
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response({"error": "Invalid JSON body"}, status=400)
+    operation_id = str(data.get("operation_id") or "").strip() if isinstance(data, dict) else ""
+    if not operation_id:
+        return web.json_response({"error": "Missing operation_id"}, status=400)
+    ctx, err = _resolve_vault_ctx(app_state, data.get("vault_id") if isinstance(data, dict) else None)
+    if err:
+        return err
+    assert ctx is not None
+    result = revert_operation(ctx.config.path, operation_id)
+    if result.get("status") == "not_found":
+        return web.json_response(result, status=404)
+    if result.get("status") == "conflict":
+        return web.json_response(result, status=409)
+    if result.get("status") == "already_reverted":
+        return web.json_response(result, status=409)
+    result["vault_id"] = ctx.config.id
+    result["refresh_required"] = True
+    return web.json_response(result)
+
+
+async def api_synthesis_stage(request, app_state: dict) -> web.Response:
+    """Dry-run extraction: stage session_synthesis candidates without side effects.
+
+    POST /api/synthesis/stage
+
+    Body:
+      {
+        "vault_id": "...",
+        "synthesis_id": "...",
+        "session_id": "...",
+        "transcript_sha256": "...",
+        "response_text": "...",
+        "query": "...",
+        "activated_notes": [...],
+        "dry_run": true
+      }
+
+    Returns staged candidates and creates pending candidate files (unless dry_run).
+    """
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response({"error": "Invalid JSON body"}, status=400)
+
+    vault_id = _vault_id_from_body(data)
+    ctx, err = _resolve_vault_ctx(app_state, vault_id)
+    if err:
+        return err
+    assert ctx is not None
+
+    synthesis_id = str(data.get("synthesis_id") or "").strip()
+    session_id = str(data.get("session_id") or "").strip()
+    transcript_sha256 = str(data.get("transcript_sha256") or "").strip()
+    response_text = str(data.get("response_text") or "").strip()
+    query = str(data.get("query") or "").strip()
+    activated_notes = data.get("activated_notes") or []
+    dry_run = bool(data.get("dry_run", True))
+
+    if not synthesis_id or not session_id or not re.fullmatch(r"[0-9a-fA-F]{64}", transcript_sha256):
+        return web.json_response(
+            {"error": "Missing or invalid synthesis_id, session_id, or transcript_sha256"},
+            status=400,
+        )
+    if not response_text:
+        return web.json_response({"error": "Missing response_text"}, status=400)
+
+    try:
+        result = stage_from_api_response(
+            ctx.config.path,
+            synthesis_id=synthesis_id,
+            vault_id=ctx.config.id,
+            session_id=session_id,
+            transcript_sha256=transcript_sha256,
+            response_text=response_text,
+            query=query,
+            active={},
+            nodes=ctx.nodes,
+            activated_notes=activated_notes,
+            source="session_synthesis",
+            llm_config=resolve_llm_config_for_source(ctx.config.settings, "session_synthesis"),
+            dry_run=dry_run,
+            config=ctx.config.settings,
+        )
+    except ValueError as exc:
+        return web.json_response({"error": str(exc)}, status=400)
+    except Exception as exc:
+        logger.warning("api_synthesis_stage failed: %s", exc)
+        return web.json_response({"error": f"staging failed: {exc}"}, status=500)
+
+    return web.json_response(result)
+
+
+async def api_synthesis_candidates(request, app_state: dict) -> web.Response:
+    """List staged session_synthesis candidates for Curate review.
+
+    GET /api/synthesis/candidates?vault_id=...&status=...&synthesis_id=...
+    """
+    ctx, err = _resolve_vault_ctx(app_state, _vault_id_from_query(request))
+    if err:
+        return err
+    assert ctx is not None
+
+    from bdh_graph_harness.memory.session_synthesis_staging import list_candidates
+
+    status = request.query.get("status")
+    synthesis_id = request.query.get("synthesis_id")
+    candidates = list_candidates(
+        ctx.config.path,
+        status=status,
+        synthesis_id=synthesis_id,
+    )
+    return web.json_response({
+        "vault_id": ctx.config.id,
+        "count": len(candidates),
+        "candidates": [c.to_dict() for c in candidates],
+    })
+
+
+# Terminal apply states: once a candidate reaches one of these, re-applying
+# must return the previous result without a second mutation.
+_APPLIED_STATES = frozenset(
+    {"created", "merged", "noop", "failed", "conflict", "rejected", "reverted"}
+)
+
+
+def _find_created_operation_id(vault_root: str, synthesis_id: str, note_id: str) -> str:
+    """Return the journal operation_id for a freshly created note, if any."""
+    from bdh_graph_harness.neurogenesis.operation_journal import list_operation_records
+
+    note_path = note_id if note_id.endswith(".md") else f"{note_id}.md"
+    for record in reversed(list_operation_records(vault_root)):
+        if record.get("synthesis_id") == synthesis_id and record.get("note_path") == note_path:
+            return str(record.get("operation_id") or "")
+    return ""
+
+
+def _apply_approved_candidate(ctx, candidate) -> dict:
+    """Apply one approved candidate: create, merge, or noop.
+
+    Reuses the existing neurogenesis create/merge helpers and the operation
+    journal (which ``create_note``/``assimilate_evidence`` drive internally).
+    Returns a result dict with ``status`` in {created, merged, noop, conflict}.
+    """
+    title = candidate.title
+    definition = candidate.definition
+    n = ctx.nodes
+    vault_root = ctx.config.path
+
+    synthesis_meta = {
+        "session_id": candidate.session_id,
+        "synthesis_id": candidate.synthesis_id,
+        "transcript_sha256": candidate.transcript_sha256,
+    }
+    source_notes = list(candidate.provenance.get("source_notes") or [])
+    source_node_ids = list(candidate.provenance.get("source_node_ids") or [])
+
+    # Resolve the canonical target note (exact title, then semantic match).
+    canonical_id = next(
+        (
+            nid
+            for nid, node in n.items()
+            if str(node.get("title", "")).casefold() == title.casefold()
+        ),
+        None,
+    )
+    if canonical_id is None:
+        match = find_semantic_match(
+            title,
+            definition,
+            threshold=MERGE_SIMILARITY_THRESHOLD,
+            vault_root=vault_root,
+            config=ctx.config.settings,
+        )
+        canonical_id = match.get("node_id") if match else None
+
+    if canonical_id is not None and canonical_id in n:
+        if looks_conflicting(definition):
+            return {
+                "status": "conflict",
+                "reason": "candidate definition conflicts with existing note",
+                "note_path": str(n[canonical_id].get("relative_path") or ""),
+            }
+        merged = assimilate_evidence(
+            vault_root,
+            canonical_id,
+            n[canonical_id],
+            definition,
+            source_notes=source_notes,
+            source_node_ids=source_node_ids,
+            query="",
+            source="session_synthesis",
+            synthesis_meta=synthesis_meta,
+        )
+        if merged.get("status") == "merged":
+            return {
+                "status": "merged",
+                "note_path": str(merged.get("path") or ""),
+                "operation_id": str(merged.get("operation_id") or ""),
+            }
+        return {
+            "status": "noop",
+            "reason": f"merge returned {merged.get('status')}",
+            "note_path": str(merged.get("path") or ""),
+        }
+
+    # No canonical note: create a new one.
+    new_note_id = create_note(
+        vault_root,
+        title,
+        definition,
+        source_notes,
+        "",
+        neurogenesis_dir=ctx.config.settings.get("neurogenesis_dir"),
+        source_node_ids=source_node_ids,
+        source="session_synthesis",
+        synthesis_meta=synthesis_meta,
+    )
+    if new_note_id:
+        note_path = str(new_note_id) if str(new_note_id).endswith(".md") else f"{new_note_id}.md"
+        return {
+            "status": "created",
+            "note_path": note_path,
+            "operation_id": _find_created_operation_id(
+                vault_root, synthesis_meta["synthesis_id"], note_path
+            ),
+        }
+    return {"status": "noop", "reason": "note already exists at target path"}
+
+
+async def api_synthesis_approve(request, app_state: dict) -> web.Response:
+    """Approve a pending session_synthesis candidate without applying it.
+
+    POST /api/synthesis/approve
+
+    BDH remains the source of truth for the approval gate. Mission Control
+    records the human action locally, then calls this endpoint before apply.
+    """
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response({"error": "Invalid JSON body"}, status=400)
+    if not isinstance(data, dict):
+        return web.json_response({"error": "Invalid JSON body"}, status=400)
+
+    candidate_id = str(data.get("candidate_id") or "").strip()
+    synthesis_id = str(data.get("synthesis_id") or "").strip()
+    session_id = str(data.get("session_id") or "").strip()
+    source = str(data.get("source") or "").strip()
+    if not candidate_id or not synthesis_id or not session_id:
+        return web.json_response({"error": "Missing candidate_id, synthesis_id, or session_id"}, status=400)
+    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}", candidate_id) is None:
+        return web.json_response({"error": "Invalid candidate_id"}, status=400)
+    if source != "session_synthesis":
+        return web.json_response({"error": "source must be 'session_synthesis'"}, status=400)
+
+    ctx, err = _resolve_vault_ctx(app_state, _vault_id_from_body(data))
+    if err:
+        return err
+    assert ctx is not None
+    from bdh_graph_harness.memory.session_synthesis_staging import load_candidate, update_candidate_status
+
+    candidate = load_candidate(ctx.config.path, candidate_id)
+    if candidate is None:
+        return web.json_response({"error": f"Unknown candidate '{candidate_id}'"}, status=404)
+    if (
+        candidate.vault_id != ctx.config.id
+        or candidate.synthesis_id != synthesis_id
+        or candidate.session_id != session_id
+        or candidate.source != source
+    ):
+        return web.json_response({"error": "candidate correlation does not match request"}, status=400)
+    if candidate.status == "approved":
+        return web.json_response({"candidate_id": candidate_id, "status": "approved", "idempotent": True})
+    if candidate.status != "pending_review":
+        return web.json_response({"error": f"candidate '{candidate_id}' is not pending_review (status={candidate.status})"}, status=400)
+
+    approved = update_candidate_status(ctx.config.path, candidate_id, "approved", reason="approved in Mission Control Curate")
+    if approved is None:
+        return web.json_response({"error": f"Unknown candidate '{candidate_id}'"}, status=404)
+    return web.json_response({"candidate_id": candidate_id, "status": approved.status, "idempotent": False})
+
+
+async def api_synthesis_apply(request, app_state: dict) -> web.Response:
+    """Apply an approved session_synthesis candidate to the vault (idempotent).
+
+    POST /api/synthesis/apply
+
+    Body:
+      {
+        "candidate_id": "...",
+        "synthesis_id": "...",
+        "session_id": "...",
+        "vault_id": "...",          # optional; defaults to the registry default
+        "source": "session_synthesis"
+      }
+
+    Only an approved candidate reference is accepted; raw transcript or
+    concept text is never accepted.  The candidate is resolved from
+    BDH-owned staged data, correlation-checked, then applied exactly once
+    (create/merge/noop).  Repeating the identical apply returns the previous
+    result without a second note, Hebbian update, or journal row.
+    """
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response({"error": "Invalid JSON body"}, status=400)
+    if not isinstance(data, dict):
+        return web.json_response({"error": "Invalid JSON body"}, status=400)
+
+    candidate_id = str(data.get("candidate_id") or "").strip()
+    synthesis_id = str(data.get("synthesis_id") or "").strip()
+    session_id = str(data.get("session_id") or "").strip()
+    source = str(data.get("source") or "").strip()
+
+    if not candidate_id or not synthesis_id or not session_id:
+        return web.json_response(
+            {"error": "Missing candidate_id, synthesis_id, or session_id"},
+            status=400,
+        )
+    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}", candidate_id) is None:
+        return web.json_response({"error": "Invalid candidate_id"}, status=400)
+    if source != "session_synthesis":
+        return web.json_response(
+            {"error": "source must be 'session_synthesis'"},
+            status=400,
+        )
+
+    ctx, err = _resolve_vault_ctx(app_state, _vault_id_from_body(data))
+    if err:
+        return err
+    assert ctx is not None
+
+    from bdh_graph_harness.memory.session_synthesis_staging import (
+        load_candidate,
+        update_candidate_status,
+    )
+    from bdh_graph_harness.memory.curate_audit import (
+        latest_curate_state,
+        transition_curate_state,
+    )
+
+    candidate = load_candidate(ctx.config.path, candidate_id)
+    if candidate is None:
+        return web.json_response(
+            {"error": f"Unknown candidate '{candidate_id}'"},
+            status=404,
+        )
+
+    # Correlation checks: the candidate must belong to this vault and match
+    # the supplied synthesis/session/source references.
+    if candidate.vault_id != ctx.config.id:
+        return web.json_response(
+            {"error": "candidate vault_id does not match resolved vault"},
+            status=400,
+        )
+    if candidate.synthesis_id != synthesis_id:
+        return web.json_response(
+            {"error": "candidate synthesis_id does not match request"},
+            status=400,
+        )
+    if candidate.session_id != session_id:
+        return web.json_response(
+            {"error": "candidate session_id does not match request"},
+            status=400,
+        )
+    if candidate.source != "session_synthesis":
+        return web.json_response(
+            {"error": "candidate source is not session_synthesis"},
+            status=400,
+        )
+
+    # Idempotency: if the candidate already reached a terminal apply state,
+    # return the previous result without re-applying.
+    latest = latest_curate_state(ctx.config.path, candidate_id)
+    if latest is not None and latest.state in _APPLIED_STATES:
+        return web.json_response({
+            "candidate_id": candidate_id,
+            "synthesis_id": synthesis_id,
+            "vault_id": ctx.config.id,
+            "status": latest.state,
+            "note_path": latest.note_path,
+            "operation_id": latest.operation_id,
+            "reason": latest.reason,
+            "idempotent": True,
+            "applied": latest.state in {"created", "merged"},
+        })
+
+    # Approval gate: only an approved candidate may be applied.
+    if candidate.status != "approved":
+        return web.json_response(
+            {
+                "error": (
+                    f"candidate '{candidate_id}' is not approved "
+                    f"(status={candidate.status})"
+                )
+            },
+            status=400,
+        )
+
+    # Perform exactly one create/merge/noop operation.
+    try:
+        result = _apply_approved_candidate(ctx, candidate)
+    except Exception as exc:
+        logger.warning("api_synthesis_apply failed for %s: %s", candidate_id, exc)
+        try:
+            transition_curate_state(
+                ctx.config.path,
+                candidate_id,
+                "failed",
+                reason=f"{type(exc).__name__}: {exc}",
+            )
+        except ValueError:
+            pass
+        return web.json_response(
+            {"error": f"apply failed: {exc}", "candidate_id": candidate_id},
+            status=500,
+        )
+
+    status = result["status"]
+    # Transition the audit state to match the operation outcome.
+    try:
+        transition_curate_state(
+            ctx.config.path,
+            candidate_id,
+            status,
+            reason=result.get("reason", ""),
+            note_path=result.get("note_path", ""),
+            operation_id=result.get("operation_id", ""),
+        )
+    except ValueError as exc:
+        logger.warning(
+            "api_synthesis_apply audit transition failed for %s: %s",
+            candidate_id, exc,
+        )
+
+    # Mark the candidate file as applied on a successful create/merge/noop.
+    if status in {"created", "merged", "noop"}:
+        update_candidate_status(ctx.config.path, candidate_id, "applied")
+
+    return web.json_response({
+        "candidate_id": candidate_id,
+        "synthesis_id": synthesis_id,
+        "vault_id": ctx.config.id,
+        "status": status,
+        "note_path": result.get("note_path", ""),
+        "operation_id": result.get("operation_id", ""),
+        "reason": result.get("reason", ""),
+        "idempotent": False,
+        "applied": status in {"created", "merged"},
+    })
+
+
 # ---------------------------------------------------------------------------
 # Route registration
 # ---------------------------------------------------------------------------
@@ -1668,6 +2306,24 @@ def setup_routes(app: web.Application, app_state: dict, ws_clients: set) -> None
     async def _vaults(request):
         return await api_vaults(request, app_state)
 
+    async def _synthesis_activity(request):
+        return await api_synthesis_activity(request, app_state)
+
+    async def _synthesis_revert(request):
+        return await api_synthesis_revert(request, app_state)
+
+    async def _synthesis_stage(request):
+        return await api_synthesis_stage(request, app_state)
+
+    async def _synthesis_candidates(request):
+        return await api_synthesis_candidates(request, app_state)
+
+    async def _synthesis_approve(request):
+        return await api_synthesis_approve(request, app_state)
+
+    async def _synthesis_apply(request):
+        return await api_synthesis_apply(request, app_state)
+
     app.router.add_get('/', _index)
     app.router.add_get('/ws', _ws)
     app.router.add_get('/health', _health)
@@ -1682,6 +2338,12 @@ def setup_routes(app: web.Application, app_state: dict, ws_clients: set) -> None
     app.router.add_get('/api/quality', _quality)
     app.router.add_get('/api/consolidation-stats', _consolidation_stats)
     app.router.add_get('/api/vaults', _vaults)
+    app.router.add_get('/api/synthesis-activity', _synthesis_activity)
+    app.router.add_post('/api/synthesis/revert', _synthesis_revert)
+    app.router.add_post('/api/synthesis/stage', _synthesis_stage)
+    app.router.add_get('/api/synthesis/candidates', _synthesis_candidates)
+    app.router.add_post('/api/synthesis/approve', _synthesis_approve)
+    app.router.add_post('/api/synthesis/apply', _synthesis_apply)
     app.router.add_post('/api/query', _query)
     app.router.add_post('/api/stream', _stream)
     app.router.add_post('/api/refresh', _refresh)
