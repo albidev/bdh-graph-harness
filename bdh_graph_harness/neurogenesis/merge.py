@@ -11,6 +11,10 @@ from pathlib import Path
 from typing import Any
 
 from bdh_graph_harness.graph.parser import parse_frontmatter, parse_json_frontmatter_list
+from bdh_graph_harness.neurogenesis.operation_journal import (
+    complete_operation,
+    prepare_operation,
+)
 
 MERGE_SIMILARITY_THRESHOLD = 0.82
 
@@ -85,11 +89,14 @@ def assimilate_evidence(
     source_node_ids: list[str] | None = None,
     query: str = "",
     source: str | None = None,
+    synthesis_meta: dict | None = None,
 ) -> dict[str, Any]:
     """Append new evidence to an existing canonical neurogenesis note.
 
-    Returns a structured result. Existing content is never replaced; repeated
-    evidence is detected by normalized text and becomes a no-op.
+    ``synthesis_meta`` carries session-synthesis audit metadata
+    (session_id, synthesis_id, transcript_sha256). It is recorded in
+    the evidence section for traceability without storing the raw
+    transcript.
     """
     raw_path = node.get("absolute_path")
     if raw_path:
@@ -112,28 +119,73 @@ def assimilate_evidence(
     sources = ", ".join(str(item) for item in (source_notes or [])[:3]) or "session recovery"
     query_line = " ".join((query or "").split())[:240]
     provenance_line = f"  - provenance: {source}\n" if source else ""
+
+    # Synthesis audit metadata lines
+    synth_session_id = synthesis_meta.get("session_id") if synthesis_meta else None
+    synth_id = synthesis_meta.get("synthesis_id") if synthesis_meta else None
+    transcript_sha = synthesis_meta.get("transcript_sha256") if synthesis_meta else None
+    queued_at = synthesis_meta.get("queued_at") if synthesis_meta else None
+    synth_lines = ""
+    if synth_session_id:
+        synth_lines += f"  - synthesis_session_id: {synth_session_id}\n"
+    if synth_id:
+        synth_lines += f"  - synthesis_id: {synth_id}\n"
+    if transcript_sha:
+        synth_lines += f"  - transcript_sha256: {transcript_sha}\n"
+    if queued_at:
+        synth_lines += f"  - queued_at: {queued_at}\n"
+
     section = (
         "\n\n## Assimilated Evidence\n"
         f"- **{date.today().isoformat()}** — {definition.strip()}\n"
         f"  - source: {sources}\n"
         f"  - query: {query_line}\n"
         f"{provenance_line}"
+        f"{synth_lines}"
     )
     updated = _merge_source_node_ids(existing.rstrip() + section + "\n", source_node_ids)
     updated = _update_frontmatter(updated)
     if updated == existing:
         return {"status": "already_present", "node_id": node_id, "path": str(note_path)}
 
+    operation = None
+    if synthesis_meta and synthesis_meta.get("synthesis_id"):
+        operation = prepare_operation(
+            vault_root,
+            synthesis_meta=synthesis_meta,
+            action="merged",
+            note_path=note_path,
+            before_content=existing,
+        )
+
     fd, tmp_name = tempfile.mkstemp(prefix=f".{note_path.name}.", dir=str(note_path.parent), text=True)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             handle.write(updated)
         os.replace(tmp_name, note_path)
+        if operation is not None:
+            complete_operation(vault_root, operation, note_path=note_path)
     except Exception:
         try:
             os.unlink(tmp_name)
         except OSError:
             pass
+        if operation is not None:
+            rollback_fd, rollback_name = tempfile.mkstemp(
+                prefix=f".{note_path.name}.rollback.", dir=str(note_path.parent), text=True
+            )
+            try:
+                with os.fdopen(rollback_fd, "w", encoding="utf-8") as handle:
+                    handle.write(existing)
+                os.replace(rollback_name, note_path)
+            except Exception:
+                try:
+                    os.unlink(rollback_name)
+                except OSError:
+                    pass
         raise
 
-    return {"status": "merged", "node_id": node_id, "path": str(note_path)}
+    result = {"status": "merged", "node_id": node_id, "path": str(note_path)}
+    if operation is not None:
+        result["operation_id"] = operation["operation_id"]
+    return result

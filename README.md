@@ -374,6 +374,9 @@ See `bdh-config.yaml` for all parameters. Key ones:
 | `hebbian_dynamic_shadow_enabled` | `true` | Emit privacy-safe telemetry when dynamic-only results are recovered |
 | `consolidation_dormant_persist_cycles` | 3 | Remove nodes dormant for N+ consolidation cycles |
 | `consolidation_prune_dormant_nodes` | `true` | Delete stale dormant nodes (not just hide) |
+| `session_synthesis_staging_enabled` | `false` | Gate `session_synthesis` writes behind Curate: extract concepts into pending candidate files instead of creating/merging notes directly |
+| `session_synthesis_staging_dir` | `.bdh-candidates` | Directory (relative to the vault root) holding staged Curate candidate files |
+| `session_synthesis_staging_max_concepts` | 5 | Cap on staged candidates per synthesis |
 
 ## Tests
 
