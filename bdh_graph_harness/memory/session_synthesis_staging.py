@@ -277,6 +277,7 @@ def stage_session_synthesis_candidates(
     query: str = "",
     active: dict[str, Any] | None = None,
     nodes: dict[str, Any] | None = None,
+    source: str = "session_synthesis",
     source_notes: list[str] | None = None,
     source_node_ids: list[str] | None = None,
     llm_config: dict[str, Any] | None = None,
@@ -431,7 +432,7 @@ def stage_session_synthesis_candidates(
             vault_id=vault_id,
             session_id=session_id,
             transcript_sha256=transcript_sha256,
-            source="session_synthesis",
+            source=source,
             title=title,
             definition=definition,
             confidence=str(concept.get("confidence", "low")).lower(),
@@ -463,7 +464,7 @@ def stage_session_synthesis_candidates(
                 transcript_sha256=transcript_sha256,
                 extra={
                     "title": title,
-                    "source": "session_synthesis",
+                    "source": source,
                     "status": "pending_review",
                 },
             )
@@ -557,6 +558,7 @@ def stage_from_api_response(
         query=query,
         active=active,
         nodes=nodes,
+        source=source,
         source_notes=source_notes,
         source_node_ids=source_node_ids,
         llm_config=llm_config,

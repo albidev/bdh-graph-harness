@@ -754,10 +754,11 @@ async def api_query(request, app_state: dict, ws_clients: set) -> web.Response:
     # requests or hashes raw transcript.
     synthesis_meta = None
     raw_metadata = data.get('metadata')
-    if source == 'session_synthesis' and raw_metadata is not None and not isinstance(raw_metadata, dict):
-        return web.json_response({'error': 'Invalid session synthesis metadata'}, status=400)
-    if source == 'session_synthesis' and isinstance(raw_metadata, dict):
-        raw_session_id = raw_metadata.get('session_id')
+    _STAGED_SOURCES = ('session_synthesis', 'room_synthesis')
+    if source in _STAGED_SOURCES and raw_metadata is not None and not isinstance(raw_metadata, dict):
+        return web.json_response({'error': 'Invalid synthesis metadata'}, status=400)
+    if source in _STAGED_SOURCES and isinstance(raw_metadata, dict):
+        raw_session_id = raw_metadata.get('session_id') or raw_metadata.get('room_id')
         raw_synthesis_id = raw_metadata.get('synthesis_id')
         raw_transcript_sha = raw_metadata.get('transcript_sha256')
         raw_queued_at = raw_metadata.get('queued_at')
@@ -786,19 +787,20 @@ async def api_query(request, app_state: dict, ws_clients: set) -> web.Response:
                 reason='invalid metadata fields: ' + ', '.join(metadata_errors),
                 queued_at=str(raw_queued_at) if raw_queued_at is not None else '',
             )
-            return web.json_response({'error': 'Invalid session synthesis metadata'}, status=400)
+            return web.json_response({'error': 'Invalid synthesis metadata'}, status=400)
         synthesis_meta = {
             'session_id': session_id,
             'synthesis_id': synthesis_id,
             'transcript_sha256': transcript_sha,
             'queued_at': str(raw_queued_at) if raw_queued_at is not None else '',
+            'room_id': str(raw_metadata.get('room_id') or ''),
         }
 
     # Session synthesis staging is a strict pre-write gate. Retrieval remains
     # available, but Hebbian plasticity and neurogenesis stay disabled until a
     # Curate approval explicitly applies the persisted candidate.
     staging_enabled = ctx.config.settings.get('session_synthesis_staging_enabled', False)
-    if staging_enabled and synthesis_meta and source == 'session_synthesis':
+    if staging_enabled and synthesis_meta and source in _STAGED_SOURCES:
         learn = False
 
     llm_query = query
@@ -839,7 +841,7 @@ async def api_query(request, app_state: dict, ws_clients: set) -> web.Response:
 
     new_concepts_list = []
     synthesis_failed = (
-        source == 'session_synthesis'
+        source in _STAGED_SOURCES
         and synthesis_meta is not None
         and isinstance(response_text, str)
         and (response_text.startswith('[LLM error:') or response_text == '[no response from LLM]')
@@ -851,7 +853,7 @@ async def api_query(request, app_state: dict, ws_clients: set) -> web.Response:
                 llm_config=llm_config, synthesis_meta=synthesis_meta,
             )
         except Exception as exc:
-            if synthesis_meta and source == 'session_synthesis':
+            if synthesis_meta and source in _STAGED_SOURCES:
                 record_synthesis_audit(
                     ctx.config.path,
                     session_id=synthesis_meta['session_id'],
@@ -869,7 +871,7 @@ async def api_query(request, app_state: dict, ws_clients: set) -> web.Response:
             raise
 
     # Record synthesis audit entry when synthesis metadata is present
-    if synthesis_meta and source == 'session_synthesis':
+    if synthesis_meta and source in _STAGED_SOURCES:
         concept_ids = [c.get('id', '') for c in new_concepts_list if c.get('id')]
         merged_ids = [c['id'] for c in new_concepts_list if c.get('merged')]
         created_ids = [c['id'] for c in new_concepts_list if not c.get('merged')]
@@ -904,7 +906,7 @@ async def api_query(request, app_state: dict, ws_clients: set) -> web.Response:
     if (
         staging_enabled
         and synthesis_meta
-        and source == 'session_synthesis'
+        and source in _STAGED_SOURCES
         and respond
         and not synthesis_failed
     ):
@@ -1987,7 +1989,7 @@ def _apply_approved_candidate(ctx, candidate) -> dict:
             source_notes=source_notes,
             source_node_ids=source_node_ids,
             query="",
-            source="session_synthesis",
+            source=candidate.source,
             synthesis_meta=synthesis_meta,
         )
         if merged.get("status") == "merged":
@@ -2011,7 +2013,7 @@ def _apply_approved_candidate(ctx, candidate) -> dict:
         "",
         neurogenesis_dir=ctx.config.settings.get("neurogenesis_dir"),
         source_node_ids=source_node_ids,
-        source="session_synthesis",
+        source=candidate.source,
         synthesis_meta=synthesis_meta,
     )
     if new_note_id:
@@ -2049,8 +2051,8 @@ async def api_synthesis_approve(request, app_state: dict) -> web.Response:
         return web.json_response({"error": "Missing candidate_id, synthesis_id, or session_id"}, status=400)
     if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}", candidate_id) is None:
         return web.json_response({"error": "Invalid candidate_id"}, status=400)
-    if source != "session_synthesis":
-        return web.json_response({"error": "source must be 'session_synthesis'"}, status=400)
+    if source not in ("session_synthesis", "room_synthesis"):
+        return web.json_response({"error": "source must be 'session_synthesis' or 'room_synthesis'"}, status=400)
 
     ctx, err = _resolve_vault_ctx(app_state, _vault_id_from_body(data))
     if err:

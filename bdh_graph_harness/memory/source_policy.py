@@ -116,6 +116,14 @@ register_source(
 )
 
 register_source(
+    "room_synthesis",
+    frequency_increment=0.2,
+    use_user_prompt_for_retrieval=True,
+    provenance_label="room_synthesis",
+    allow_neurogenesis=True,
+)
+
+register_source(
     "cron",
     frequency_increment=0.3,
     provenance_label="cron",
