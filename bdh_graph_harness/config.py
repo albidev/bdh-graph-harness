@@ -448,39 +448,23 @@ def resolve_llm_config_for_source(
     """
     source_config = dict(base_config or CONFIG)
     overrides = source_config.pop('llm_source_overrides', {})
-    if not source or not isinstance(overrides, dict):
-        return resolve_llm_config(source_config)
+    override = overrides.get(source) if source and isinstance(overrides, dict) else None
+    if isinstance(override, dict):
+        # Source overrides are complete operator configuration.  Merge them into
+        # the nested LLM block without mutating the caller's config, then let the
+        # normal resolver validate the selected provider and endpoint.
+        nested = dict(source_config.get('llm') or {})
+        nested.update(override)
+        source_config['llm'] = nested
 
-    override = overrides.get(source)
-    if not isinstance(override, dict):
-        # No explicit override for this source, but session_synthesis still
-        # defaults to local oMLX to prevent accidental Cloud fallback.
-        if source == 'session_synthesis':
-            nested = dict(source_config.get('llm') or {})
-            nested['provider'] = 'omlx'
-            nested['model'] = nested.get('model', 'qwen3.8-27b-oq4e-mtp')
-            nested['base_url'] = nested.get('base_url', 'http://127.0.0.1:8083/v1')
-            nested['local_only'] = True
-            nested['chat_template_kwargs'] = nested.get('chat_template_kwargs', {'enable_thinking': False, 'thinking': False})
-            nested['llm_fallbacks'] = []
-            source_config['llm'] = nested
-            source_config['llm_fallbacks'] = []
-        return resolve_llm_config(source_config)
-
-    nested = dict(source_config.get('llm') or {})
-    nested.update(override)
-    source_config['llm'] = nested
-    # session_synthesis: hard-force local-only oMLX with empty fallback chain.
-    # Even an explicit cloud override must not redirect this bounded workflow
-    # to Nous/OpenRouter. local_only is an extra validation gate only.
     if source == 'session_synthesis':
-        nested['provider'] = 'omlx'
-        nested['model'] = 'qwen3.8-27b-oq4e-mtp'
-        nested['base_url'] = 'http://127.0.0.1:8083/v1'
-        nested['local_only'] = True
-        nested['chat_template_kwargs'] = {'enable_thinking': False, 'thinking': False}
-        nested['llm_fallbacks'] = []
+        # Synthesis must not inherit the global failover chain: a bounded Curate
+        # workflow must report an unavailable configured backend instead of
+        # silently sending the transcript to another provider.  This is the only
+        # source-specific policy here; provider/model/base_url remain configurable
+        # so Linux can use Ollama and macOS can explicitly use oMLX.
         source_config['llm_fallbacks'] = []
+
     return resolve_llm_config(source_config)
 
 

@@ -599,7 +599,7 @@ def test_levelb_annotates_node_quality_when_state_given():
     assert "quality=0.9" in user_prompt
 
 def test_source_llm_override_isolated_from_global_config(monkeypatch):
-    """session_synthesis forces local-only oMLX even with explicit cloud override."""
+    """session_synthesis honors its explicit provider while isolating fallbacks."""
     from bdh_graph_harness.config import resolve_llm_config_for_source
 
     base = {
@@ -608,13 +608,15 @@ def test_source_llm_override_isolated_from_global_config(monkeypatch):
         "llm_base_url": "https://ollama.com/v1",
         "llm_temperature": 0.3,
         "llm_max_ctx": 4096,
+        "llm_fallbacks": [
+            {"provider": "openrouter", "model": "openrouter/free"},
+        ],
         "llm_source_overrides": {
             "session_synthesis": {
-                "provider": "ollama-cloud",
-                "model": "deepseek-v4-flash:cloud",
+                "provider": "ollama",
+                "model": "qwen3.8:27b",
+                "base_url": "http://127.0.0.1:11434",
                 "temperature": 0.1,
-                "reasoning_effort": "low",
-                "thinking": "enabled",
             },
         },
     }
@@ -622,16 +624,107 @@ def test_source_llm_override_isolated_from_global_config(monkeypatch):
     synthesis = resolve_llm_config_for_source(base, "session_synthesis")
     normal = resolve_llm_config_for_source(base, "assistant_response")
 
-    # session_synthesis always forces local-only oMLX
-    assert synthesis["llm_provider"] == "omlx"
-    assert synthesis["llm_model"] == "qwen3.8-27b-oq4e-mtp"
-    assert synthesis["llm_base_url"] == "http://127.0.0.1:8083/v1"
-    assert synthesis["llm_local_only"] is True
+    assert synthesis["llm_provider"] == "ollama"
+    assert synthesis["llm_model"] == "qwen3.8:27b"
+    assert synthesis["ollama_url"] == "http://127.0.0.1:11434"
+    assert synthesis["llm_endpoint"] == "http://127.0.0.1:11434/api/chat"
     assert synthesis["llm_fallbacks"] == []
-    assert synthesis["llm_chat_template_kwargs"] == {"enable_thinking": False, "thinking": False}
-    # Other sources unaffected
+    # Other sources and the caller's config remain unaffected.
     assert normal["llm_model"] == "deepseek-v4-pro"
+    assert normal["llm_fallbacks"] == base["llm_fallbacks"]
     assert base["llm_model"] == "deepseek-v4-pro"
+
+
+def test_session_synthesis_explicit_omlx_override_is_preserved():
+    """macOS can retain its oMLX path through explicit operator configuration."""
+    from bdh_graph_harness.config import resolve_llm_config_for_source
+
+    config = resolve_llm_config_for_source({
+        "llm_provider": "ollama",
+        "llm_model": "qwen3.8:27b",
+        "llm_source_overrides": {
+            "session_synthesis": {
+                "provider": "omlx",
+                "model": "qwen3.8-27b-oq4e-mtp",
+                "base_url": "http://127.0.0.1:8083/v1",
+                "local_only": True,
+                "chat_template_kwargs": {"enable_thinking": False, "thinking": False},
+            },
+        },
+    }, "session_synthesis")
+
+    assert config["llm_provider"] == "omlx"
+    assert config["llm_model"] == "qwen3.8-27b-oq4e-mtp"
+    assert config["llm_base_url"] == "http://127.0.0.1:8083/v1"
+    assert config["llm_local_only"] is True
+    assert config["llm_chat_template_kwargs"] == {"enable_thinking": False, "thinking": False}
+    assert config["llm_fallbacks"] == []
+
+
+def test_session_synthesis_linux_default_inherits_configured_ollama():
+    """Without a source override, a Linux Ollama config is not replaced by oMLX."""
+    from bdh_graph_harness.config import resolve_llm_config_for_source
+
+    config = resolve_llm_config_for_source({
+        "llm_provider": "ollama",
+        "llm_model": "qwen3.8:27b",
+        "ollama_url": "http://127.0.0.1:11434",
+        "llm_fallbacks": [{"provider": "omlx", "model": "unused"}],
+    }, "session_synthesis")
+
+    assert config["llm_provider"] == "ollama"
+    assert config["llm_model"] == "qwen3.8:27b"
+    assert config["llm_endpoint"] == "http://127.0.0.1:11434/api/chat"
+    assert config["llm_fallbacks"] == []
+
+
+def test_session_synthesis_source_policy_does_not_change_other_sources():
+    """The no-fallback policy is scoped to session_synthesis only."""
+    from bdh_graph_harness.config import resolve_llm_config_for_source
+
+    base = {
+        "llm_provider": "ollama-cloud",
+        "llm_model": "deepseek-v4-pro",
+        "llm_fallbacks": [{"provider": "omlx", "model": "local"}],
+    }
+    normal = resolve_llm_config_for_source(base, "assistant_response")
+    assert normal["llm_provider"] == "ollama-cloud"
+    assert normal["llm_fallbacks"] == base["llm_fallbacks"]
+
+
+def test_session_synthesis_unavailable_backend_returns_diagnostic_without_fallback(
+    mock_active_notes, mock_nodes, monkeypatch,
+):
+    """A down synthesis backend returns an error and never tries global fallbacks."""
+    import urllib.error
+    import urllib.request
+
+    from bdh_graph_harness.config import resolve_llm_config_for_source
+
+    config = resolve_llm_config_for_source({
+        "llm_provider": "ollama",
+        "llm_model": "qwen3.8:27b",
+        "ollama_url": "http://127.0.0.1:11434",
+        "llm_fallbacks": [
+            {"provider": "omlx", "model": "qwen3.8-27b-oq4e-mtp"},
+        ],
+    }, "session_synthesis")
+    calls = []
+
+    def unavailable(req, timeout):
+        calls.append(req.full_url)
+        raise urllib.error.URLError("connection refused")
+
+    monkeypatch.setattr(urllib.request, "urlopen", unavailable)
+    monkeypatch.setattr(bdh_providers, "retry_with_backoff", lambda fn: fn())
+
+    result = bdh_providers.llm_respond(
+        "session synthesis", mock_active_notes, mock_nodes, config=config,
+    )
+
+    assert result.startswith("[LLM error:")
+    assert "connection refused" in result
+    assert calls == [config["llm_endpoint"]]
 
 
 def test_openai_payload_carries_low_reasoning_for_source_override(

@@ -34,6 +34,28 @@ not exposed as a revert action.
 
 ## Curate pre-write gate (session_synthesis staging + apply)
 
+Provider selection and Curate staging are independent settings. Configure the
+source-specific provider separately, then enable the pre-write gate only when
+Curate should receive pending candidates:
+
+```yaml
+# Linux: inherit the global Ollama config, or set this explicit override.
+# If the global provider is cloud-based, use this override to force local Ollama.
+llm_source_overrides:
+  session_synthesis:
+    provider: ollama
+    model: qwen3.8:27b
+    base_url: http://127.0.0.1:11434
+
+# Independent Curate gate.
+session_synthesis_staging_enabled: true
+```
+
+On macOS, an explicit `provider: omlx` override keeps the existing local oMLX
+path. No implicit platform override is applied, and the source does not inherit
+the global fallback chain; an unavailable configured backend is returned as a
+clear LLM error instead of silently switching providers.
+
 When `session_synthesis_staging_enabled: true`, `session_synthesis` writes are
 routed through a human review gate instead of creating/merging notes directly.
 Extraction and application are separated:

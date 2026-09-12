@@ -77,55 +77,71 @@ def _capture_app(monkeypatch, config, nodes, edges, collection, state):
 
 
 # ---------------------------------------------------------------------------
-# Tests: oMLX default routing for session_synthesis
+# Tests: source-specific session_synthesis routing
 # ---------------------------------------------------------------------------
 
 
-class TestSessionSynthesisDefaultsToOmlx:
-    def test_session_synthesis_routes_to_omlx_with_local_only(self):
-        """Without explicit overrides, session_synthesis defaults to local oMLX."""
-        base = {'llm_provider': 'ollama-cloud', 'llm_model': 'deepseek-v4-pro'}
+class TestSessionSynthesisSourceRouting:
+    def test_session_synthesis_inherits_configured_ollama_without_override(self):
+        """A Linux-style Ollama config is not replaced by oMLX."""
+        base = {
+            'llm_provider': 'ollama',
+            'llm_model': 'qwen3.8:27b',
+            'ollama_url': 'http://127.0.0.1:11434',
+        }
         config = resolve_llm_config_for_source(base, 'session_synthesis')
-        assert config['llm_provider'] == 'omlx'
-        assert config['llm_local_only'] is True
-        assert config['llm_base_url'] == 'http://127.0.0.1:8083/v1'
+        assert config['llm_provider'] == 'ollama'
+        assert config['llm_model'] == 'qwen3.8:27b'
+        assert config['llm_endpoint'] == 'http://127.0.0.1:11434/api/chat'
 
-    def test_session_synthesis_has_chat_template_kwargs_thinking_off(self):
-        """session_synthesis default includes chat_template_kwargs enable_thinking=false,thinking=false."""
-        base = {'llm_provider': 'ollama-cloud', 'llm_model': 'deepseek-v4-pro'}
-        config = resolve_llm_config_for_source(base, 'session_synthesis')
-        assert config.get('llm_chat_template_kwargs') == {'enable_thinking': False, 'thinking': False}
-
-    def test_session_synthesis_override_forced_to_omlx(self):
-        """Explicit overrides for session_synthesis are forced to local-only oMLX."""
+    def test_session_synthesis_explicit_omlx_override_is_preserved(self):
+        """The existing macOS path remains available through explicit config."""
         base = {
             'llm_provider': 'ollama-cloud',
             'llm_model': 'deepseek-v4-pro',
             'llm_source_overrides': {
                 'session_synthesis': {
-                    'provider': 'ollama-cloud',
-                    'model': 'deepseek-v4-flash:cloud',
-                    'temperature': 0.1,
+                    'provider': 'omlx',
+                    'model': 'qwen3.8-27b-oq4e-mtp',
+                    'base_url': 'http://127.0.0.1:8083/v1',
+                    'local_only': True,
+                    'chat_template_kwargs': {'enable_thinking': False, 'thinking': False},
                 },
             },
         }
         config = resolve_llm_config_for_source(base, 'session_synthesis')
         assert config['llm_provider'] == 'omlx'
+        assert config['llm_model'] == 'qwen3.8-27b-oq4e-mtp'
         assert config['llm_local_only'] is True
         assert config['llm_base_url'] == 'http://127.0.0.1:8083/v1'
+        assert config['llm_chat_template_kwargs'] == {
+            'enable_thinking': False, 'thinking': False,
+        }
 
-    def test_other_sources_not_affected_by_omlx_default(self):
-        """Other sources (e.g. assistant_response) are not affected by oMLX default."""
-        base = {'llm_provider': 'ollama-cloud', 'llm_model': 'deepseek-v4-pro'}
-        config = resolve_llm_config_for_source(base, 'assistant_response')
-        assert config['llm_provider'] == 'ollama-cloud'
-        assert config['llm_model'] == 'deepseek-v4-pro'
-
-    def test_session_synthesis_has_empty_fallback_chain(self):
-        """Local-only session synthesis must not inherit cloud fallbacks."""
+    def test_session_synthesis_explicit_ollama_override_wins_over_global(self):
+        """A source-specific Ollama model/base URL beats cloud global settings."""
         base = {
             'llm_provider': 'ollama-cloud',
             'llm_model': 'deepseek-v4-pro',
+            'llm_base_url': 'https://ollama.com/v1',
+            'llm_source_overrides': {
+                'session_synthesis': {
+                    'provider': 'ollama',
+                    'model': 'qwen3.8:27b',
+                    'base_url': 'http://127.0.0.1:11434',
+                },
+            },
+        }
+        config = resolve_llm_config_for_source(base, 'session_synthesis')
+        assert config['llm_provider'] == 'ollama'
+        assert config['llm_model'] == 'qwen3.8:27b'
+        assert config['llm_endpoint'] == 'http://127.0.0.1:11434/api/chat'
+
+    def test_session_synthesis_has_no_fallback_chain(self):
+        """An unavailable configured backend is not silently routed elsewhere."""
+        base = {
+            'llm_provider': 'ollama',
+            'llm_model': 'qwen3.8:27b',
             'llm_fallbacks': [
                 {'provider': 'nous', 'model': 'upstage/solar-pro4:free'},
                 {'provider': 'openrouter', 'model': 'openrouter/free'},
@@ -135,11 +151,17 @@ class TestSessionSynthesisDefaultsToOmlx:
         assert config['llm_fallbacks'] == []
         assert bdh_providers.resolve_llm_candidates(config) == [config]
 
-    def test_session_synthesis_default_endpoint(self):
-        """session_synthesis default oMLX endpoint is local."""
-        base = {'llm_provider': 'ollama-cloud', 'llm_model': 'deepseek-v4-pro'}
-        config = resolve_llm_config_for_source(base, 'session_synthesis')
-        assert config['llm_endpoint'] == 'http://127.0.0.1:8083/v1/chat/completions'
+    def test_other_sources_keep_global_provider_and_fallbacks(self):
+        """The source policy does not affect normal interactive responses."""
+        base = {
+            'llm_provider': 'ollama-cloud',
+            'llm_model': 'deepseek-v4-pro',
+            'llm_fallbacks': [{'provider': 'omlx', 'model': 'local'}],
+        }
+        config = resolve_llm_config_for_source(base, 'assistant_response')
+        assert config['llm_provider'] == 'ollama-cloud'
+        assert config['llm_model'] == 'deepseek-v4-pro'
+        assert config['llm_fallbacks'] == base['llm_fallbacks']
 
 
 # ---------------------------------------------------------------------------
@@ -225,7 +247,7 @@ class TestApiQueryRecordsAudit:
             assert entries[0].synthesis_id == 'syn-001'
             assert entries[0].outcome == 'created'
             assert entries[0].vault == 'default'
-            assert entries[0].provider == 'omlx'
+            assert entries[0].provider == 'ollama'
             assert entries[0].hebbian_updates >= 0
             assert len(entries[0].transcript_sha256) == 64  # SHA-256 hex
         finally:
