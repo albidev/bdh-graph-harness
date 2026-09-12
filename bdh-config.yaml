@@ -56,13 +56,31 @@ llm_model: gemma4:12b-mlx
 llm_temperature: 0.3
 llm_max_ctx: 4096
 # Optional source-specific LLM overrides. These do not change the global model.
+# Linux can inherit the configured global Ollama provider/model by omitting the
+# session_synthesis block. If the global provider is cloud-based, configure an
+# explicit local source override instead. On macOS, keep the existing oMLX path by
+# configuring it explicitly rather than relying on an implicit platform override:
 # llm_source_overrides:
 #   session_synthesis:
-#     provider: ollama-cloud
-#     model: deepseek-v4-flash:cloud
+#     provider: ollama       # Linux example
+#     model: qwen3.8:27b
+#     base_url: http://127.0.0.1:11434
 #     temperature: 0.1
-#     reasoning_effort: low
-#     thinking: enabled
+#
+# macOS/oMLX example:
+# llm_source_overrides:
+#   session_synthesis:
+#     provider: omlx
+#     model: qwen3.8-27b-oq4e-mtp
+#     base_url: http://127.0.0.1:8083/v1
+#     local_only: true
+#     chat_template_kwargs:
+#       enable_thinking: false
+#       thinking: false
+# Curate staging is independent of provider selection:
+# session_synthesis_staging_enabled: true
+# session_synthesis_staging_dir: .bdh-candidates
+# session_synthesis_staging_max_concepts: 5
 llm_timeout: 300
 
 # ChromaDB
