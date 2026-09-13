@@ -304,22 +304,17 @@ class TestAPIRoutingProvenance:
 
     @pytest.mark.asyncio
     async def test_unknown_source_returns_error(self, mock_app_setup, monkeypatch):
-        """Unknown source at the API level must fail with a clear error."""
+        """Unknown source at the API level must fail with a clear client error.
+
+        The policy registry raising ``ValueError`` is the anti-fall-through guard
+        (issue #16) and stays. What changed is the boundary: an unknown ``source``
+        is a bad request, so the handler answers 400 with the offending value and
+        the accepted set — not an opaque 500 that reads like a server crash.
+        """
         from aiohttp.test_utils import TestClient, TestServer
 
         nodes, edges, collection, state, config, _ = mock_app_setup
-
-        # Patch hebbian_update to raise on unknown sources (the new behavior)
-        original_hebbian = bdh_routes.hebbian_update
-        def strict_hebbian(*args, **kwargs):
-            source = kwargs.get('source') or (args[3] if len(args) > 3 else None)
-            if source not in (None, 'user_query', 'assistant_response',
-                              'nightly_semantic_consolidation', 'session_synthesis',
-                              'cron', 'automatic_retrieval'):
-                raise ValueError(f"Unknown source {source!r}")
-            return original_hebbian(*args, **kwargs)
-
-        monkeypatch.setattr(bdh_routes, 'hebbian_update', strict_hebbian)
+        queries_before = state['queries']
 
         app = _capture_app(monkeypatch, config, nodes, edges, collection, state)
         server = TestServer(app)
@@ -331,8 +326,13 @@ class TestAPIRoutingProvenance:
                 'source': 'bogus_unknown_source',
                 'learn': True,
             })
-            # The server should return a 500 error (ValueError propagation)
-            assert resp.status == 500
+            assert resp.status == 400
+            body = await resp.json()
+            assert body['field'] == 'source'
+            assert "'bogus_unknown_source'" in body['error']
+            assert 'user_query' in body['allowed_sources']
+            # Rejected before any plasticity: query state untouched.
+            assert state['queries'] == queries_before
         finally:
             await client.close()
 

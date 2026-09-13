@@ -27,6 +27,7 @@ from bdh_graph_harness.retrieval.attention import attention
 from bdh_graph_harness.retrieval.shadow import append_dynamic_shadow, build_dynamic_shadow
 from bdh_graph_harness.memory import hebbian_update, save_state
 from bdh_graph_harness.memory.source_policy import (
+    allowed_sources,
     get_source_policy,
     use_user_prompt_for_retrieval,
     get_frequency_increment,
@@ -159,6 +160,29 @@ def _vault_id_from_query(request: web.Request) -> str | None:
 def _vault_id_from_body(data: dict) -> str | None:
     """Extract ``vault_id`` from a parsed JSON body dict."""
     return data.get('vault_id') or None
+
+
+def _unknown_source_response(source) -> web.Response | None:
+    """Return a 400 for an unregistered ``source``, or ``None`` when it is valid.
+
+    ``get_frequency_increment()`` raises ``ValueError`` for unknown sources — an
+    intentional anti-fall-through guard (issue #16). At the API boundary that
+    exception used to escape the handler and surface as an opaque HTTP 500, so a
+    typo in the caller's payload looked like a server crash. Validate here so the
+    caller gets the offending value and the accepted set.
+    """
+    if source is None:
+        return None
+    if isinstance(source, str) and source in set(allowed_sources()):
+        return None
+    return web.json_response(
+        {
+            'error': f'Unknown source {source!r}',
+            'field': 'source',
+            'allowed_sources': allowed_sources(),
+        },
+        status=400,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -741,6 +765,9 @@ async def api_query(request, app_state: dict, ws_clients: set) -> web.Response:
     assert ctx is not None
 
     source = data.get('source')
+    source_error = _unknown_source_response(source)
+    if source_error is not None:
+        return source_error
     learn = data.get('learn', True) is not False
     respond = data.get('respond', True) is not False
     user_prompt = data.get('user_prompt', '').strip()
@@ -1006,6 +1033,9 @@ async def api_stream(request, app_state: dict, ws_clients: set) -> web.StreamRes
         return err
 
     source = data.get('source')
+    source_error = _unknown_source_response(source)
+    if source_error is not None:
+        return source_error
     user_prompt = data.get('user_prompt', '').strip()
     query_variants = data.get('query_variants') or None
 

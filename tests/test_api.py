@@ -650,3 +650,109 @@ async def test_api_query_session_synthesis_honors_source_override(
         assert config["llm_temperature"] == 0.3
     finally:
         await client.close()
+
+
+# ---------------------------------------------------------------------------
+# POST /api/query — source policy boundary (issue: opaque 500 on unknown source)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_api_query_unknown_source_returns_400(mock_app_setup, monkeypatch):
+    """An unregistered `source` is a client error, not an opaque 500."""
+    from aiohttp.test_utils import TestClient, TestServer
+
+    nodes, edges, collection, state, config, _ = mock_app_setup
+    app = _capture_app(monkeypatch, config, nodes, edges, collection, state)
+    server = TestServer(app)
+    client = TestClient(server)
+    await client.start_server()
+
+    try:
+        resp = await client.post(
+            '/api/query',
+            json={'query': 'test routing', 'learn': False, 'respond': False,
+                  'source': 'verification'},
+        )
+        assert resp.status == 400
+        body = await resp.json()
+        assert body['field'] == 'source'
+        assert "'verification'" in body['error']
+        assert 'user_query' in body['allowed_sources']
+        # The rejection must not have touched Hebbian/query state.
+        assert state['queries'] == 5
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_api_query_registered_source_is_accepted(mock_app_setup, monkeypatch):
+    """Every registered source must pass the boundary check."""
+    from aiohttp.test_utils import TestClient, TestServer
+    from bdh_graph_harness.memory.source_policy import allowed_sources
+
+    nodes, edges, collection, state, config, _ = mock_app_setup
+    monkeypatch.setattr(
+        bdh_routes, 'llm_respond',
+        lambda query, active, graph_nodes, **kwargs: 'Mock LLM response',
+    )
+    app = _capture_app(monkeypatch, config, nodes, edges, collection, state)
+    server = TestServer(app)
+    client = TestClient(server)
+    await client.start_server()
+
+    try:
+        for source in allowed_sources():
+            resp = await client.post(
+                '/api/query',
+                json={'query': f'query for {source}', 'respond': False,
+                      'source': source},
+            )
+            assert resp.status == 200, f'{source} was rejected: {await resp.text()}'
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_api_query_omitted_source_still_works(mock_app_setup, monkeypatch):
+    """`source` is optional — omitting it stays at interactive full strength."""
+    from aiohttp.test_utils import TestClient, TestServer
+
+    nodes, edges, collection, state, config, _ = mock_app_setup
+    monkeypatch.setattr(
+        bdh_routes, 'llm_respond',
+        lambda query, active, graph_nodes, **kwargs: 'Mock LLM response',
+    )
+    app = _capture_app(monkeypatch, config, nodes, edges, collection, state)
+    server = TestServer(app)
+    client = TestClient(server)
+    await client.start_server()
+
+    try:
+        resp = await client.post('/api/query', json={'query': 'no source here'})
+        assert resp.status == 200
+        data = await resp.json()
+        assert data['routing']['source_policy']['frequency_increment'] == 1.0
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_api_query_non_string_source_returns_400(mock_app_setup, monkeypatch):
+    """A non-string source must be a 400, never an unhandled TypeError/500."""
+    from aiohttp.test_utils import TestClient, TestServer
+
+    nodes, edges, collection, state, config, _ = mock_app_setup
+    app = _capture_app(monkeypatch, config, nodes, edges, collection, state)
+    server = TestServer(app)
+    client = TestClient(server)
+    await client.start_server()
+
+    try:
+        resp = await client.post(
+            '/api/query', json={'query': 'test', 'source': ['not', 'a', 'string']},
+        )
+        assert resp.status == 400
+        body = await resp.json()
+        assert body['field'] == 'source'
+    finally:
+        await client.close()
