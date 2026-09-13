@@ -473,3 +473,108 @@ def _capture_app(monkeypatch, config, nodes, edges, collection, state):
 
 
 import bdh_graph_harness.api.routes as bdh_routes
+
+class TestStagedDuplicateSuppression:
+    """A live session re-stages the same concept on every run.
+
+    ``transcript_sha256`` changes as the conversation grows, so the synthesis-id
+    idempotency cannot catch it, and the vault-level dedupe only sees notes that
+    were already promoted. The staged queue is where the copies pile up.
+    """
+
+    @staticmethod
+    def _concepts(monkeypatch, concepts):
+        monkeypatch.setattr(staging, "extract_new_concepts", lambda *a, **k: concepts)
+
+    def _stage(self, tmp_path, *, synthesis_id, sha, concepts):
+        return staging.stage_session_synthesis_candidates(
+            str(tmp_path),
+            synthesis_id=synthesis_id,
+            vault_id="vault-1",
+            session_id="sess-live",
+            transcript_sha256=sha,
+            response_text="We discussed the concept.",
+            query="session synthesis",
+            active={},
+            nodes={},
+            dry_run=False,
+        )
+
+    def test_same_concept_from_a_later_run_is_not_staged_twice(self, tmp_path, monkeypatch):
+        concept = {"title": "Action Beats Injection", "definition": "First phrasing.", "confidence": "low"}
+        self._concepts(monkeypatch, [concept])
+        first = self._stage(tmp_path, synthesis_id="syn-1", sha="a" * 64, concepts=[concept])
+        assert first["count"] == 1
+        assert first["duplicate_count"] == 0
+
+        # Second run of the SAME live session: new transcript digest, new synthesis id,
+        # and the extractor rephrases the definition — all three of which the old
+        # checks treated as "new".
+        again = {"title": "Action Beats Injection", "definition": "Rephrased by the model.", "confidence": "low"}
+        self._concepts(monkeypatch, [again])
+        second = self._stage(tmp_path, synthesis_id="syn-2", sha="b" * 64, concepts=[again])
+
+        assert second["count"] == 0, "the same concept must not be staged again"
+        assert second["duplicate_count"] == 1
+        assert len(staging.list_candidates(str(tmp_path))) == 1, "the ledger keeps one row"
+
+    def test_a_different_concept_is_still_staged(self, tmp_path, monkeypatch):
+        one = {"title": "Action Beats Injection", "definition": "A principle.", "confidence": "low"}
+        two = {"title": "Sparse Attention", "definition": "A separate technique.", "confidence": "low"}
+        self._concepts(monkeypatch, [one])
+        self._stage(tmp_path, synthesis_id="syn-1", sha="a" * 64, concepts=[one])
+        self._concepts(monkeypatch, [two])
+        second = self._stage(tmp_path, synthesis_id="syn-2", sha="b" * 64, concepts=[two])
+
+        assert second["count"] == 1, "an unrelated concept must survive dedupe"
+        assert second["duplicate_count"] == 0
+        assert len(staging.list_candidates(str(tmp_path))) == 2
+
+    def test_two_distinct_concepts_in_one_run_are_both_kept(self, tmp_path, monkeypatch):
+        a = {"title": "Write Path Dampening", "definition": "A.", "confidence": "low"}
+        b = {"title": "Read Path Independence", "definition": "B.", "confidence": "low"}
+        self._concepts(monkeypatch, [a, b])
+        result = self._stage(tmp_path, synthesis_id="syn-1", sha="a" * 64, concepts=[a, b])
+
+        assert result["count"] == 2, "dedupe must not collapse distinct concepts in one run"
+        assert result["duplicate_count"] == 0
+
+    def test_token_order_and_punctuation_do_not_hide_a_duplicate(self, tmp_path, monkeypatch):
+        first = {"title": "Skill-Graph Separation", "definition": "A.", "confidence": "low"}
+        self._concepts(monkeypatch, [first])
+        self._stage(tmp_path, synthesis_id="syn-1", sha="a" * 64, concepts=[first])
+
+        reordered = {"title": "separation, skill graph", "definition": "B.", "confidence": "low"}
+        self._concepts(monkeypatch, [reordered])
+        second = self._stage(tmp_path, synthesis_id="syn-2", sha="b" * 64, concepts=[reordered])
+
+        assert second["duplicate_count"] == 1, "same token set in another order is the same concept"
+
+    def test_exact_definition_match_is_not_required(self, tmp_path, monkeypatch):
+        """The extractor rephrases every run; requiring definition agreement matched nothing."""
+        first = {"title": "Canonical Bot Chat Identity", "definition": "Original wording.", "confidence": "low"}
+        self._concepts(monkeypatch, [first])
+        self._stage(tmp_path, synthesis_id="syn-1", sha="a" * 64, concepts=[first])
+
+        reworded = {"title": "Canonical Bot Chat Identity", "definition": "Completely different words here.", "confidence": "low"}
+        self._concepts(monkeypatch, [reworded])
+        second = self._stage(tmp_path, synthesis_id="syn-2", sha="b" * 64, concepts=[reworded])
+
+        assert second["duplicate_count"] == 1
+
+    def test_an_applied_candidate_does_not_block_a_restaged_concept(self, tmp_path, monkeypatch):
+        """Only concepts still awaiting a decision absorb a duplicate."""
+        from bdh_graph_harness.memory.session_synthesis_staging import update_candidate_status
+
+        concept = {"title": "Launchd Keepalive Sigterm Limitation", "definition": "A.", "confidence": "low"}
+        self._concepts(monkeypatch, [concept])
+        first = self._stage(tmp_path, synthesis_id="syn-1", sha="a" * 64, concepts=[concept])
+        cid = first["candidates"][0]["candidate_id"]
+        update_candidate_status(str(tmp_path), cid, "applied")
+
+        self._concepts(monkeypatch, [concept])
+        second = self._stage(tmp_path, synthesis_id="syn-2", sha="b" * 64, concepts=[concept])
+
+        assert second["count"] == 1, "an already-applied concept may legitimately be re-observed"
+        assert second["duplicate_count"] == 0
+
