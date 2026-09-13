@@ -44,6 +44,86 @@ def _candidates_dir(vault_path: str | os.PathLike[str]) -> Path:
     return Path(vault_path) / ".bdh-candidates"
 
 
+def _normalized_concept_key(title: str, definition: str = "") -> tuple[str, str]:
+    """Whitespace-collapsed, casefolded identity used for candidate dedupe."""
+    return (
+        re.sub(r"\s+", " ", str(title or "")).strip().casefold(),
+        re.sub(r"\s+", " ", str(definition or "")).strip().casefold(),
+    )
+
+
+def _title_tokens(title: str) -> frozenset[str]:
+    """Significant tokens of a concept title, for near-duplicate detection."""
+    return frozenset(
+        token for token in re.findall(r"[a-z0-9]+", str(title or "").casefold())
+        if len(token) >= 3
+    )
+
+
+def _open_staged_candidates(
+    vault_path: str | os.PathLike[str],
+    *,
+    statuses: tuple[CandidateStatus, ...] = ("pending_review", "approved"),
+) -> list[SessionSynthesisCandidate]:
+    """Candidates awaiting a decision — the set a new concept must be deduped against.
+
+    ``list_candidates`` reads every staged file; the caller filters by status here so
+    the staging loop only pays for the states that can still absorb a duplicate.
+    """
+    return [
+        candidate
+        for candidate in list_candidates(vault_path)
+        if candidate.status in statuses
+    ]
+
+
+def _find_staged_duplicate(
+    title: str,
+    definition: str,
+    staged: list[SessionSynthesisCandidate],
+) -> SessionSynthesisCandidate | None:
+    """Return an already-staged candidate for the same concept, or ``None``.
+
+    The vault is not the only place a concept can already exist: the staging queue
+    holds concepts extracted from earlier runs of a session that is STILL OPEN, and
+    a live session yields a new ``transcript_sha256`` on every run while the concepts
+    it implies stay the same. Vault-only dedupe therefore misses them, and one
+    conversation produces a fresh copy of the same idea every time the extractor
+    runs (observed: 4 "action beats injection" candidates in 87 minutes, all from one
+    live session).
+
+    Matching is on the TITLE, deliberately not the definition. The extractor rephrases
+    the definition on every run — measured on the real duplicates above, pairwise token
+    overlap between two copies of the same concept ran 0.07-0.47 — so requiring
+    definition agreement would match nothing, and thresholding on that overlap would
+    merge genuinely distinct concepts. Two rules, both high-confidence:
+
+      1. equal normalized title (the common case);
+      2. equal significant-token set, which survives word order and punctuation
+         ("skill-graph separation" vs "separation skill graph").
+
+    A definition may legitimately be refined, so the newest definition wins is NOT
+    applied here: the existing candidate is kept and the duplicate is dropped, leaving
+    a human the single row to review. ``definition`` is accepted for callers that want
+    to log the near-miss and for future tightening.
+    """
+    wanted_title = _normalized_concept_key(title)[0]
+    if not wanted_title:
+        return None
+    for candidate in staged:
+        if _normalized_concept_key(candidate.title)[0] == wanted_title:
+            return candidate
+
+    wanted_tokens = _title_tokens(title)
+    # A single-token title is too weak to call a reworded version of another one.
+    if len(wanted_tokens) < 2:
+        return None
+    for candidate in staged:
+        if _title_tokens(candidate.title) == wanted_tokens:
+            return candidate
+    return None
+
+
 _CANDIDATE_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}")
 
 
@@ -383,11 +463,30 @@ def stage_session_synthesis_candidates(
         }]
     concepts = concepts[:max(0, int(max_concepts))]
 
+    # Concepts already awaiting a decision are part of the "does this already
+    # exist" answer. Reading them once here keeps the check inside the loop from
+    # rescanning the ledger per concept, and lets a skipped concept be reported
+    # instead of silently vanishing.
+    staged_open = _open_staged_candidates(vault_path) if not dry_run else []
+
     candidates: list[SessionSynthesisCandidate] = []
+    duplicates = 0
     for concept in concepts:
         title = str(concept.get("title", "")).strip()
         definition = str(concept.get("definition", "")).strip()
         if not title or not definition:
+            continue
+
+        # The same concept staged by an earlier run of a still-open session must not
+        # be staged again: the transcript hash changes every run, so the synthesis-id
+        # idempotency above cannot catch it.
+        existing_staged = _find_staged_duplicate(title, definition, staged_open)
+        if existing_staged is not None:
+            duplicates += 1
+            logger.debug(
+                "session synthesis: concept %r already staged as %s (%s)",
+                title, existing_staged.candidate_id, existing_staged.status,
+            )
             continue
 
         # Compute dedupe metadata without mutating the vault.
@@ -477,6 +576,7 @@ def stage_session_synthesis_candidates(
         "synthesis_id": synthesis_id,
         "idempotent": False,
         "filtered_count": filtered_count,
+        "duplicate_count": duplicates,
     }
 
 
