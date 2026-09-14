@@ -27,6 +27,11 @@ htmlcov/
 *.env
 *.local.yaml
 
+# Machine-specific launchd service. The tracked template is
+# ai.bdh.graph-harness.plist.example; the concrete file carries absolute
+# home paths and is rendered locally (see README "Running as a service").
+ai.bdh.graph-harness.plist
+
 # OS
 .DS_Store
 
