@@ -325,13 +325,21 @@ Every `source` string accepted by `/api/query` is registered in an explicit poli
 
 ### Running as a service (macOS)
 
+The concrete plist is machine-specific (absolute home paths) and is **not**
+committed; the tracked template is `ai.bdh.graph-harness.plist.example`.
+
 ```bash
-# Install launchd service
+export BDH_ROOT="$HOME/Projects/bdh-graph-harness"
+export BDH_HOME="$HOME/.hermes"
+envsubst '$BDH_ROOT $BDH_HOME' \
+  < ai.bdh.graph-harness.plist.example \
+  > ai.bdh.graph-harness.plist
+$EDITOR ai.bdh.graph-harness.plist        # set UserName to your account
 cp ai.bdh.graph-harness.plist ~/Library/LaunchAgents/
-launchctl load ~/Library/LaunchAgents/ai.bdh.graph-harness.plist
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ai.bdh.graph-harness.plist
 ```
 
-The service auto-restarts on crash (`KeepAlive: true`). Logs at `~/.hermes/logs/bdh-server.log`. The `start-server.sh` wrapper loads the configured provider credential from the environment (`OLLAMA_API_KEY`, `OPENROUTER_API_KEY`, or `OPENCODE_ZEN_API_KEY`) before launching.
+The service auto-restarts on crash (`KeepAlive: true`). Logs at `$BDH_HOME/logs/bdh-server.log`. The `start-server.sh` wrapper loads the configured provider credential from the environment (`OLLAMA_API_KEY`, `OPENROUTER_API_KEY`, or `OPENCODE_ZEN_API_KEY`) before launching.
 
 ## Config
 

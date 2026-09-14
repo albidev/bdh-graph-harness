@@ -1,4 +1,18 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Template for the macOS launchd service. The concrete
+  ai.bdh.graph-harness.plist is machine-specific and gitignored, like
+  bdh-config.local.yaml.
+
+  Render and install (see README "Running as a service"):
+
+    envsubst < ai.bdh.graph-harness.plist.example > ai.bdh.graph-harness.plist
+    cp ai.bdh.graph-harness.plist ~/Library/LaunchAgents/
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ai.bdh.graph-harness.plist
+
+  BDH_ROOT and BDH_HOME must be exported first. Set UserName below to your
+  account, or drop that key to run as whoever loaded the job.
+-->
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
@@ -6,27 +20,27 @@
     <string>ai.bdh.graph-harness</string>
 
     <!-- start-server.sh resolves the provider credential (OLLAMA_API_KEY,
-         OPENROUTER_API_KEY or OPENCODE_ZEN_API_KEY) from .env / ~/.hermes/.env
+         OPENROUTER_API_KEY or OPENCODE_ZEN_API_KEY) from .env / $BDH_HOME/.env
          before exec'ing the server, so launchd itself carries no secrets. -->
     <key>ProgramArguments</key>
     <array>
         <string>/bin/bash</string>
-        <string>/Users/albi/Projects/bdh-graph-harness/start-server.sh</string>
+        <string>${BDH_ROOT}/start-server.sh</string>
     </array>
 
     <key>WorkingDirectory</key>
-    <string>/Users/albi/Projects/bdh-graph-harness</string>
+    <string>${BDH_ROOT}</string>
 
     <!-- HERMES_HOME lets config.py resolve the Nous fallback key from
-         ~/.hermes/auth.json instead of requiring it in the environment.
+         $BDH_HOME/auth.json instead of requiring it in the environment.
          PATH includes the project venv first so the checked-out package and
          its dependencies are the ones actually used. -->
     <key>EnvironmentVariables</key>
     <dict>
         <key>HERMES_HOME</key>
-        <string>/Users/albi/.hermes</string>
+        <string>${BDH_HOME}</string>
         <key>PATH</key>
-        <string>/Users/albi/Projects/bdh-graph-harness/.venv/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <string>${BDH_ROOT}/.venv/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
     </dict>
 
     <key>LimitLoadToSessionType</key>
@@ -35,8 +49,11 @@
         <string>Background</string>
     </array>
 
+    <!-- RunAtLoad + KeepAlive start the server at login and restart it after a
+         crash. On a multi-user machine set this to the owning account, or drop
+         the key to run as whoever loaded the job. -->
     <key>UserName</key>
-    <string>albi</string>
+    <string>CHANGE_ME</string>
 
     <key>RunAtLoad</key>
     <true/>
@@ -54,9 +71,9 @@
     <integer>25</integer>
 
     <key>StandardOutPath</key>
-    <string>/Users/albi/.hermes/logs/bdh-server.log</string>
+    <string>${BDH_HOME}/logs/bdh-server.log</string>
 
     <key>StandardErrorPath</key>
-    <string>/Users/albi/.hermes/logs/bdh-server.error.log</string>
+    <string>${BDH_HOME}/logs/bdh-server.error.log</string>
 </dict>
 </plist>
