@@ -1,4 +1,4 @@
-aiohttp>=3.9
+aiohttp>=3.14.3
 aiohttp-cors>=0.7
 chromadb>=0.5
 numpy>=1.26
