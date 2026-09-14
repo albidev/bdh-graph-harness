@@ -6,5 +6,5 @@ pyyaml>=6.0.3
 websockets>=17.1
 mcp>=1.0,<2.0  # FastMCP import path used by mcp_server.py
 python-dotenv>=1.2.3
-uvicorn>=0.31
+uvicorn>=0.52.4
 ollama>=0.4
