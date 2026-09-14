@@ -5,6 +5,14 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    # Runtime packages here are consumed through a uv-managed venv that is
+    # refreshed by hand, so a major bump lands as a green PR that nobody can
+    # install without a code migration. Keep majors out of the queue and take
+    # them as deliberate work. mcp is the concrete case: 2.x renamed FastMCP
+    # to MCPServer, so the PR is red on purpose.
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: github-actions
     directory: "/"
@@ -17,3 +25,9 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    # Same reasoning for the Obsidian plugin: a major toolchain bump is a
+    # migration, not a chore. typescript 5 -> 7 and @types/node 20 -> 26 both
+    # require touching tsconfig/jest before they are safe.
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
