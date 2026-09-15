@@ -362,6 +362,7 @@ def stage_session_synthesis_candidates(
     llm_config: dict[str, Any] | None = None,
     max_concepts: int | None = None,
     provenance: dict[str, Any] | None = None,
+    source: str = "session_synthesis",
     dry_run: bool = False,
     config: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -441,7 +442,7 @@ def stage_session_synthesis_candidates(
 
     extractor_config = llm_config
     if extractor_config is None and cfg.get("llm_provider"):
-        extractor_config = resolve_llm_config_for_source(cfg, "session_synthesis")
+        extractor_config = resolve_llm_config_for_source(cfg, source)
 
     concepts = _extract_concepts_safely(
         response_text, query, active, nodes, llm_config=extractor_config
@@ -530,7 +531,7 @@ def stage_session_synthesis_candidates(
             vault_id=vault_id,
             session_id=session_id,
             transcript_sha256=transcript_sha256,
-            source="session_synthesis",
+            source=source,
             title=title,
             definition=definition,
             confidence=str(concept.get("confidence", "low")).lower(),
@@ -562,7 +563,7 @@ def stage_session_synthesis_candidates(
                 transcript_sha256=transcript_sha256,
                 extra={
                     "title": title,
-                    "source": "session_synthesis",
+                    "source": source,
                     "status": "pending_review",
                 },
             )
@@ -660,6 +661,7 @@ def stage_from_api_response(
         source_notes=source_notes,
         source_node_ids=source_node_ids,
         llm_config=llm_config,
+        source=source,
         dry_run=dry_run,
         config=config,
         provenance=provenance,

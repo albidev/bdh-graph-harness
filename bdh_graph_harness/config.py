@@ -18,6 +18,17 @@ from dotenv import load_dotenv
 # Load .env file from project root (if present) before reading config
 load_dotenv()
 
+
+def _is_curate_gated(source: str | None) -> bool:
+    """Whether *source* must pass through the Curate pre-write gate.
+
+    Imported lazily: ``bdh_graph_harness.memory`` imports this module, so a
+    module-level import of the policy registry here would be circular.
+    """
+    from bdh_graph_harness.memory.source_policy import is_curate_gated
+
+    return is_curate_gated(source)
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -457,12 +468,12 @@ def resolve_llm_config_for_source(
         nested.update(override)
         source_config['llm'] = nested
 
-    if source == 'session_synthesis':
-        # Synthesis must not inherit the global failover chain: a bounded Curate
-        # workflow must report an unavailable configured backend instead of
-        # silently sending the transcript to another provider.  This is the only
-        # source-specific policy here; provider/model/base_url remain configurable
-        # so Linux can use Ollama and macOS can explicitly use oMLX.
+    if _is_curate_gated(source):
+        # A bounded Curate workflow must not inherit the global failover chain:
+        # it has to report an unavailable configured backend instead of silently
+        # sending the transcript to another provider.  This is the only
+        # source-specific policy here; provider/model/base_url remain
+        # configurable so Linux can use Ollama and macOS can explicitly use oMLX.
         source_config['llm_fallbacks'] = []
 
     return resolve_llm_config(source_config)

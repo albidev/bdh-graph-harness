@@ -115,6 +115,18 @@ register_source(
     allow_neurogenesis=True,
 )
 
+# Room synthesis is the hosted-group-room counterpart of session synthesis.
+# It is a Curate-gated source like session synthesis: the transcript lives in
+# ``user_prompt``, so the attention pass must use it instead of the fixed
+# generic query label.
+register_source(
+    "room_synthesis",
+    frequency_increment=0.2,
+    use_user_prompt_for_retrieval=True,
+    provenance_label="room_synthesis",
+    allow_neurogenesis=True,
+)
+
 register_source(
     "cron",
     frequency_increment=0.3,
@@ -128,6 +140,26 @@ register_source(
     provenance_label="automatic_retrieval",
     allow_neurogenesis=True,
 )
+
+
+# ---------------------------------------------------------------------------
+# Curate-gated synthesis sources
+# ---------------------------------------------------------------------------
+
+# Sources that must never write to the graph directly.  They are a strict
+# pre-write gate: retrieval stays available, but Hebbian plasticity and
+# neurogenesis remain disabled until a Curate approval applies the persisted
+# candidate.  Every code path that stages, audits, or approves synthesis work
+# keys off this set rather than repeating a single-source comparison.
+CURATE_GATED_SOURCES: frozenset[str] = frozenset({
+    "session_synthesis",
+    "room_synthesis",
+})
+
+
+def is_curate_gated(source: str | None) -> bool:
+    """Return whether *source* must pass through the Curate gate."""
+    return source in CURATE_GATED_SOURCES
 
 
 # ---------------------------------------------------------------------------

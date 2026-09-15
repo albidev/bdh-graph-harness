@@ -51,6 +51,7 @@ from bdh_graph_harness.memory.semantic_consolidation import (
     extract_bdh_candidates,
 )
 from bdh_graph_harness.llm import llm_respond, llm_stream
+from bdh_graph_harness.memory.source_policy import is_curate_gated
 from bdh_graph_harness.memory.session_synthesis_staging import (
     stage_from_api_response,
 )
@@ -781,9 +782,9 @@ async def api_query(request, app_state: dict, ws_clients: set) -> web.Response:
     # requests or hashes raw transcript.
     synthesis_meta = None
     raw_metadata = data.get('metadata')
-    if source == 'session_synthesis' and raw_metadata is not None and not isinstance(raw_metadata, dict):
+    if is_curate_gated(source) and raw_metadata is not None and not isinstance(raw_metadata, dict):
         return web.json_response({'error': 'Invalid session synthesis metadata'}, status=400)
-    if source == 'session_synthesis' and isinstance(raw_metadata, dict):
+    if is_curate_gated(source) and isinstance(raw_metadata, dict):
         raw_session_id = raw_metadata.get('session_id')
         raw_synthesis_id = raw_metadata.get('synthesis_id')
         raw_transcript_sha = raw_metadata.get('transcript_sha256')
@@ -825,7 +826,7 @@ async def api_query(request, app_state: dict, ws_clients: set) -> web.Response:
     # available, but Hebbian plasticity and neurogenesis stay disabled until a
     # Curate approval explicitly applies the persisted candidate.
     staging_enabled = ctx.config.settings.get('session_synthesis_staging_enabled', False)
-    if staging_enabled and synthesis_meta and source == 'session_synthesis':
+    if staging_enabled and synthesis_meta and is_curate_gated(source):
         learn = False
 
     llm_query = query
@@ -866,7 +867,7 @@ async def api_query(request, app_state: dict, ws_clients: set) -> web.Response:
 
     new_concepts_list = []
     synthesis_failed = (
-        source == 'session_synthesis'
+        is_curate_gated(source)
         and synthesis_meta is not None
         and isinstance(response_text, str)
         and (response_text.startswith('[LLM error:') or response_text == '[no response from LLM]')
@@ -878,7 +879,7 @@ async def api_query(request, app_state: dict, ws_clients: set) -> web.Response:
                 llm_config=llm_config, synthesis_meta=synthesis_meta,
             )
         except Exception as exc:
-            if synthesis_meta and source == 'session_synthesis':
+            if synthesis_meta and is_curate_gated(source):
                 record_synthesis_audit(
                     ctx.config.path,
                     session_id=synthesis_meta['session_id'],
@@ -896,7 +897,7 @@ async def api_query(request, app_state: dict, ws_clients: set) -> web.Response:
             raise
 
     # Record synthesis audit entry when synthesis metadata is present
-    if synthesis_meta and source == 'session_synthesis':
+    if synthesis_meta and is_curate_gated(source):
         concept_ids = [c.get('id', '') for c in new_concepts_list if c.get('id')]
         merged_ids = [c['id'] for c in new_concepts_list if c.get('merged')]
         created_ids = [c['id'] for c in new_concepts_list if not c.get('merged')]
@@ -931,7 +932,7 @@ async def api_query(request, app_state: dict, ws_clients: set) -> web.Response:
     if (
         staging_enabled
         and synthesis_meta
-        and source == 'session_synthesis'
+        and is_curate_gated(source)
         and respond
         and not synthesis_failed
     ):
@@ -2079,8 +2080,8 @@ async def api_synthesis_approve(request, app_state: dict) -> web.Response:
         return web.json_response({"error": "Missing candidate_id, synthesis_id, or session_id"}, status=400)
     if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}", candidate_id) is None:
         return web.json_response({"error": "Invalid candidate_id"}, status=400)
-    if source != "session_synthesis":
-        return web.json_response({"error": "source must be 'session_synthesis'"}, status=400)
+    if not is_curate_gated(source):
+        return web.json_response({"error": "source must be a Curate-gated synthesis source"}, status=400)
 
     ctx, err = _resolve_vault_ctx(app_state, _vault_id_from_body(data))
     if err:
@@ -2148,9 +2149,9 @@ async def api_synthesis_apply(request, app_state: dict) -> web.Response:
         )
     if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}", candidate_id) is None:
         return web.json_response({"error": "Invalid candidate_id"}, status=400)
-    if source != "session_synthesis":
+    if not is_curate_gated(source):
         return web.json_response(
-            {"error": "source must be 'session_synthesis'"},
+            {"error": "source must be a Curate-gated synthesis source"},
             status=400,
         )
 
@@ -2192,9 +2193,9 @@ async def api_synthesis_apply(request, app_state: dict) -> web.Response:
             {"error": "candidate session_id does not match request"},
             status=400,
         )
-    if candidate.source != "session_synthesis":
+    if not is_curate_gated(candidate.source):
         return web.json_response(
-            {"error": "candidate source is not session_synthesis"},
+            {"error": "candidate source is not a Curate-gated synthesis source"},
             status=400,
         )
 
