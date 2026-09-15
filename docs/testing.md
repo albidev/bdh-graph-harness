@@ -9,6 +9,11 @@ External systems (Ollama, ChromaDB services, LLM providers, and network calls) a
 pip install -r requirements-dev.txt
 ```
 
+Use the project interpreter explicitly (`.venv/bin/python`). A shared or global
+Python may resolve `mcp` 2.x, where `FastMCP` moved to `mcp.server.mcpserver`:
+`requirements.txt` pins `mcp>=1.0,<2.0`, and `mcp_server.py` accommodates both
+majors, but the suite is only verified against the pinned one.
+
 ## Commands
 
 ```bash

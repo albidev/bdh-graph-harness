@@ -35,7 +35,21 @@ import urllib.request
 import urllib.error
 from urllib.parse import quote
 
-from mcp.server.fastmcp import FastMCP
+try:
+    # MCP SDK v1: FastMCP shipped inside the SDK. This is the pinned and tested
+    # path (`mcp>=1.0,<2.0` in requirements.txt).
+    from mcp.server.fastmcp import FastMCP
+except ModuleNotFoundError as _exc:  # pragma: no cover - exercised by the v2 probe
+    if "mcp.server.fastmcp" not in str(_exc):
+        raise
+    # MCP SDK v2 renamed FastMCP to MCPServer and moved it to
+    # mcp.server.mcpserver. The decorator form and the transport methods this
+    # module uses are unchanged, so the alias is a faithful substitute rather
+    # than a downgrade. Reached when the interpreter resolves mcp 2.x — a shared
+    # venv, a future upgrade, or a tool invoking the suite with the wrong python
+    # — where the previous bare import failed with a ModuleNotFoundError that
+    # says nothing about which pin was violated.
+    from mcp.server.mcpserver import MCPServer as FastMCP
 
 from bdh_graph_harness.config import load_config
 from bdh_graph_harness.memory.hebbian import safe_decode_synapse_key
