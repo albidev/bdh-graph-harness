@@ -14,9 +14,19 @@ Each entry carries:
   - vault: vault identifier
   - provider / model: configured LLM runtime for this source
   - hebbian_updates: number of Hebbian synapses updated
-  - outcome: one of "created", "merged", "noop", "failed"
+  - outcome: one of "created", "merged", "staged", "noop", "failed", "invalid"
   - concept_ids: list of concept note IDs produced or merged into
+  - staged_count: candidates queued for Curate review (the write path when
+    staging is enabled, where no note is created and concept_ids stays empty)
+  - staged_duplicate_count: candidates skipped because an equivalent concept was
+    already staged by an earlier run of the same still-open session
   - reason: optional human-readable reason for noop/failed outcomes
+
+``staged`` vs ``noop`` is the distinction this log exists to make: with staging
+enabled, ``run_neurogenesis`` returns [] because it creates no notes, so a run
+that extracted four concepts and a run that extracted none both used to record
+``noop, concept_ids=[]``. ``outcome="staged"`` with ``staged_count > 0`` is the
+first; ``staged_count = 0`` is the second.
 """
 from __future__ import annotations
 
@@ -27,7 +37,7 @@ from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
 from typing import Any, Literal
 
-AuditOutcome = Literal["created", "merged", "noop", "failed", "invalid"]
+AuditOutcome = Literal["created", "merged", "staged", "noop", "failed", "invalid"]
 
 
 @dataclass
@@ -47,6 +57,8 @@ class SynthesisAuditEntry:
     concept_ids: list[str] = field(default_factory=list)
     reason: str = ""
     queued_at: str = ""
+    staged_count: int = 0
+    staged_duplicate_count: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -76,6 +88,8 @@ def record_synthesis_audit(
     reason: str = "",
     timestamp: str | None = None,
     queued_at: str = "",
+    staged_count: int = 0,
+    staged_duplicate_count: int = 0,
 ) -> SynthesisAuditEntry:
     """Append one audit entry to the vault's synthesis audit log."""
     entry = SynthesisAuditEntry(
@@ -92,6 +106,8 @@ def record_synthesis_audit(
         concept_ids=concept_ids or [],
         reason=reason,
         queued_at=queued_at,
+        staged_count=staged_count,
+        staged_duplicate_count=staged_duplicate_count,
     )
     path = _audit_path(vault_path)
     os.makedirs(os.path.dirname(path), exist_ok=True)
