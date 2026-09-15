@@ -896,39 +896,18 @@ async def api_query(request, app_state: dict, ws_clients: set) -> web.Response:
                 )
             raise
 
-    # Record synthesis audit entry when synthesis metadata is present
-    if synthesis_meta and is_curate_gated(source):
-        concept_ids = [c.get('id', '') for c in new_concepts_list if c.get('id')]
-        merged_ids = [c['id'] for c in new_concepts_list if c.get('merged')]
-        created_ids = [c['id'] for c in new_concepts_list if not c.get('merged')]
-        if synthesis_failed:
-            outcome = 'failed'
-        elif new_concepts_list:
-            if merged_ids and not created_ids:
-                outcome = 'merged'
-            else:
-                outcome = 'created'
-        else:
-            outcome = 'noop'
-            if not concept_ids:
-                outcome = 'noop'
-        record_synthesis_audit(
-            ctx.config.path,
-            session_id=synthesis_meta['session_id'],
-            synthesis_id=synthesis_meta['synthesis_id'],
-            transcript_sha256=synthesis_meta.get('transcript_sha256', ''),
-            source=source or 'session_synthesis',
-            vault=ctx.config.id,
-            provider=llm_config.get('llm_provider', 'unknown'),
-            model=llm_config.get('llm_model', 'unknown'),
-            hebbian_updates=len(hebbian_updates),
-            outcome=outcome,
-            concept_ids=concept_ids,
-            queued_at=synthesis_meta.get('queued_at', ''),
-        )
-
     # If staging is enabled, produce pending candidate files for Curate review.
     # Direct graph mutation was disabled above; approval is the only write path.
+    #
+    # Staging runs BEFORE the audit row is written, because in staging mode the
+    # candidates — not `new_concepts_list` — are the evidence that the run did
+    # something. `run_neurogenesis` returns [] whenever no note is created, and
+    # staging never creates notes, so auditing before this point recorded every
+    # successful extraction as `noop, concept_ids=[]`: identical to a run that
+    # extracted nothing. The counts below are what makes the two distinguishable.
+    staged_count = 0
+    staged_duplicate_count = 0
+    staging_error = ""
     if (
         staging_enabled
         and synthesis_meta
@@ -937,7 +916,7 @@ async def api_query(request, app_state: dict, ws_clients: set) -> web.Response:
         and not synthesis_failed
     ):
         try:
-            stage_from_api_response(
+            staged = stage_from_api_response(
                 ctx.config.path,
                 synthesis_id=synthesis_meta['synthesis_id'],
                 vault_id=ctx.config.id,
@@ -954,10 +933,67 @@ async def api_query(request, app_state: dict, ws_clients: set) -> web.Response:
                 config=ctx.config.settings,
             )
         except Exception as exc:
+            staging_error = f"{type(exc).__name__}"
             logger.warning(
                 "Session synthesis staging failed for %s: %s",
                 synthesis_meta.get('synthesis_id'), exc,
             )
+        else:
+            # A staging failure must not be reported as "nothing to stage": those
+            # are different outcomes and the audit has to say which happened.
+            # Read the counts defensively: the real function returns a result
+            # dict, but a wrapper or test adapter may return something else, and
+            # an audit row must never be lost to that.
+            if isinstance(staged, dict):
+                staged_count = int(staged.get('count') or 0)
+                staged_duplicate_count = int(staged.get('duplicate_count') or 0)
+
+    # Record the synthesis audit entry once the staging outcome is known.
+    if synthesis_meta and is_curate_gated(source):
+        concept_ids = [c.get('id', '') for c in new_concepts_list if c.get('id')]
+        merged_ids = [c['id'] for c in new_concepts_list if c.get('merged')]
+        created_ids = [c['id'] for c in new_concepts_list if not c.get('merged')]
+        if synthesis_failed:
+            outcome = 'failed'
+        elif new_concepts_list:
+            if merged_ids and not created_ids:
+                outcome = 'merged'
+            else:
+                outcome = 'created'
+        elif staged_count:
+            # Staging is the write path when enabled: candidates were queued for
+            # Curate, which is the durable effect of this run.
+            outcome = 'staged'
+        else:
+            outcome = 'noop'
+        reason = ''
+        if staging_error:
+            reason = f'staging {staging_error}'
+        elif not new_concepts_list and not staged_count and synthesis_meta:
+            # Say WHY it was empty, so a quiet run is readable from the log.
+            if not staging_enabled:
+                reason = 'staging disabled — extractor produced no concepts'
+            elif staged_duplicate_count:
+                reason = f'all concepts already staged ({staged_duplicate_count} duplicates)'
+            else:
+                reason = 'extractor produced no concepts'
+        record_synthesis_audit(
+            ctx.config.path,
+            session_id=synthesis_meta['session_id'],
+            synthesis_id=synthesis_meta['synthesis_id'],
+            transcript_sha256=synthesis_meta.get('transcript_sha256', ''),
+            source=source or 'session_synthesis',
+            vault=ctx.config.id,
+            provider=llm_config.get('llm_provider', 'unknown'),
+            model=llm_config.get('llm_model', 'unknown'),
+            hebbian_updates=len(hebbian_updates),
+            outcome=outcome,
+            concept_ids=concept_ids,
+            reason=reason,
+            queued_at=synthesis_meta.get('queued_at', ''),
+            staged_count=staged_count,
+            staged_duplicate_count=staged_duplicate_count,
+        )
 
     # Neurogenesis runs after the initial activation broadcast. Send a second
     # ordered activation event so WebSocket clients render newly created notes
