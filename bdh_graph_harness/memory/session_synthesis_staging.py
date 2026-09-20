@@ -340,6 +340,14 @@ def _notify_curate_gate(candidate_id: str, vault_id: str) -> None:
     ).rstrip("/")
     token = (os.environ.get("MISSION_CONTROL_TOKEN") or
              os.environ.get("API_SERVER_KEY") or "").strip()
+    if not token:
+        # LaunchAgent env may not carry the token; fall back to the env file
+        env_path = Path(os.path.expanduser("~/.hermes/.env"))
+        if env_path.exists():
+            for line in env_path.read_text(encoding="utf-8").splitlines():
+                if line.startswith("MISSION_CONTROL_TOKEN="):
+                    token = line.split("=", 1)[1].strip()
+                    break
     body = json.dumps({"id": candidate_id, "vault": vault_id}).encode("utf-8")
     headers = {"Content-Type": "application/json"}
     if token:
