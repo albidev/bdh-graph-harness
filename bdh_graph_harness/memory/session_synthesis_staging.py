@@ -325,6 +325,39 @@ _PLACEHOLDER_SYNTHESIS_DEFINITION = re.compile(
 )
 
 
+def _notify_curate_gate(candidate_id: str, vault_id: str) -> None:
+    """Fire-and-forget: ask the Curate sidecar to classify this candidate in-flow.
+
+    Best-effort by design: if the sidecar is down, the candidate simply stays
+    'not classified yet' and the review proceeds as before. Never raises.
+    Timeout is 2s per call; the sidecar itself has its own Jev timeout.
+    """
+    import threading
+    import urllib.request
+
+    url = os.environ.get(
+        "CURATE_SIDECAR_URL", "http://127.0.0.1:8775"
+    ).rstrip("/")
+    token = (os.environ.get("MISSION_CONTROL_TOKEN") or
+             os.environ.get("API_SERVER_KEY") or "").strip()
+    body = json.dumps({"id": candidate_id, "vault": vault_id}).encode("utf-8")
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    def _post():
+        try:
+            request = urllib.request.Request(
+                f"{url}/api/local/candidates/classify-single",
+                data=body, headers=headers, method="POST",
+            )
+            urllib.request.urlopen(request, timeout=15).read()
+        except Exception:  # noqa: BLE001 — gate is advisory, never blocks staging
+            pass
+
+    threading.Thread(target=_post, daemon=True).start()
+
+
 def _filter_session_synthesis_concepts(concepts: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
     """Drop extractor placeholders and repeated concept loops before Curate."""
     accepted: list[dict[str, Any]] = []
@@ -554,6 +587,7 @@ def stage_session_synthesis_candidates(
 
         if not dry_run:
             _save_candidate(candidate, vault_path)
+            _notify_curate_gate(candidate_id, vault_id)
             create_curate_candidate(
                 str(vault_path),
                 candidate_id=candidate_id,
