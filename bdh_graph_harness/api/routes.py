@@ -2137,7 +2137,7 @@ async def api_synthesis_approve(request, app_state: dict) -> web.Response:
         return web.json_response({"error": "candidate correlation does not match request"}, status=400)
     if candidate.status == "approved":
         return web.json_response({"candidate_id": candidate_id, "status": "approved", "idempotent": True})
-    if candidate.status != "pending_review":
+    if candidate.status not in ("pending_review", "pre_approved"):
         return web.json_response({"error": f"candidate '{candidate_id}' is not pending_review (status={candidate.status})"}, status=400)
 
     approved = update_candidate_status(ctx.config.path, candidate_id, "approved", reason="approved in Mission Control Curate")
