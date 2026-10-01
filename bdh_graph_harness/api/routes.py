@@ -2251,6 +2251,18 @@ async def api_synthesis_apply(request, app_state: dict) -> web.Response:
             "applied": latest.state in {"created", "merged"},
         })
 
+    # Existing auto approve/apply MUST NOT silently ignore extra.curator_merge_target:
+    # if candidate carries a nonterminal target hint (extra.curator_merge_target),
+    # return 409 directed merge confirmation required (not create).
+    extra = getattr(candidate, 'extra', {}) or {}
+    if extra.get('curator_merge_target') and (candidate.status not in ('merged', 'noop', 'created', 'conflict', 'rejected', 'failed')):
+        return web.json_response({
+            'error': 'directed merge confirmation required (extra.curator_merge_target present)',
+            'candidate_id': candidate_id,
+            'target_hint': extra.get('curator_merge_target'),
+            'resolution': 'use POST /api/synthesis/merge-preview then POST /api/synthesis/merge with confirmed:true',
+        }, status=409)
+
     # Approval gate: only an approved candidate may be applied.
     if candidate.status != "approved":
         return web.json_response(
@@ -2391,6 +2403,21 @@ def setup_routes(app: web.Application, app_state: dict, ws_clients: set) -> None
     async def _synthesis_apply(request):
         return await api_synthesis_apply(request, app_state)
 
+    from bdh_graph_harness.api.directed_merge import (
+        api_synthesis_merge_targets,
+        api_synthesis_merge_preview,
+        api_synthesis_merge,
+    )
+
+    async def _synthesis_merge_targets(request):
+        return await api_synthesis_merge_targets(request, app_state)
+
+    async def _synthesis_merge_preview(request):
+        return await api_synthesis_merge_preview(request, app_state)
+
+    async def _synthesis_merge(request):
+        return await api_synthesis_merge(request, app_state)
+
     app.router.add_get('/', _index)
     app.router.add_get('/ws', _ws)
     app.router.add_get('/health', _health)
@@ -2411,6 +2438,9 @@ def setup_routes(app: web.Application, app_state: dict, ws_clients: set) -> None
     app.router.add_get('/api/synthesis/candidates', _synthesis_candidates)
     app.router.add_post('/api/synthesis/approve', _synthesis_approve)
     app.router.add_post('/api/synthesis/apply', _synthesis_apply)
+    app.router.add_get('/api/synthesis/merge-targets', _synthesis_merge_targets)
+    app.router.add_post('/api/synthesis/merge-preview', _synthesis_merge_preview)
+    app.router.add_post('/api/synthesis/merge', _synthesis_merge)
     app.router.add_post('/api/query', _query)
     app.router.add_post('/api/stream', _stream)
     app.router.add_post('/api/refresh', _refresh)

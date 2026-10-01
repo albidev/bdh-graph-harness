@@ -27,6 +27,17 @@ from bdh_graph_harness.neurogenesis.operation_journal import list_operation_reco
 SHA = "a" * 64
 
 
+@pytest.fixture(autouse=True)
+def offline_synthesis_extraction(monkeypatch):
+    # The extraction provider reads global runtime config; gate tests must never
+    # contact the user's live LLM or turn a tmp vault into a live multi-vault app.
+    monkeypatch.setattr(staging, 'extract_new_concepts', lambda response, *a, **kw: [{
+        'title': response.split(' is ', 1)[0],
+        'definition': response.split(' is ', 1)[-1], 'confidence': 'low',
+    }])
+    monkeypatch.setattr(staging, 'find_semantic_match', lambda *a, **kw: None)
+
+
 def _stage_pending(tmp_path, *, title="Sparse Attention",
                    definition="A durable concept about sparse attention.",
                    synthesis_id="syn-1", session_id="sess-1", vault_id="default"):
@@ -68,8 +79,8 @@ import chromadb
 
 
 @pytest.fixture
-def mock_app_setup(monkeypatch):
-    d = tempfile.mkdtemp()
+def mock_app_setup(monkeypatch, tmp_path):
+    d = str(tmp_path)
 
     nodes = {
         'alpha': {'id': 'alpha', 'title': 'Alpha', 'tags': 'concept', 'text': 'Alpha content', 'path': '/fake/alpha.md'},
@@ -99,9 +110,7 @@ def mock_app_setup(monkeypatch):
     )
 
     import harness
-    config = dict(harness.CONFIG)
-    config['vault_path'] = d
-    config['neurogenesis_enabled'] = False
+    config = {'vault_path': d, 'neurogenesis_enabled': False, 'external_sources': [], 'api_host': '127.0.0.1', 'api_port': 0}
 
     monkeypatch.setattr(bdh_attention_mod, 'get_embeddings', lambda texts: [[1.0, 0.0, 0.0]])
     monkeypatch.setattr(bdh_routes, 'llm_respond', lambda q, a, n, **kwargs: 'Mock LLM response')
