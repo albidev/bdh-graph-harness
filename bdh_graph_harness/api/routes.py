@@ -2415,6 +2415,11 @@ def setup_routes(app: web.Application, app_state: dict, ws_clients: set) -> None
     async def _synthesis_merge_preview(request):
         return await api_synthesis_merge_preview(request, app_state)
 
+    from bdh_graph_harness.api.merge_reconciliation import api_synthesis_merge_reconciliation
+
+    async def _synthesis_merge_reconciliation(request):
+        return await api_synthesis_merge_reconciliation(request, app_state)
+
     async def _synthesis_merge(request):
         return await api_synthesis_merge(request, app_state)
 
@@ -2441,6 +2446,7 @@ def setup_routes(app: web.Application, app_state: dict, ws_clients: set) -> None
     app.router.add_get('/api/synthesis/merge-targets', _synthesis_merge_targets)
     app.router.add_post('/api/synthesis/merge-preview', _synthesis_merge_preview)
     app.router.add_post('/api/synthesis/merge', _synthesis_merge)
+    app.router.add_post('/api/synthesis/merge-reconciliation', _synthesis_merge_reconciliation)
     app.router.add_post('/api/query', _query)
     app.router.add_post('/api/stream', _stream)
     app.router.add_post('/api/refresh', _refresh)

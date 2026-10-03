@@ -24,6 +24,11 @@ _CONFLICT_RE = re.compile(
 )
 
 
+def conflict_signals(definition: str) -> list[str]:
+    """Expose the existing lexical guard's hits without treating them as contradictions."""
+    return list(dict.fromkeys(match.group(0) for match in _CONFLICT_RE.finditer(definition or "")))
+
+
 def looks_conflicting(definition: str) -> bool:
     """Return True for explicit negation/replacement language.
 

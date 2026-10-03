@@ -241,3 +241,91 @@ async def test_real_content_changes_invalidate_reviewed_preview(merge_env, chang
     before = snapshot(env)
     response = await env['client'].post('/api/synthesis/merge', json=request_body(env, **{k: p[k] for k in ('candidate_revision', 'target_revision')}))
     assert response.status == 409 and snapshot(env) == before
+
+
+def flagged(env):
+    env['candidate'].definition = 'Never overwrite the original criteria; append specific cases.'
+    env['candidate'].provenance['would_conflict'] = True
+    staging._save_candidate(env['candidate'], env['root'])
+
+
+def assessment(env, classification='compatible'):
+    return {'classification': classification, 'reason': 'An additive clarification preserves the existing criteria.',
+            'candidate_quote': env['candidate'].definition, 'target_quote': 'Original criteria.',
+            'provider': 'fixture-provider', 'model': 'fixture-model'}
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_is_advice_only_until_human_confirmation_and_preserves_revert(merge_env):
+    env = merge_env
+    flagged(env)
+    p = await preview(env)
+    assert p['conflict']['required'] and p['conflict']['provenance_flag']
+    assert 'Never' in p['conflict']['signals']
+    body = request_body(env, **{k: p[k] for k in ('candidate_revision', 'target_revision')})
+    original = snapshot(env)
+    response = await env['client'].post('/api/synthesis/merge', json=body)
+    assert response.status == 409 and snapshot(env) == original
+    response = await env['client'].post('/api/synthesis/merge-reconciliation', json={**body,'assessment':assessment(env)})
+    assert response.status == 200, await response.text()
+    record = await response.json()
+    rid = record['reconciliation_id']
+    after = snapshot(env)
+    assert all(after[k] == v for k,v in original.items())
+    assert len(after.keys() - original.keys()) == 1  # only the assessment record, not approval/audit/journal
+    for overrides in ({'reconciliation_id':rid}, {'reconciliation_id':rid,'conflict_confirmed':'true'},
+                      {'reconciliation_id':'rec-'+'0'*32,'conflict_confirmed':True}):
+        response = await env['client'].post('/api/synthesis/merge', json={**body,**overrides})
+        assert response.status in {400,409} and snapshot(env) == after
+    confirmed = {**body,'reconciliation_id':rid,'conflict_confirmed':True}
+    response = await env['client'].post('/api/synthesis/merge', json=confirmed)
+    assert response.status == 200, await response.text()
+    result = await response.json()
+    entry = audit.latest_curate_state(str(env['root']),env['candidate'].candidate_id)
+    assert entry.extra['reconciliation_id'] == rid and entry.extra['conflict_confirmed'] is True
+    assert entry.applied_by == 'human' and env['candidate'].definition in env['target'].read_text()
+    response = await env['client'].post('/api/synthesis/merge', json=confirmed)
+    assert response.status == 200 and (await response.json())['idempotent']
+    before = snapshot(env)
+    response = await env['client'].post('/api/synthesis/merge', json={**confirmed,'conflict_confirmed':False})
+    assert response.status in {400,409} and snapshot(env) == before
+    assert revert_operation(str(env['root']),result['operation_id'])['status'] == 'reverted'
+    assert env['target'].read_bytes() == original[str(env['target'].relative_to(env['root']))]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('kind', ['conflicting','uncertain','bad_quote','invalid_class','too_large','stale_candidate','stale_target','other_target','other_vault'])
+async def test_reconciliation_cannot_open_an_uncertain_unbound_or_invalid_gate(merge_env,kind):
+    env = merge_env
+    flagged(env)
+    p = await preview(env)
+    body = request_body(env, **{k:p[k] for k in ('candidate_revision','target_revision')})
+    opinion = assessment(env,kind if kind in {'conflicting','uncertain'} else 'compatible')
+    if kind == 'bad_quote': opinion['target_quote'] = 'fabricated evidence'
+    if kind == 'invalid_class': opinion['classification'] = ['compatible']
+    if kind == 'too_large': opinion['reason'] = 'x' * 1001
+    before = snapshot(env)
+    response = await env['client'].post('/api/synthesis/merge-reconciliation',json={**body,'assessment':opinion})
+    if kind in {'bad_quote','invalid_class','too_large'}:
+        assert response.status == 400 and snapshot(env) == before
+        return
+    assert response.status == 200, await response.text()
+    rid = (await response.json())['reconciliation_id']
+    if kind == 'stale_candidate':
+        env['candidate'].definition += ' Further unreviewed evidence.'
+        staging._save_candidate(env['candidate'],env['root'])
+        p = await preview(env)
+    if kind == 'stale_target':
+        env['target'].write_text(env['target'].read_text() + '\nUnreviewed edit.\n')
+        p = await preview(env)
+    if kind == 'other_target':
+        ctx = env['registry'].get('core')
+        other = env['root'] / 'other.md'; other.write_text('Original criteria.')
+        ctx.nodes['vault:other.md'] = {'absolute_path':str(other),'title':'Other'}
+        body['target_node_id'] = 'vault:other.md'
+        p = await preview(env,target_node_id=body['target_node_id'])
+    if kind == 'other_vault': body['vault_id'] = 'other'
+    body.update({k:p[k] for k in ('candidate_revision','target_revision')})
+    before = snapshot(env)
+    response = await env['client'].post('/api/synthesis/merge',json={**body,'reconciliation_id':rid,'conflict_confirmed':True})
+    assert response.status in {404,409} and snapshot(env) == before
