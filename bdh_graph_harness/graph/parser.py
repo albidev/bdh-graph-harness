@@ -15,6 +15,16 @@ import json
 WIKILINK_RE = re.compile(r'\[\[([^\]|]+)(?:\|([^\]]+))?\]\]')
 FRONTMATTER_RE = re.compile(r'^---\n(.*?)\n---\n', re.DOTALL)
 
+# Written by neurogenesis/merge.py::assimilate_evidence. Each section holds one
+# claim bullet followed by indented audit sub-bullets.
+ASSIMILATED_EVIDENCE_HEADING = '## Assimilated Evidence'
+_EVIDENCE_AUDIT_LINE_RE = re.compile(
+    r'^[ \t]+- (?:source|query|provenance|synthesis_session_id|synthesis_id|'
+    r'transcript_sha256|queued_at):[^\n]*(?:\n|$)',
+    re.MULTILINE,
+)
+_EVIDENCE_CLAIM_RE = re.compile(r'^- (?:\*\*\d{4}-\d{2}-\d{2}\*\* — )?(\S[^\n]*)$', re.MULTILINE)
+
 # ---------------------------------------------------------------------------
 # Parser functions
 # ---------------------------------------------------------------------------
@@ -103,13 +113,38 @@ def extract_wikilinks(content):
     return links
 
 
-def extract_text(content):
-    """Extract plain text from markdown (strip frontmatter, wikilinks, markdown)."""
-    # Strip frontmatter
-    text = FRONTMATTER_RE.sub('', content)
-    # Convert wikilinks to display text
-    text = WIKILINK_RE.sub(lambda m: m.group(2) or m.group(1), text)
-    # Strip markdown formatting
+def strip_evidence_audit(content):
+    """Drop the audit sub-bullets of Assimilated Evidence sections.
+
+    They stay in the file for traceability, but session ids, hashes and the
+    repeated ``query: Explicit Curate merge target`` line are not knowledge:
+    indexed, they become a shared lexical/semantic attractor across every merged
+    note. ``create_note`` keeps the same provenance in frontmatter for this reason.
+    """
+    head, heading, tail = content.partition(ASSIMILATED_EVIDENCE_HEADING)
+    if not heading:
+        return content
+    return head + heading + _EVIDENCE_AUDIT_LINE_RE.sub('', tail)
+
+
+def _plain(markdown):
+    text = WIKILINK_RE.sub(lambda m: m.group(2) or m.group(1), markdown)
     text = re.sub(r'[#*_`>\-]', ' ', text)
-    text = re.sub(r'\s+', ' ', text).strip()
-    return text
+    return re.sub(r'\s+', ' ', text).strip()
+
+
+def extract_text(content):
+    """Extract plain text from markdown (strip frontmatter, evidence audit lines, wikilinks, markdown)."""
+    return _plain(strip_evidence_audit(FRONTMATTER_RE.sub('', content)))
+
+
+def extract_evidence_claims(content):
+    """Plain-text claims appended by merges, one per Assimilated Evidence bullet."""
+    sections = re.split(r'^(?=## )', content, flags=re.MULTILINE)
+    evidence = '\n'.join(s for s in sections if s.startswith(ASSIMILATED_EVIDENCE_HEADING))
+    claims = []
+    for match in _EVIDENCE_CLAIM_RE.finditer(_EVIDENCE_AUDIT_LINE_RE.sub('', evidence)):
+        claim = _plain(match.group(1))
+        if claim and claim not in claims:
+            claims.append(claim)
+    return claims

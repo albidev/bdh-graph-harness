@@ -18,6 +18,7 @@ from bdh_graph_harness.memory.hebbian import (
 from bdh_graph_harness.retrieval.embeddings import get_embeddings
 from bdh_graph_harness.retrieval.bm25 import BM25Index
 from bdh_graph_harness.retrieval.hybrid import hybrid_score
+from bdh_graph_harness.retrieval.evidence import fold_evidence_scores
 from bdh_graph_harness.retrieval.okf_policy import (
     apply_okf_retrieval_policy,
     evaluate_okf_metadata,
@@ -480,6 +481,7 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
             dist = results['distances'][0][i]
             sim = max(0.0, 1.0 - dist)
             raw_vector_scores[note_id] = sim
+    fold_evidence_scores(collection, query_emb, raw_vector_scores, overfetch, nodes)
 
     # Hybrid search: combine vector + BM25 (with proper batch normalization)
     hybrid_enabled = CONFIG.get('hybrid_search', False) and bm25_index is not None
@@ -952,6 +954,7 @@ def integrate_and_fire_attention(query, nodes, edges, collection, k=None, max_ho
             dist = results['distances'][0][i]
             sim = max(0.0, 1.0 - dist)
             raw_vector_scores[note_id] = sim
+    fold_evidence_scores(collection, query_emb, raw_vector_scores, overfetch, nodes)
 
     hybrid_enabled = CONFIG.get('hybrid_search', False) and bm25_index is not None
 

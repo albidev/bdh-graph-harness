@@ -9,6 +9,7 @@ import hashlib
 
 from bdh_graph_harness.config import CONFIG
 from bdh_graph_harness.retrieval.embeddings import get_embeddings
+from bdh_graph_harness.retrieval.evidence import sync_evidence_embeddings
 
 
 def _get_ollama_embedding_function():
@@ -76,10 +77,11 @@ def compute_all_embeddings(
     resolved_collection = collection_name or cfg.get('chroma_collection', 'notes')
 
     client = chromadb.PersistentClient(path=chroma_path)
+    embedding_function = _get_ollama_embedding_function()
     collection = client.get_or_create_collection(
         resolved_collection,
         metadata={'hnsw:space': 'cosine'},
-        embedding_function=_get_ollama_embedding_function(),
+        embedding_function=embedding_function,
     )
 
     # Compute content hashes for all notes
@@ -151,4 +153,5 @@ def compute_all_embeddings(
     else:
         print(f"Using ChromaDB cache ({collection.count()} notes)")
 
+    sync_evidence_embeddings(client, collection, resolved_collection, nodes, embedding_function)
     return collection

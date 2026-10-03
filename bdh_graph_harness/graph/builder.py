@@ -15,6 +15,7 @@ from bdh_graph_harness.graph.parser import (
     extract_note_id,
     parse_frontmatter,
     parse_json_frontmatter_list,
+    extract_evidence_claims,
     extract_text,
     extract_wikilinks,
 )
@@ -30,6 +31,9 @@ from bdh_graph_harness.graph.okf import (
 # ---------------------------------------------------------------------------
 
 GRAPH_CACHE_FILE = ".bdh-graph-cache.json"
+# Bump when node fields or extract_text output change: an older cache is rebuilt
+# instead of serving stale text (incremental updates only re-read changed mtimes).
+GRAPH_CACHE_SCHEMA = 2
 
 
 # ---------------------------------------------------------------------------
@@ -69,7 +73,8 @@ def build_graph(vault_root, use_cache=True, graph_ignore=None, okf_mode=False):
             cached = None
 
     okf_enabled = okf_mode not in (False, None, "off")
-    if cached and bool(cached.get('okf_mode', False)) == okf_enabled:
+    if (cached and bool(cached.get('okf_mode', False)) == okf_enabled
+            and cached.get('schema') == GRAPH_CACHE_SCHEMA):
         nodes, edges = _incremental_graph_update(
             vault_root,
             cached,
@@ -131,6 +136,7 @@ def _full_graph_build(vault_root, ignore_list=None, okf_mode=False):
                 'title': fm.get('title', os.path.basename(f)[:-3]),
                 'tags': fm.get('tags', ''),
                 'text': text,
+                'evidence': extract_evidence_claims(content),
                 'path': filepath,
                 'mtime': mtime,
                 'activated_from_ids': parse_json_frontmatter_list(fm, 'activated_from_ids'),
@@ -317,6 +323,7 @@ def _incremental_graph_update(
             'title': fm.get('title', os.path.basename(filepath)[:-3]),
             'tags': fm.get('tags', ''),
             'text': text,
+            'evidence': extract_evidence_claims(content),
             'path': filepath,
             'mtime': mtime,
             'activated_from_ids': parse_json_frontmatter_list(fm, 'activated_from_ids'),
@@ -355,6 +362,7 @@ def _save_graph_cache(vault_root, nodes, edges, cache_path, *, okf_mode=False):
         'cached_at': datetime.now().isoformat(),
         'vault_path': vault_root,
         'okf_mode': bool(okf_mode),
+        'schema': GRAPH_CACHE_SCHEMA,
     }
     try:
         with open(cache_path, 'w', encoding='utf-8') as f:

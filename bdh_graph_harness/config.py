@@ -188,6 +188,8 @@ CONFIG = {
     # Interactive neurogenesis is conservative but can retain several independent durable concepts.
     'neurogenesis_max_concepts': 3,
     'neurogenesis_source_edges_enabled': True,
+    # One vector per merged claim (retrieval/evidence.py) so merge never costs recall vs a new note.
+    'evidence_vectors_enabled': True,
     # Semantic sleep — disabled until explicitly enabled in the vault config.
     'semantic_consolidation_enabled': False,
     'semantic_consolidation_checkpoint': '.bdh-semantic-consolidation.json',

@@ -20,6 +20,7 @@ from typing import Iterable
 from bdh_graph_harness.graph.builder import build_graph
 from bdh_graph_harness.graph.display import add_display_label
 from bdh_graph_harness.graph.parser import (
+    extract_evidence_claims,
     extract_text,
     extract_wikilinks,
     parse_frontmatter,
@@ -321,6 +322,7 @@ def build_federated_graph(
             ),
             "tags": frontmatter.get("tags", ""),
             "text": extract_text(document.content),
+            "evidence": extract_evidence_claims(document.content),
             "path": document.absolute_path,
             "absolute_path": document.absolute_path,
             "relative_path": document.relative_path,
