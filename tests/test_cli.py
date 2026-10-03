@@ -35,6 +35,35 @@ def test_serve_mode_uses_module_graph_builder_after_list_vaults_support(monkeypa
     assert captured["collection"] == "collection"
 
 
+def test_multivault_serve_does_not_prebuild_the_legacy_graph(monkeypatch, tmp_path):
+    """Multi-vault --serve: the registry loads every vault itself.
+
+    A legacy pre-build wrote non-federated ids into the federated core
+    collection, forcing a full delete + re-embed of that collection on every start.
+    """
+    config = {
+        "vault_path": str(tmp_path),
+        "vaults": [{"id": "core", "path": str(tmp_path)}],
+        "hybrid_search": False,
+    }
+    captured = {}
+    must_not_run = lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("legacy pre-build ran"))
+
+    monkeypatch.setattr(sys, "argv", ["bdh", "--serve"])
+    monkeypatch.setattr(cli, "load_config", lambda _path: config)
+    monkeypatch.setattr(cli, "build_graph", must_not_run)
+    monkeypatch.setattr(cli, "build_configured_graph", must_not_run)
+    monkeypatch.setattr(cli, "compute_all_embeddings", must_not_run)
+    monkeypatch.setattr(
+        cli, "start_api_server",
+        lambda cfg, nodes, edges, collection, state: captured.update(cfg=cfg, collection=collection),
+    )
+
+    cli.main()
+
+    assert captured == {"cfg": config, "collection": None}
+
+
 def test_scan_sources_is_read_only_and_skips_runtime_pipeline(monkeypatch, tmp_path, capsys):
     vault = tmp_path / "vault"
     projects = tmp_path / "projects"

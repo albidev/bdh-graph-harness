@@ -301,6 +301,15 @@ def main():
         print()
         return
 
+    # Multi-vault --serve: the registry builds graph, embeddings and state per
+    # vault (VaultRegistry.load_all) and ignores pre-built data. Building the
+    # legacy single-vault graph here wrote non-federated ids into the same
+    # Chroma collection as the federated core vault, so every start deleted and
+    # re-embedded that whole collection twice.
+    if args.serve and config.get('vaults'):
+        start_api_server(config, None, None, None, None)
+        return
+
     # Resolve vault (--vault-id takes precedence over --vault)
     effective_config = dict(config)
     if args.vault_id:
