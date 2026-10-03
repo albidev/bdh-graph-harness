@@ -341,6 +341,32 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ai.bdh.graph-harness.pli
 
 The service auto-restarts on crash (`KeepAlive: true`). Logs at `$BDH_HOME/logs/bdh-server.log`. The `start-server.sh` wrapper loads the configured provider credential from the environment (`OLLAMA_API_KEY`, `OPENROUTER_API_KEY`, or `OPENCODE_ZEN_API_KEY`) before launching.
 
+## Human-confirmed merge reconciliation
+
+Directed merge preview exposes `conflict: {required, signals, provenance_flag}`.
+These negation/replacement matches are lexical warnings, not semantic verdicts.
+The existing guard remains in force until a caller supplies an exact-text assessment
+and a separate human decision; automatic apply is unchanged.
+
+`POST /api/synthesis/merge-reconciliation` registers advice only. Supply the stored
+candidate correlation (`candidate_id`, `synthesis_id`, `session_id`, `source`, `vault_id`),
+`target_node_id`, both preview revisions, and `assessment` with `classification`
+(`compatible`, `conflicting`, or `uncertain`), `reason`, exact `candidate_quote` and
+`target_quote`, `provider`, and `model`. Full text exceeds 60,000 combined characters:
+HTTP 413, never silent truncation. Invalid quotes: HTTP 400. Stale revisions: HTTP 409.
+
+The endpoint writes only an immutable advice record under
+`<vault>/.bdh-audit/merge-reconciliations/<reconciliation_id>.json`; it does not edit
+notes, approve candidates, advance the curate audit, or create an operation journal.
+The Curate plugin owns the model call; BDH only validates and stores the opinion.
+
+A flagged `POST /api/synthesis/merge` still needs the normal identity, revisions and
+`confirmed: true`, plus `reconciliation_id` and literal `conflict_confirmed: true`.
+BDH reloads the record under the vault runtime lock and requires a compatible opinion
+bound to the same candidate, vault, target and both texts. Uncertain/conflicting,
+foreign or stale records fail closed. The human-confirmed ID is recorded in the
+curate audit. Existing reversible note assimilation and idempotent retry remain intact.
+
 ## Config
 
 See `bdh-config.yaml` for all parameters. Key ones:

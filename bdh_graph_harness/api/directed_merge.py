@@ -10,7 +10,7 @@ from aiohttp import web
 
 from bdh_graph_harness.memory import curate_audit as audit
 from bdh_graph_harness.memory import session_synthesis_staging as staging
-from bdh_graph_harness.neurogenesis.merge import assimilate_evidence, looks_conflicting
+from bdh_graph_harness.neurogenesis.merge import assimilate_evidence, conflict_signals
 
 
 class MergeError(Exception):
@@ -101,7 +101,10 @@ def _preview(ctx, candidate, node_id):
     return {'vault_id': ctx.config.id,
             'candidate': {'candidate_id': candidate.candidate_id, 'title': candidate.title, 'definition': candidate.definition},
             'target': {**target, 'content': content},
-            'candidate_revision': _revision(candidate), 'target_revision': _hash(content)}
+            'candidate_revision': _revision(candidate), 'target_revision': _hash(content),
+            'conflict': {'required': bool(candidate.provenance.get('would_conflict') or conflict_signals(candidate.definition)),
+                         'signals': conflict_signals(candidate.definition),
+                         'provenance_flag': bool(candidate.provenance.get('would_conflict'))}}
 
 
 def _available(ctx):
@@ -155,6 +158,8 @@ def _merge(ctx, candidate, data):
     if entry.state in {'merged', 'noop'}:
         if not entry.extra.get('directed_merge') or any(entry.extra.get(k) != v for k, v in {**revisions, 'target_node_id': node_id}.items()):
             raise MergeError(409, 'Candidate was already applied with a different decision')
+        if entry.extra.get('reconciliation_id') and (data.get('reconciliation_id') != entry.extra['reconciliation_id'] or data.get('conflict_confirmed') is not True):
+            raise MergeError(409, 'Retry must preserve the human-confirmed reconciliation decision')
         _target(ctx, node_id)
         if candidate.status != 'applied':
             staging.update_candidate_status(ctx.config.path, candidate.candidate_id, 'applied')
@@ -166,8 +171,10 @@ def _merge(ctx, candidate, data):
         raise MergeError(409, 'Candidate or target changed; reload and review the preview before confirming')
     if not candidate.definition.strip():
         raise MergeError(409, 'Candidate definition is empty')
-    if candidate.provenance.get('would_conflict') or looks_conflicting(candidate.definition):
-        raise MergeError(409, 'Possible conflicting evidence needs reconciliation before merge')
+    reconciliation = {}
+    if p['conflict']['required']:
+        from bdh_graph_harness.api.merge_reconciliation import require_human_reconciliation
+        reconciliation = require_human_reconciliation(ctx, candidate, p, data)
     _, path = _target(ctx, node_id)
     # Passing only the validated path prevents a stale alternate absolute_path in
     # graph metadata from overriding the human-reviewed destination.
@@ -185,7 +192,7 @@ def _merge(ctx, candidate, data):
             ctx.config.path, candidate.candidate_id, 'merged' if outcome == 'merged' else 'noop',
             reason='Human-confirmed directed merge' if outcome == 'merged' else 'Evidence already present in selected note',
             note_path=p['target']['note_path'], operation_id=merged.get('operation_id', ''), applied_by='human',
-            extra={**revisions, 'target_node_id': node_id, 'directed_merge': True, 'confirmed': True})
+            extra={**revisions, 'target_node_id': node_id, 'directed_merge': True, 'confirmed': True, **reconciliation})
     except Exception as exc:
         # A failed audit cannot leave an untracked vault mutation behind.
         from bdh_graph_harness.neurogenesis.operation_journal import revert_operation
