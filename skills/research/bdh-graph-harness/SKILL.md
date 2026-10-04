@@ -13,6 +13,8 @@ metadata:
 
 # BDH Graph Harness Skill
 
+Start with the [standalone demo](https://github.com/albidev/bdh-graph-harness/blob/main/docs/quickstart.md) and [operations/privacy](https://github.com/albidev/bdh-graph-harness/blob/main/docs/operations.md). The Harness runs without Hermes or Mission Control; this skill and the bridge remain optional integrations. Always pass an explicit `--config` for your copied local config.
+
 Use this skill to operate the BDH Graph Harness from Hermes Agent. BDH is an experimental graph-based memory system for Markdown/Obsidian vaults; it combines structural links, vector retrieval, optional BM25 search, graph attention, Hebbian learning, and controlled neurogenesis. This skill covers the BDH integration only: the `bdh-hermes-bridge` plugin is a separate component and is not installed by this file.
 
 ## When to Use
@@ -78,7 +80,7 @@ bdh_stats(vault_id="research")
 From a checkout of this repository:
 
 ```bash
-python -m bdh_graph_harness --config bdh-config.yaml --serve
+python -m bdh_graph_harness --config bdh-config.local.yaml --serve
 ```
 
 For a direct HTTP fallback, substitute the actual configured base URL:
@@ -87,7 +89,7 @@ For a direct HTTP fallback, substitute the actual configured base URL:
 curl -sS --max-time 5 <BDH_BASE_URL>/api/stats
 curl -sS --max-time 30 <BDH_BASE_URL>/api/query \
   -H 'Content-Type: application/json' \
-  -d '{"query":"How does Hebbian retrieval work?"}'
+  -d '{"query":"How does Hebbian retrieval work?","learn":false,"respond":false}'
 ```
 
 The API server may also expose `/api/vaults` for configured vault discovery. When a `vault_id` is required, pass it explicitly as a query parameter or request field.
@@ -101,7 +103,7 @@ The API server may also expose `/api/vaults` for configured vault discovery. Whe
 | Full graph inspection | `GET /api/graph` | Read-only |
 | Hebbian inspection | `GET /api/hebbian` | Read-only |
 | Source/configured-vault discovery | `GET /api/vaults` | Read-only |
-| Embedding refresh | `POST /api/refresh` or `--refresh` | **Mutates:** embeddings/cache |
+| Embedding refresh | `POST /api/refresh` or `--refresh-embeddings` | **Mutates:** embeddings/cache |
 | Consolidation | `POST /api/consolidate` | **Mutates:** synapses and possibly dormant nodes |
 | Dry-run consolidation | `POST /api/consolidate` with `{"dry_run":true}` | Read-only preview |
 | Source scan | `python -m bdh_graph_harness --scan-sources` | Read-only |
@@ -117,7 +119,7 @@ api_host: <configured-host>
 api_port: <configured-port>
 seed_count: 5
 max_hop: 2
-hybrid_search: false
+hybrid_search: true   # shipped true; internal default true
 hebbian_dynamic_edges_enabled: true
 ```
 
@@ -129,7 +131,7 @@ The effective per-vault LLM can override the global provider, model, endpoint, t
 2. **Discover the target vault and endpoint.** Read the active BDH configuration or call the configured vault-discovery endpoint. Record the effective base URL and optional `vault_id`; do not replace them with an example port.
 3. **Check connectivity read-only.** Call `bdh_stats` or `GET /api/stats`. Confirm a structured response containing graph metrics, or report the exact connection/error response and stop before attempting a mutating operation.
 4. **Choose the least invasive operation.** Use `bdh_stats`, `/api/graph`, `/api/hebbian`, or `--scan-sources` for inspection. Use `bdh_query` only when the user wants a grounded graph answer or explicitly asks for retrieval.
-5. **Run a grounded query when requested.** Pass the user's question as the query. If the response includes `response`, present it as the main answer; cite `activated_notes` with note names and scores. Mention `new_concepts` or Hebbian changes only when relevant.
+5. **Run a grounded query when requested.** The bridge returns compact `found`/`response`, not raw note arrays. Cite note provenance only when actually present in the API evidence; do not invent note names/scores from a compact tool result. For retrieval without learning, use the direct HTTP payload with explicit `learn:false` (and `respond:false` to avoid completion).
 6. **Keep mutations explicit.** Warn before refresh, consolidation, neurogenesis-related writes, or any operation that changes the vault or persistent graph state. A normal `bdh_query` is not read-only even when the user only wants information.
 7. **Handle failures without hiding them.** Distinguish an unavailable bridge tool, an unreachable server, an invalid vault ID, an LLM/embedding failure, and a valid empty result. Do not retry a timed-out `POST /api/query` blindly: the endpoint may already have applied Hebbian updates or neurogenesis.
 8. **Verify the requested result.** For a read-only operation, ensure the returned JSON is structurally valid and matches the requested vault. For a mutation, report the response and re-read the relevant stats or resource when the operation exposes a stable read-back path.
@@ -168,17 +170,17 @@ After an eligible LLM response, BDH can extract genuinely new concepts, validate
 
 ```bash
 # Read-only source scan: no embeddings, LLM, ChromaDB, or writes
-python -m bdh_graph_harness --config bdh-config.yaml --scan-sources
+python -m bdh_graph_harness --config bdh-config.local.yaml --scan-sources
 
-# Read-only CLI statistics
-python -m bdh_graph_harness --config bdh-config.yaml --stats
+# CLI statistics: startup can write caches
+python -m bdh_graph_harness --config bdh-config.local.yaml --stats
 
-# Read-only Hebbian inspection
-python -m bdh_graph_harness --config bdh-config.yaml --hebbian-show
+# CLI Hebbian inspection: startup can write caches
+python -m bdh_graph_harness --config bdh-config.local.yaml --hebbian-show
 
-# Force a graph rebuild or embedding refresh only when explicitly needed
-python -m bdh_graph_harness --config bdh-config.yaml --refresh
-python -m bdh_graph_harness --config bdh-config.yaml --refresh-embeddings
+# Skip graph cache only when explicitly needed (not a state reset)
+python -m bdh_graph_harness --config bdh-config.local.yaml --no-cache --stats
+python -m bdh_graph_harness --config bdh-config.local.yaml --refresh-embeddings
 ```
 
 Use the configured command-line options for the installed version; experimental APIs, storage formats, and defaults can change.

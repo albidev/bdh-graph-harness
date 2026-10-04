@@ -54,6 +54,10 @@ sleep-cycle consolidation → downscale → prune → quality re-evaluation → 
 - **Agent-native interfaces** — REST API, WebSocket event stream, CLI, and MCP server all use the same core retrieval and memory model.
 - **Inspectable visualization** — a WebGL force graph renders activation, edge families, learned strength, dormant state, and live updates.
 
+## Start safely
+
+Use the [standalone demo quickstart](docs/quickstart.md) before connecting a real vault. It supplies fictional linked notes, isolated storage, local-only completion settings and an executable read-only smoke check. Hermes / Mission Control / Curate are optional, not prerequisites. Review [operations/privacy](docs/operations.md) and [compatibility](docs/compatibility.md) and the [alpha release checklist](docs/alpha-checklist.md); this remains an experimental alpha, not a production stability claim.
+
 ## Documentation map
 
 | Need | Read |
@@ -63,6 +67,10 @@ sleep-cycle consolidation → downscale → prune → quality re-evaluation → 
 | MCP clients and transports | [`docs/mcp-server.md`](docs/mcp-server.md) |
 | Real-time graph visualization | [`docs/visualization.md`](docs/visualization.md) |
 | Testing and coverage policy | [`docs/testing.md`](docs/testing.md) |
+| Standalone demo and learning opt-in | [`docs/quickstart.md`](docs/quickstart.md) |
+| Backup/restore, privacy and troubleshooting | [`docs/operations.md`](docs/operations.md) |
+| Tested versions and alpha limits | [`docs/compatibility.md`](docs/compatibility.md) |
+| Directed merge evidence | [`docs/directed-merge-evidence.md`](docs/directed-merge-evidence.md) |
 | Configurable behavior | [`bdh-config.yaml`](bdh-config.yaml) |
 
 ## Neurogenesis Signal Filtering
@@ -94,7 +102,7 @@ Sleep Cycle (periodic):
 
 ```
 bdh_graph_harness/
-├── __main__.py              # CLI entry point (--serve, --mcp, --query, --refresh)
+├── __main__.py              # CLI entry point (--serve, --mcp, positional query, --refresh-embeddings, --no-cache)
 ├── config.py                # Config loading, env var expansion, retry logic
 ├── vaults.py                # VaultConfig, VaultContext, VaultRegistry (multi-vault isolation)
 ├── mcp_server.py            # MCP server (FastMCP, stdio + HTTP transport)
@@ -109,8 +117,8 @@ bdh_graph_harness/
 ├── retrieval/
 │   ├── embeddings.py        # Ollama embedding client
 │   ├── chroma_store.py      # ChromaDB vector store
-│   ├── bm25.py              # BM25 lexical index (optional, disabled by default)
-│   ├── hybrid.py            # Vector + BM25 fusion (optional, disabled by default)
+│   ├── bm25.py              # BM25 lexical index (configurable; hybrid_search is currently true)
+│   ├── hybrid.py            # Vector + BM25 fusion (configurable; hybrid_search is currently true)
 │   └── attention.py         # Seed selection + k-hop spread + adaptive threshold
 ├── memory/
 │   ├── hebbian.py           # Synaptic weight update + decay
@@ -155,20 +163,24 @@ pip install -r requirements.txt
 
 ```bash
 cp bdh-config.yaml bdh-config.local.yaml
-# Edit vault_path to point at your Obsidian vault
+# Edit vault_path/provider/storage in your copied config
+# Pass --config bdh-config.local.yaml explicitly; automatic discovery does not select it
 ```
 
 ## Usage
 
 ```bash
 # Start server
-python -m bdh_graph_harness --serve
+python -m bdh_graph_harness --config bdh-config.local.yaml --serve
 
 # Single query (CLI)
-python -m bdh_graph_harness --query "come funziona l'apprendimento Hebbian?"
+python -m bdh_graph_harness --config bdh-config.local.yaml "come funziona l'apprendimento Hebbian?"
 
-# Force graph rebuild
-python -m bdh_graph_harness --refresh
+# Skip graph cache (not a learned-memory reset)
+python -m bdh_graph_harness --config bdh-config.local.yaml --no-cache --stats
+
+# Refresh embeddings (different from graph rebuild)
+python -m bdh_graph_harness --config bdh-config.local.yaml --refresh-embeddings
 
 # Read-only source scan (no ChromaDB, embeddings, LLM, or writes)
 python -m bdh_graph_harness --config bdh-config.local.yaml --scan-sources
@@ -210,10 +222,10 @@ The bundle contains typed concept documents plus conformant root `index.md` and 
 open http://localhost:8643
 
 # List configured vaults (multi-vault mode)
-python -m bdh_graph_harness --list-vaults
+python -m bdh_graph_harness --config bdh-config.local.yaml --list-vaults
 
 # Target a configured vault from the CLI
-python -m bdh_graph_harness --vault-id research --stats
+python -m bdh_graph_harness --config bdh-config.local.yaml --vault-id research --stats
 ```
 
 ### Multi-vault API
@@ -224,7 +236,7 @@ Keep the legacy `vault_path` config for one vault, or use the `vaults:` list sho
 # Query one vault explicitly
 curl -X POST http://localhost:8643/api/query \
   -H 'Content-Type: application/json' \
-  -d '{"vault_id":"research","query":"How does retrieval work?"}'
+  -d '{"vault_id":"research","query":"How does retrieval work?","learn":false,"respond":false}'
 
 # Read stats for one vault, or discover configured vaults
 curl 'http://localhost:8643/api/stats?vault_id=research'
@@ -245,7 +257,7 @@ vaults:
     # No llm block: inherits the global provider/model configuration.
 ```
 
-Supported nested fields are `provider`, `model`, `base_url`, `temperature`, `max_ctx`, `max_tokens`, `timeout`, `api_key`, `api_key_env`, and `local_only`. Prefer `api_key_env` for cloud vaults; credentials are resolved from the process environment and are never required in the YAML. `base_url` maps to the native Ollama host for `ollama` and to the OpenAI-compatible base for `ollama-cloud`/`openrouter`. `local_only: true` is a hard privacy gate: it accepts only the `ollama` provider and loopback endpoints (`localhost`, `127.0.0.1`, or `::1`).
+Supported nested fields are `provider`, `model`, `base_url`, `temperature`, `max_ctx`, `max_tokens`, `timeout`, `api_key`, `api_key_env`, and `local_only`. Prefer `api_key_env` for cloud vaults; credentials are resolved from the process environment and are never required in the YAML. `base_url` maps to the native Ollama host for `ollama` and to the OpenAI-compatible base for `ollama-cloud`/`openrouter`. `local_only: true` gates completion routing: it accepts only the `ollama` or `omlx` providers and loopback endpoints (`localhost`, `127.0.0.1`, or `::1`). It does not gate the separate embedding URL, bridge rewrite models or optional integrations; review those independently.
 
 The effective provider is resolved per request for REST, streaming, MCP, CLI, and neurogenesis paths. `GET /api/stats?vault_id=...` exposes the selected provider, model, transport, and endpoint for verification.
 
@@ -369,7 +381,7 @@ curate audit. Existing reversible note assimilation and idempotent retry remain 
 
 ## Config
 
-See `bdh-config.yaml` for all parameters. Key ones:
+See `bdh-config.yaml` for shipped settings and `config.py` for internal defaults. The table below is an orientation guide; provider/model/storage values are deployment-specific, not a required maintainer setup. The [demo](examples/demo.yaml) has its own explicit settings. Key ones:
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
@@ -379,7 +391,7 @@ See `bdh-config.yaml` for all parameters. Key ones:
 | `alpha` | 0.7 | Frequency weight in Hebbian |
 | `beta` | 0.3 | Recency weight in Hebbian |
 | `decay` | 0.95 | Per-session decay for unused synapses |
-| `hybrid_search` | `false` | Enable BM25 hybrid mode (disabled by default for Italian vaults) |
+| `hybrid_search` | `true` | Enable BM25 hybrid mode (currently true in both shipped config and internal defaults) |
 | `hybrid_alpha` | 0.7 | Vector search weight (only when `hybrid_search: true`) |
 | `hybrid_beta` | 0.3 | BM25 search weight (only when `hybrid_search: true`) |
 | `llm_provider` | `ollama` | `ollama` (local), `ollama-cloud`, or `openrouter` (OpenAI-compatible endpoints) |
@@ -425,13 +437,12 @@ python -m pytest -q
 python -m pytest -q --cov=bdh_graph_harness --cov-branch --cov-report=term-missing
 ```
 
-`develop` currently verifies **377 passing tests**. The suite includes regression coverage for multi-query retrieval, API contracts, provenance, WebSocket ordering, the retrieval inspector UI, and trusted dynamic Hebbian traversal.
+Test totals change; use the exact CI run or local verification receipt, not a frozen count. The suite includes regression coverage for multi-query retrieval, API contracts, provenance, WebSocket ordering, the retrieval inspector UI, and trusted dynamic Hebbian traversal.
 
 See [`docs/testing.md`](docs/testing.md) for the coverage policy, exact commands, and multi-vault regression requirements. [`docs/coverage.md`](docs/coverage.md) records the current versioned baseline; GitHub Actions keeps the XML and JSON report for every later `develop` or `main` run.
 
 ## Visualization
 
-The web UI at `:8643` shows a real-time force-graph (WebGL) with:
 The web UI at `:8643` shows a real-time **3D force-graph** (WebGL via [3d-force-graph](https://github.com/vasturiano/3d-force-graph)) with:
 - **3D node rendering** — Three.js objects with custom geometries, label sprites, rings, and dashed semantic links
 - **Nodes** colored by activation state or by Obsidian tags (toggle); neurogenesis nodes use aqua (`#00E5FF`)
@@ -455,15 +466,15 @@ The harness includes a [Model Context Protocol](https://modelcontextprotocol.io)
 
 ```bash
 # stdio mode (Claude Desktop, Cursor)
-python -m bdh_graph_harness --mcp
+python -m bdh_graph_harness --config bdh-config.local.yaml --mcp
 
 # HTTP mode (web clients)
-python -m bdh_graph_harness --mcp --mcp-transport http --mcp-port 8644
+python -m bdh_graph_harness --config bdh-config.local.yaml --mcp --mcp-transport http --mcp-port 8644
 ```
 
 **Tools:** `query` (grounded Q&A with citations), `stats` (graph overview), `hebbian` (learned synapses), `graph` (full network), `refresh` (rebuild embeddings).
 
-The MCP server imports the package directly — no dependency on the HTTP API server. Both can run independently or simultaneously.
+The MCP tools first use the configured Harness HTTP API (`api_host`/`api_port`). If it is unreachable, they can initialize an in-process backend. This backend selection is separate from MCP stdio/HTTP transport; direct fallback can index/cache and execute learning. See the detailed MCP guide before running both against the same vault.
 
 See [`docs/mcp-server.md`](docs/mcp-server.md) for client configuration (Claude Desktop, Cursor, etc.).
 
@@ -473,7 +484,7 @@ See [`docs/mcp-server.md`](docs/mcp-server.md) for client configuration (Claude 
 
 The **[bdh-hermes-bridge](https://github.com/albidev/bdh-hermes-bridge)** plugin provides bidirectional integration between [Hermes Agent](https://github.com/NousResearch/hermes-agent) and BDH:
 
-- **Write path** — every Hermes response (>200 chars) is fed to BDH, triggering Hebbian reinforcement and neurogenesis from real usage
+- **Write path** — eligible completed turns can be submitted for learning; enabling the plugin is not a read-only action. See the bridge [isolated onboarding](https://github.com/albidev/bdh-hermes-bridge/blob/main/docs/quickstart.md) first
 - **Read path** — `bdh_query` tool lets Hermes pull context from the knowledge graph on demand
 - **Echo-loop dampening** — assistant responses are flagged with `source: "assistant_response"` to prevent feedback amplification
 - **Session synthesis** — session-synthesis payloads use `source: "session_synthesis"` with dampened plasticity (0.2 increment) and user_prompt-based retrieval; see [Source policy](#source-policy-and-session_synthesis-contract)

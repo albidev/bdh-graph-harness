@@ -34,20 +34,9 @@ python -m pytest -q \
 
 ## Coverage status
 
-The current `develop` baseline is **214 passing tests** and **50% package branch coverage**. The mobile/provenance branch is verified with **222 passing tests**. These are honest baselines, not badges with lipstick on them.
+Test totals and coverage are run-specific. Record the exact commit, dependency versions, command and complete output; do not treat an old count as the current baseline. [coverage.md](coverage.md) is a historical snapshot, not a fresh measurement. Unit mocks alone do not verify provider behavior: use the disposable [demo smoke check](quickstart.md) for a real read-only path, then separately exercise learning and restore.
 
-Modules at 100% branch coverage:
-
-- `memory/state_store.py` — corrupt-state recovery, atomic writes, cleanup, concurrent merge
-- `memory/consolidation.py` — downscaling, pruning, dry-run and phantom-link paths
-- `memory/quality.py` — dormancy and reactivation branches
-- `retrieval/bm25.py` — empty queries, normalization, no-results behavior
-- `tests/test_mobile_visualization.py` — compact layout and touch-first interaction contracts
-- `tests/test_neurogenesis.py` — provenance placement and sanitized frontmatter fields
-- `tests/test_graph_quality_audit.py` — structural/Hebbian invariant audit
-- `tests/test_visualization_3d_contract.py` — 3D renderer contracts
-
-The remaining work is concentrated in infrastructure boundaries: REST/WebSocket routes, CLI/MCP dispatch, graph/cache rebuilds, ChromaDB/embedding failure modes, and provider clients.
+The remaining integration work includes REST/WebSocket routes, CLI/MCP dispatch, graph/cache rebuilds, ChromaDB/embedding failure modes, and provider clients.
 
 ## Regression-test policy
 

@@ -1,5 +1,17 @@
 # BDH Graph Harness Configuration
-
+#
+# PUBLIC CONTRACT NOTES (comments only — no runtime value changes):
+# - Always pass --config bdh-config.local.yaml for local overrides (precedence explicit).
+# - Positional query is CLI form (python -m bdh_graph_harness "..."), not --query.
+# - --refresh-embeddings = embedding refresh only; --no-cache = full graph rebuild.
+# - hybrid_search: shipped true; internal default true.
+# - local_only accepts ollama or omlx with loopback endpoint.
+# - Demo: vault_path=${BDH_DEMO_VAULT}, chroma_path=${BDH_DEMO_CHROMA},
+#   api_host=127.0.0.1, api_port=18643, neurogenesis_enabled=false,
+#   session_synthesis_staging_enabled=true, llm_provider=ollama, llm_model=qwen3:0.6b,
+#   nested llm.local_only=true, no fallbacks.
+# - Startup writes caches; --scan-sources avoids all writes.
+#
 # ---------------------------------------------------------------------------
 # Single-vault mode (default — backward compatible)
 # ---------------------------------------------------------------------------

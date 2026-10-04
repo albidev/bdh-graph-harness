@@ -1,0 +1,45 @@
+# BDH Graph Harness — public demo configuration
+# Fictional vault for documentation/examples only.
+#
+# Environment variables are expanded at load time via ${VAR} syntax.
+# Set BDH_DEMO_VAULT and BDH_DEMO_CHROMA before starting the server.
+
+vault_path: ${BDH_DEMO_VAULT}        # e.g. /tmp/bdh-demo-vault
+chroma_path: ${BDH_DEMO_CHROMA}      # e.g. /tmp/bdh-demo-chroma
+
+# Explicit one-vault registry; requests without vault_id select demo.
+default_vault: demo
+vaults:
+  - id: demo
+    name: Public demo
+    path: ${BDH_DEMO_VAULT}
+    chroma_collection: demo
+
+# API server — bound to loopback only
+api_host: 127.0.0.1
+api_port: 18643
+
+# Neurogenesis disabled for the demo: no concept notes are written
+neurogenesis_enabled: false
+
+# Navigation/log files are not neurons; all concept/entity wikilinks resolve.
+# Cover legacy note IDs (no suffix) and source-aware scan paths (with suffix).
+graph_ignore: [index, log, index.md, log.md]
+llm_fallbacks: []
+
+# Session synthesis stages into .bdh-candidates instead of writing vault notes
+session_synthesis_staging_enabled: true
+session_synthesis_staging_dir: .bdh-candidates
+session_synthesis_staging_max_concepts: 5
+
+# Ollama completion; no fallback chain
+llm_provider: ollama
+llm_model: qwen3:0.6b
+llm:
+  provider: ollama
+  model: qwen3:0.6b
+  local_only: true
+
+# Embeddings stay on local Ollama
+embedding_model: nomic-embed-text-v2-moe
+ollama_url: http://127.0.0.1:11434

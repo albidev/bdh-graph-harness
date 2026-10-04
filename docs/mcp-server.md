@@ -1,5 +1,7 @@
 # MCP Server — BDH Graph Harness
 
+MCP `query` performs learning; `refresh` mutates graph/index state. Use `stats` for the initial read-only tool check. `--mcp` CLI startup may also prepare graph/index caches before entering the MCP server.
+
 The BDH Graph Harness ships with a [Model Context Protocol](https://modelcontextprotocol.io) server that exposes the Hebbian knowledge graph as tools to any MCP-compatible client.
 
 ## What is MCP?
@@ -34,7 +36,7 @@ pip install -r requirements.txt
 
 ### 2. Configure the vault
 
-For one vault, edit `bdh-config.yaml`:
+Start with the [standalone demo](quickstart.md). For your own vault, copy `bdh-config.yaml` to `bdh-config.local.yaml`, edit the copy and pass `--config bdh-config.local.yaml` explicitly:
 
 ```yaml
 vault_path: /path/to/your/vault
@@ -56,13 +58,13 @@ The server runs in two transport modes:
 **stdio** (default — for Claude Desktop, Cursor):
 
 ```bash
-python -m bdh_graph_harness --mcp
+python -m bdh_graph_harness --config bdh-config.local.yaml --mcp
 ```
 
 **HTTP** (for web-based clients):
 
 ```bash
-python -m bdh_graph_harness --mcp --mcp-transport http --mcp-port 8644
+python -m bdh_graph_harness --config bdh-config.local.yaml --mcp --mcp-transport http --mcp-port 8644
 ```
 
 ## Client configuration
@@ -75,8 +77,8 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
 {
   "mcpServers": {
     "bdh-graph-harness": {
-      "command": "python3",
-      "args": ["-m", "bdh_graph_harness", "--mcp"],
+      "command": "/path/to/bdh-graph-harness/.venv/bin/python",
+      "args": ["-m", "bdh_graph_harness", "--config", "/path/to/bdh-config.local.yaml", "--mcp"],
       "cwd": "/path/to/bdh-graph-harness",
       "env": {
         "OPENROUTER_API_KEY": "your-key-here"
@@ -96,8 +98,8 @@ Add to `~/.cursor/mcp.json`:
 {
   "mcpServers": {
     "bdh-graph-harness": {
-      "command": "python3",
-      "args": ["-m", "bdh_graph_harness", "--mcp"],
+      "command": "/path/to/bdh-graph-harness/.venv/bin/python",
+      "args": ["-m", "bdh_graph_harness", "--config", "/path/to/bdh-config.local.yaml", "--mcp"],
       "cwd": "/path/to/bdh-graph-harness",
       "env": {
         "OPENROUTER_API_KEY": "your-key-here"
@@ -112,7 +114,7 @@ Add to `~/.cursor/mcp.json`:
 Similar JSON config — see your client's MCP documentation. The server command is always:
 
 ```
-python3 -m bdh_graph_harness --mcp
+python3 -m bdh_graph_harness --config bdh-config.local.yaml --mcp
 ```
 
 ### HTTP transport
@@ -121,26 +123,21 @@ For clients that prefer HTTP:
 
 ```bash
 # Start the server
-python -m bdh_graph_harness --mcp --mcp-transport http --mcp-port 8644
+python -m bdh_graph_harness --config bdh-config.local.yaml --mcp --mcp-transport http --mcp-port 8644
 ```
 
 Then configure your client with the URL: `http://localhost:8644/mcp`
 
 ## Architecture
 
-The MCP server is a thin transport layer over the existing `bdh_graph_harness` package. It does **not** depend on the HTTP API server (`--serve`) — it imports the package functions directly:
+The MCP server is a **thin HTTP client** of the BDH web server (`127.0.0.1:8643` by default, or the configured `api_host`/`api_port`). All read/write operations go through the REST API first; if the web server is unreachable, the server falls back to the direct in-process pipeline with a logged warning. Both can run independently or together.
 
 ```
 MCP Client (Claude Desktop / Cursor / ...)
-    ↓ (stdio or HTTP)
-MCP Server (bdh_graph_harness/mcp_server.py)
-    ↓ (direct imports)
-bdh_graph_harness package
-    ├── graph.build_graph
-    ├── retrieval.attention
-    ├── memory.hebbian_update
-    ├── llm.llm_respond
-    └── neurogenesis.extract_new_concepts
+    ↓ (stdio or HTTP: --mcp --mcp-transport http --mcp-port 8644)
+MCP Server (mcp_server.py — thin HTTP + direct fallback)
+    ↓ (HTTP GET/POST to 127.0.0.1:8643 /api/...)  OR  direct import fallback
+bdh_graph_harness package (graph, retrieval, memory, llm, neurogenesis)
 ```
 
 This means the Hebbian architecture is fully preserved — the MCP server is just another way to access the same retrieval pipeline. You can run both `--serve` (HTTP API + visualization) and `--mcp` (MCP server) independently or simultaneously.
@@ -161,7 +158,7 @@ The graph learns from every query — the next query operates on a modified grap
 You can test the server with the official MCP Inspector:
 
 ```bash
-npx @modelcontextprotocol/inspector python3 -m bdh_graph_harness --mcp
+npx @modelcontextprotocol/inspector python3 -m bdh_graph_harness --config bdh-config.local.yaml --mcp
 ```
 
 This opens a web UI where you can call each tool and inspect the results.
