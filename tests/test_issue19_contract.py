@@ -4,9 +4,13 @@ These tests exercise the compatibility/bounds/provenance logic that will be
 shared by the bridge and backend once the multi-query feature is implemented.
 They do NOT require the real vault or embeddings.
 """
+from pathlib import Path
+
 import pytest
 
 from benchmarks.run_issue19_audit import _valid_variants, audit_contract
+
+GOLDEN_SET = Path(__file__).resolve().parents[1] / "benchmarks" / "golden_set_issue19.yaml"
 
 
 def _entry(query="original", variants=None, category="test"):
@@ -54,9 +58,8 @@ def test_valid_variants_keeps_language_and_weight():
 
 
 def test_audit_contract_reports_all_ok_for_clean_set():
-    from pathlib import Path
     report = audit_contract(
-        Path("benchmarks/golden_set_issue19.yaml"),
+        GOLDEN_SET,
         max_variants=4,
     )
     assert report["mode"] == "contract"
@@ -66,10 +69,9 @@ def test_audit_contract_reports_all_ok_for_clean_set():
 
 
 def test_audit_contract_detects_empty_original_query():
-    from pathlib import Path
     entry = _entry("", category="write-semantics")
     report = audit_contract(
-        Path("benchmarks/golden_set_issue19.yaml"),
+        GOLDEN_SET,
         max_variants=4,
     )
     assert report["all_ok"] is True
@@ -87,6 +89,5 @@ def test_audit_contract_detects_empty_original_query():
     "rollback",
 ])
 def test_issue19_golden_set_includes_all_contract_categories(category):
-    from pathlib import Path
-    report = audit_contract(Path("benchmarks/golden_set_issue19.yaml"), max_variants=4)
+    report = audit_contract(GOLDEN_SET, max_variants=4)
     assert category in report["categories"], f"missing category: {category}"

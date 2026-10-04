@@ -9,7 +9,7 @@ The demo is an onboarding boundary, not evidence that the entire system is produ
 - [ ] Real embedding retrieval and read-only smoke pass; verify learning artifacts, not only HTTP 200.
 - [ ] Actual selected local completion model generates a response; a mocked or error response is not success.
 - [ ] Explicit Hebbian learning changes state/counter, not demo Markdown; stop/backup/restore recovers the original state.
-- [ ] Suite passes, or every failure is reproduced on the unchanged baseline and publicly disclosed. Resolve the query-rewrite golden-set/issue-19 contract discrepancy before declaring the full suite green.
+- [ ] Suite passes, or every failure is reproduced on the unchanged baseline and publicly disclosed.
 - [ ] Relative doc links, code fences, source scan links and effective config values checked.
 - [ ] Optional bridge is tested separately through a real isolated Hermes registry dispatch; no production chat needed.
 - [ ] No private vaults, config backups, policy maps, transcripts, credentials, benchmark inputs or caches included in the release payload.
