@@ -47,7 +47,7 @@ The critical design choice: step 5 happens *before* step 7. The graph learns fro
 
 In the adult hippocampus, new neurons are born continuously — a process called adult neurogenesis. These new neurons integrate into existing circuits and contribute to memory formation.
 
-The harness implements this directly. After each LLM response, a second pass extracts concepts that were discussed but don't exist in the vault. For each new concept, an atomic note is created in a `concepts/` directory with frontmatter tags, a one-sentence definition, and links to the seed notes that triggered its creation.
+The harness implements this directly. After each LLM response, a second pass extracts concepts that were discussed but don't exist in the vault. For each new concept, an atomic note is created in the configured `neurogenesis_dir` (`concepts/` in the shipped `bdh-config.yaml`, `wiki/concepts` when unset) with frontmatter tags, a one-sentence definition, and links to the seed notes that triggered its creation.
 
 On the next startup, the incremental embedding process picks up these new notes, embeds them, and they join the graph. The vault has physically grown. The next query can activate these new neurons, creating connections the system didn't have before.
 
