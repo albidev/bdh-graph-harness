@@ -226,19 +226,6 @@ def start_api_server(config, nodes, edges, collection, state):
         Pre-loaded Hebbian state dict (single-vault mode).
     """
 
-    # Monkeypatch tcp_keepalive to avoid OSError [Errno 22] on macOS/Tailscale
-    try:
-        import aiohttp.tcp_helpers as _tcp_helpers
-        _orig = _tcp_helpers.tcp_keepalive
-        def _safe_keepalive(transport):
-            try:
-                _orig(transport)
-            except OSError:
-                pass
-        _tcp_helpers.tcp_keepalive = _safe_keepalive
-    except Exception:
-        pass
-
     registry = _build_registry(config, nodes, edges, collection, state)
 
     # Shared mutable state container used by all route handlers
@@ -251,7 +238,9 @@ def start_api_server(config, nodes, edges, collection, state):
     ws_clients = set()
 
     # Build aiohttp app and register routes
-    app = web.Application()
+    # Darwin/Tailscale can reject SO_KEEPALIVE during connection setup. Disable
+    # the optional TCP socket probe, not HTTP keep-alive or WebSocket support.
+    app = web.Application(handler_args={'tcp_keepalive': False})
 
     # Auth middleware
     auth_token = config.get('api_auth_token', '')

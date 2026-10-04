@@ -95,7 +95,9 @@ class VaultWatcher:
                 print(f"👁️  Vault watcher error: {exc}", flush=True)
 
     async def _check_changes(self):
-        new_signatures = self._scan_signatures()
+        # Source traversal/stat calls can stall on external filesystems. Keep the
+        # HTTP event loop responsive while collecting a detached snapshot.
+        new_signatures = await asyncio.to_thread(self._scan_signatures)
         old_signatures = self._signatures
         changed = [
             path

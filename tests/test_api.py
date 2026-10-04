@@ -84,6 +84,30 @@ def _capture_app(monkeypatch, config, nodes, edges, collection, state):
 # GET /health
 # ---------------------------------------------------------------------------
 
+
+@pytest.mark.asyncio
+async def test_health_accepts_connections_when_tcp_keepalive_is_unsupported(mock_app_setup, monkeypatch):
+    """An optional socket option must not strand an accepted HTTP request."""
+    import errno
+    from aiohttp import ClientTimeout
+    from aiohttp.test_utils import TestClient, TestServer
+    import aiohttp.web_protocol
+
+    def unsupported_keepalive(transport):
+        raise OSError(errno.EINVAL, 'TCP keepalive unsupported')
+
+    monkeypatch.setattr(aiohttp.web_protocol, 'tcp_keepalive', unsupported_keepalive)
+    nodes, edges, collection, state, config, _ = mock_app_setup
+    app = _capture_app(monkeypatch, config, nodes, edges, collection, state)
+    client = TestClient(TestServer(app), timeout=ClientTimeout(total=2))
+    await client.start_server()
+    try:
+        response = await client.get('/health')
+        assert response.status == 200
+        assert await response.json() == {'status': 'ok'}
+    finally:
+        await client.close()
+
 @pytest.mark.asyncio
 async def test_api_health(mock_app_setup, monkeypatch):
     from aiohttp.test_utils import TestClient, TestServer

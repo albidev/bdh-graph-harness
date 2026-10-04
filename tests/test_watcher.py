@@ -67,3 +67,61 @@ def test_watcher_tracks_filtered_sources_and_coalesces_changes(tmp_path):
         assert calls == ["update", "update"]
 
     asyncio.run(exercise())
+
+
+def test_slow_source_scan_does_not_block_http_health(tmp_path, monkeypatch):
+    """Filesystem latency must not freeze the API event loop."""
+    import threading
+    from urllib.request import ProxyHandler, build_opener
+    from aiohttp import web
+    from aiohttp.test_utils import TestServer
+
+    scan_started = threading.Event()
+    release_scan = threading.Event()
+    outcome = {}
+
+    async def update():
+        pass
+
+    watcher = VaultWatcher(str(tmp_path), update)
+
+    def slow_scan():
+        scan_started.set()
+        assert release_scan.wait(5), 'Probe coordinator did not release scan'
+        return {}
+
+    monkeypatch.setattr(watcher, '_scan_signatures', slow_scan)
+
+    async def exercise():
+        app = web.Application()
+
+        async def health(request):
+            return web.json_response({'status': 'ok'})
+
+        app.router.add_get('/health', health)
+        server = TestServer(app)
+        await server.start_server()
+        url = str(server.make_url('/health'))
+
+        def probe():
+            try:
+                assert scan_started.wait(5)
+                with build_opener(ProxyHandler({})).open(url, timeout=2) as response:
+                    outcome['status'] = response.status
+            except Exception as exc:
+                outcome['error'] = type(exc).__name__
+            finally:
+                release_scan.set()
+
+        thread = threading.Thread(target=probe, daemon=True)
+        thread.start()
+        try:
+            await watcher._check_changes()
+            await asyncio.to_thread(thread.join, 5)
+            assert outcome.get('status') == 200, outcome
+        finally:
+            release_scan.set()
+            await server.close()
+            thread.join(timeout=5)
+
+    asyncio.run(exercise())
