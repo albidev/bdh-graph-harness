@@ -115,7 +115,7 @@ Activation state (opacity, color, visibility) is managed via external Maps rathe
 - `nodeActivationColor` — per-node color override during Hebbian birth animation
 - `linkActivationVisible` — per-link visibility override during query
 - `linkVisibilityState` — per-link visibility from edge filters (threshold, phantom, direct-only)
-- `linkParticleState` / `linkParticleColorState` / `linkParticleCountState` — Hebbian pulse particle configuration
+- `linkParticlesState` / `linkParticleColorState` — Hebbian pulse particle count and color per link
 
 This approach avoids the `TypeError: Attempted to assign to readonly property` crash that occurred when spreading force-graph's live objects.
 

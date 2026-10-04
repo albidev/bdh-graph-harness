@@ -1,6 +1,6 @@
 # 3D Visualization Migration — Architecture Assessment
 
-Status: implemented and live-verified on `feature/3d-knowledge-graph-viz`
+Status: implemented and merged into `main` (developed and live-verified on `feature/3d-knowledge-graph-viz`)
 
 ## Decision
 

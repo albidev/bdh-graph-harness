@@ -249,10 +249,8 @@ queries:
     difficulty: hard
     relevant_note_ids:
       - external:projects/bdh-graph-harness/README.md
-      - external:projects/bdh-graph-harness/docs/plans/2026-07-09-multi-vault-chromadb.md
     qrels:
       external:projects/bdh-graph-harness/README.md: 2
-      external:projects/bdh-graph-harness/docs/plans/2026-07-09-multi-vault-chromadb.md: 1
     rationale: Tests source-aware identity rather than generic graph terminology.
     provenance: source-authored benchmark candidate
     reviewed: false

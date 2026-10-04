@@ -1,6 +1,6 @@
 # Design Proposal: Nightly Automatic Retrieval for Synapse Bootstrapping
 
-**Status:** Proposal — for evaluation 2026-09-27 (cron verdict on dynamic-edge traversal)
+**Status:** Proposal — **not implemented**. The 2026-09-27 evaluation deferred the live rollout until dynamic-edge traversal produces a measurable signal; a dry-run is acceptable only after that fix.
 **Author:** Hermes (design), Albi (approval pending)
 **Repo:** bdh-graph-harness
 **Related:** docs/hebbian-dynamic-edges.md, memory/source_policy.py, memory/hebbian.py
