@@ -771,6 +771,7 @@ async def api_query(request, app_state: dict, ws_clients: set) -> web.Response:
         return source_error
     learn = data.get('learn', True) is not False
     respond = data.get('respond', True) is not False
+    include_context = data.get('include_context', False) is True
     user_prompt = data.get('user_prompt', '').strip()
     query_variants = data.get('query_variants') or None
     llm_config = resolve_llm_config_for_source(ctx.config.settings, source)
@@ -1030,7 +1031,7 @@ async def api_query(request, app_state: dict, ws_clients: set) -> web.Response:
         'queries_processed': ctx.state.get('queries', 0),
     }, ws_clients)
 
-    return web.json_response({
+    response_payload = {
         'vault_id': ctx.config.id,
         'response': response_text,
         'activated_notes': activated_notes,
@@ -1041,7 +1042,24 @@ async def api_query(request, app_state: dict, ws_clients: set) -> web.Response:
         'queries_processed': ctx.state.get('queries', 0),
         'neuron_count': len(ctx.nodes),
         'synapse_count': sum(len(links) for links in ctx.edges.values()),
-    })
+    }
+    if include_context:
+        # Opt-in note bodies are returned only in this HTTP response. Do not put
+        # private vault text on the graph WebSocket broadcast, whose audience is
+        # broader than the requesting Hermes turn.
+        parts = []
+        remaining = 8000
+        for item in activated_notes:
+            node = n.get(item['id'])
+            text = node.get('text', '') if isinstance(node, dict) else ''
+            if not isinstance(text, str) or not text.strip() or remaining <= 0:
+                continue
+            section = f"## {item['title']}\n{text.strip()}"
+            section = section[:remaining]
+            parts.append(section)
+            remaining -= len(section) + 2
+        response_payload['retrieved_context'] = '\n\n'.join(parts)
+    return web.json_response(response_payload)
 
 
 async def api_stream(request, app_state: dict, ws_clients: set) -> web.StreamResponse:

@@ -124,6 +124,7 @@ async def test_api_query_single_query_equivalent(mock_app_mq_setup, monkeypatch)
             'query': 'test query',
             'learn': False,
             'respond': False,
+            'include_context': True,
         })
         assert resp.status == 200
         data = await resp.json()
@@ -135,6 +136,11 @@ async def test_api_query_single_query_equivalent(mock_app_mq_setup, monkeypatch)
         assert data['routing']['multi_query_enabled'] is False
         activated_ids = {note['id'] for note in data['activated_notes']}
         assert activated_ids == {'alpha', 'beta'}
+        assert data['response'] == ''
+        assert '## Alpha' in data['retrieved_context']
+        assert 'Alpha content' in data['retrieved_context']
+        assert '## Beta' in data['retrieved_context']
+        assert 'Beta content' in data['retrieved_context']
     finally:
         await client.close()
 
