@@ -14,11 +14,13 @@ The code uses standard Python 3.11 features (match statements are not required; 
 
 - `tests/` runs on Python 3.11 with `pytest`, branch coverage enabled.
 - `.github/workflows/test-and-coverage.yml` pins `python-version: "3.11"`.
-- `requirements.txt` pins `mcp>=1.0,<2.0` to prevent SDK v2 breakages.
+- `requirements.txt` requires `mcp>=2.3.0,<3.0`. `bdh_graph_harness/mcp_server.py` imports the SDK v2 `MCPServer` from `mcp.server.mcpserver` (aliased locally as `FastMCP`); it also retains the legacy SDK v1 import path as a compatibility fallback.
+- `tests/test_mcp_sdk_compat.py` checks the resolved server import, required transports, and registered tools against the installed SDK. CI currently installs the declared SDK v2 range; it does not run a separate SDK v1 test job.
 
 ## What is NOT verified
 
 - No automated tests on macOS or Windows.
+- No SDK v1 test job or MCP SDK version matrix; only the dependency resolved from `mcp>=2.3.0,<3.0` is exercised by CI.
 - No automated security or performance benchmarks.
 - No production deployment guide.
 - The `qwen3:0.6b` model is a demonstration selection; no quality or speed promise is made.

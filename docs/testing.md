@@ -9,10 +9,12 @@ External systems (Ollama, ChromaDB services, LLM providers, and network calls) a
 pip install -r requirements-dev.txt
 ```
 
-Use the project interpreter explicitly (`.venv/bin/python`). A shared or global
-Python may resolve `mcp` 2.x, where `FastMCP` moved to `mcp.server.mcpserver`:
-`requirements.txt` pins `mcp>=1.0,<2.0`, and `mcp_server.py` accommodates both
-majors, but the suite is only verified against the pinned one.
+Use the project interpreter explicitly (`.venv/bin/python`) so tests resolve the
+repository's declared dependencies. `requirements.txt` currently supports MCP SDK
+v2 (`mcp>=2.3.0,<3.0`); `mcp_server.py` retains the v1 import path as a legacy
+fallback. `tests/test_mcp_sdk_compat.py` validates whichever SDK major is installed,
+but CI currently exercises v2 only. See [compatibility.md](compatibility.md) for the
+verified support boundary.
 
 ## Commands
 

@@ -36,8 +36,8 @@ import urllib.error
 from urllib.parse import quote
 
 try:
-    # MCP SDK v1: FastMCP shipped inside the SDK. This is the pinned and tested
-    # path (`mcp>=1.0,<2.0` in requirements.txt).
+    # Legacy MCP SDK v1 path: FastMCP shipped inside the SDK. The declared and
+    # CI-tested dependency is currently MCP SDK v2 (`mcp>=2.3.0,<3.0`).
     from mcp.server.fastmcp import FastMCP
 except ModuleNotFoundError as _exc:  # pragma: no cover - exercised by the v2 probe
     if "mcp.server.fastmcp" not in str(_exc):
@@ -48,7 +48,7 @@ except ModuleNotFoundError as _exc:  # pragma: no cover - exercised by the v2 pr
     # than a downgrade. Reached when the interpreter resolves mcp 2.x — a shared
     # venv, a future upgrade, or a tool invoking the suite with the wrong python
     # — where the previous bare import failed with a ModuleNotFoundError that
-    # says nothing about which pin was violated.
+    # did not identify the SDK's relocated import path.
     from mcp.server.mcpserver import MCPServer as FastMCP
 
 from bdh_graph_harness.config import load_config

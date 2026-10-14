@@ -1,15 +1,14 @@
 """The MCP server module must import against both MCP SDK majors.
 
-`requirements.txt` pins `mcp>=1.0,<2.0`, where `FastMCP` lives at
-`mcp.server.fastmcp`. Under mcp 2.x that path is gone — FastMCP was renamed to
-`MCPServer` and moved to `mcp.server.mcpserver` — so the module used to fail with
-a bare `ModuleNotFoundError: No module named 'mcp.server.fastmcp'` that says
-nothing about which pin was violated. It bites whenever the interpreter resolves
-mcp 2.x: a shared venv, a future upgrade, or tooling invoking the suite with the
-wrong python.
+`requirements.txt` currently requires `mcp>=2.3.0,<3.0`. SDK v1 exposes
+`FastMCP` at `mcp.server.fastmcp`. Under SDK v2 that path is gone — FastMCP was renamed to
+`MCPServer` and moved it to `mcp.server.mcpserver`. A bare v1-only import used to
+fail with `ModuleNotFoundError` whenever an environment resolved SDK v2; the
+compatibility import in `mcp_server.py` now handles that relocation.
 
-These tests pin the resolution contract, not a specific SDK version, so they
-hold on whichever major the environment happens to have.
+These tests validate the import, transports, and registered tools for whichever
+SDK major is installed. CI currently exercises SDK v2; it does not run a separate
+SDK v1 job.
 """
 from __future__ import annotations
 
