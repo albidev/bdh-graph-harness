@@ -161,6 +161,17 @@ hub_dampening: true    # dampen high-degree hub nodes
 hub_degree_threshold: 15
 max_neighbors_per_hop: 10
 
+# Graph expansion from the seeds.
+#   threshold — scored k-hop walk; a neighbour must clear the activation
+#               threshold. On a rank-fused seed ranking (hybrid_fusion: rrf) no
+#               neighbour can, so the walk adds nothing.
+#   quota     — the direct neighbours of the seeds are ranked among themselves
+#               by relevance to the query (raised by a learned association with
+#               the seed) and the best few are admitted.
+graph_traversal_mode: quota
+graph_neighbor_quota: 3             # neighbours admitted per query
+graph_neighbor_min_relevance: 0.35  # below this the quota stays unfilled
+
 # Context budgets (characters). The budget is shared across the ranked notes in
 # proportion to their score: a long note can no longer crowd out the others, and
 # short notes hand their unused room on. A caller may pass its own

@@ -388,6 +388,9 @@ See `bdh-config.yaml` for shipped settings and `config.py` for internal defaults
 | `seed_count` | 5 | Top-k embedding matches as seed nodes |
 | `max_hop` | 2 | Graph traversal depth from seeds |
 | `active_threshold` | 0.25 | Min activation score (overridden by adaptive) |
+| `graph_traversal_mode` | `threshold` (shipped config: `quota`) | `threshold` walks k hops and admits neighbours above the activation threshold; `quota` admits the best direct neighbours of the seeds, ranked by query relevance |
+| `graph_neighbor_quota` | 3 | Neighbours admitted per query in `quota` mode |
+| `graph_neighbor_min_relevance` | 0.35 | Minimum query relevance for a neighbour; the quota is left unfilled rather than padded |
 | `retrieval_context_budget_chars` | 8000 | Size of `retrieved_context`, shared across ranked notes by score; overridable per request with `context_budget_chars` |
 | `retrieval_context_min_note_chars` | 400 | Guaranteed excerpt for every note admitted to a context |
 | `llm_context_budget_chars` | 10000 | Note context inside the synthesis prompt, shared the same way |
