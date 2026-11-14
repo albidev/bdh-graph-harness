@@ -31,7 +31,12 @@ from datetime import datetime, timedelta
 from copy import deepcopy
 
 from bdh_graph_harness.config import CONFIG, logger
-from bdh_graph_harness.memory.hebbian import encode_synapse_key, safe_decode_synapse_key
+from bdh_graph_harness.memory.hebbian import (
+    encode_synapse_key,
+    is_time_decay,
+    refresh_weights,
+    safe_decode_synapse_key,
+)
 from bdh_graph_harness.memory.quality import compute_all_qualities
 
 
@@ -101,6 +106,10 @@ def effective_downscale_factor(config: dict | None = None) -> float:
         The downscale factor to apply.
     """
     cfg = config if config is not None else CONFIG
+    if is_time_decay(cfg):
+        # Time-based forgetting already lowers every unused weight; a global
+        # downscale on top would forget the same thing twice.
+        return 1.0
     state_file = cfg.get('hebbian_state_file')
     if not _clean_room_basename(state_file):
         return float(cfg.get('consolidation_downscale_factor', DEFAULT_DOWNSCALE_FACTOR))
@@ -554,6 +563,10 @@ def consolidate(
     ]
 
     state['consolidation_cycles'] = cycles
+    if is_time_decay(cfg):
+        # Bring every weight up to date before judging what to prune: between
+        # learning updates a stored weight still reflects its last refresh.
+        refresh_weights(state, config=cfg)
     # P1: the clean-room shadow path neutralises the inherited downscale factor
     # (effective 1.0) so consolidation does not compound on top of online decay.
     factor = effective_downscale_factor(cfg)
@@ -641,6 +654,10 @@ def consolidate(
     pruned_count = _apply_prune_candidates(state, selected)
     stale_weak_pruned = sum(reasons.get(key) == 'stale_weak' for key in selected)
     capped = planned_count < candidate_count
+    # Every synapse still here has been through a sleep cycle and kept. Retrieval
+    # trusts such an association more than one it has only just learned.
+    for synapse in state.get('synapses', {}).values():
+        synapse['consolidated_cycles'] = int(synapse.get('consolidated_cycles', 0)) + 1
 
     old_dormant_cycles = {
         nid: q.get('dormant_cycles', 0)

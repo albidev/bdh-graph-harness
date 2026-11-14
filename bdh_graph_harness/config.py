@@ -91,6 +91,14 @@ CONFIG = {
     'retrieval_context_min_note_chars': 400,  # guaranteed excerpt per admitted note
     'llm_context_budget_chars': 10000,        # note context inside the synthesis prompt
     'hebbian_learning_seed_count': 2,  # conservative write budget; separate from retrieval seeds
+    # Forgetting. 'query' multiplies untouched weights by `decay` on every
+    # learning query; 'time' derives the weight from frequency and elapsed time
+    # only (frequency halves every half-life) and skips the nightly downscale.
+    'hebbian_decay_mode': 'query',
+    'hebbian_frequency_half_life_days': 30.0,
+    # Reinforce the edge between a seed and each neighbour the query reached
+    # from it, so links that keep being travelled gain weight.
+    'hebbian_learn_traversed_edges': False,
     'max_hop': 2,
     'active_threshold': 0.25,
     'hub_dampening': True,

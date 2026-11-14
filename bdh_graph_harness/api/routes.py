@@ -506,10 +506,32 @@ async def _run_attention_and_plasticity_unlocked(
             for item in routing.get('activation_details', [])
             if item.get('role') == 'seed' and item['id'] in active
         }
+        # The edge from a seed to a neighbour this query reached is evidence
+        # about that edge, not a new pairing: reinforcing it is what lets a
+        # link that keeps being travelled win the neighbour quota next time.
+        traversed_edges = None
+        if config.get('hebbian_learn_traversed_edges', False):
+            traversed_edges = [
+                (
+                    item['parent_id'],
+                    item['id'],
+                    learning_active[item['parent_id']] * float(item.get('query_relevance') or 0.0),
+                )
+                for item in routing.get('activation_details', [])
+                if item.get('role') in ('graph_neighbor', 'hebbian_neighbor')
+                and item.get('hop') == 1
+                and item.get('parent_id') in learning_active
+                and item['id'] in active
+            ] or None
+        # Callers and test doubles written for the four-argument signature keep
+        # working when there is nothing to add.
+        update_args = (learning_active, ctx.state, n, source)
+        if traversed_edges:
+            update_args += (traversed_edges,)
         # Acquire lock, then run hebbian_update + save_state in a thread
         async with ctx.state_lock:
             ctx.state, updated_keys, pruned_count = await asyncio.to_thread(
-                hebbian_update, learning_active, ctx.state, n, source
+                hebbian_update, *update_args
             )
             if ctx.persisted_state is not None:
                 ctx.persisted_state = project_runtime_state_to_persisted(

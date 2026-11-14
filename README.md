@@ -397,6 +397,9 @@ See `bdh-config.yaml` for shipped settings and `config.py` for internal defaults
 | `alpha` | 0.7 | Frequency weight in Hebbian |
 | `beta` | 0.3 | Recency weight in Hebbian |
 | `decay` | 0.95 | Per-session decay for unused synapses |
+| `hebbian_decay_mode` | `query` (shipped config: `time`) | `query` decays untouched weights on every learning query; `time` derives each weight from frequency and elapsed time only, and skips the nightly downscale |
+| `hebbian_frequency_half_life_days` | 30 | In `time` mode, a synapse's frequency halves over this many days without use |
+| `hebbian_learn_traversed_edges` | `false` (shipped config: `true`) | Reinforce the edge from a seed to each neighbour the query reached from it |
 | `hybrid_search` | `true` | Enable BM25 hybrid mode (currently true in both shipped config and internal defaults) |
 | `hybrid_alpha` | 0.7 | Vector search weight (only when `hybrid_search: true`) |
 | `hybrid_beta` | 0.3 | BM25 search weight (only when `hybrid_search: true`) |

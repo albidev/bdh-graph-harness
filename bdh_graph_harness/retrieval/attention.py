@@ -109,7 +109,14 @@ def _hebbian_dynamic_trust(synapse, now=None):
     saturation = max(0.01, float(CONFIG.get("hebbian_dynamic_frequency_saturation", 2.0)))
     frequency_factor = min(1.0, frequency / saturation)
 
-    cycles = max(0, int(synapse.get("consolidation_candidate_cycles", 0)))
+    # An association counts as consolidated once it has survived a sleep cycle.
+    # ``consolidation_candidate_cycles`` only exists while a synapse is a prune
+    # candidate, so on its own it would trust the weakest edges the most.
+    cycles = max(
+        0,
+        int(synapse.get("consolidated_cycles", 0)),
+        int(synapse.get("consolidation_candidate_cycles", 0)),
+    )
     consolidation_factor = 1.0 if cycles else float(
         CONFIG.get("hebbian_dynamic_unconsolidated_trust", 0.6)
     )

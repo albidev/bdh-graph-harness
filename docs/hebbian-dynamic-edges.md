@@ -24,6 +24,27 @@ An existing static relation remains a static route even if a learned synapse als
 
 Federated IDs stored by the Hebbian state are resolved back to canonical graph node IDs before traversal, so a logical learned relation is not silently lost because its storage ID differs from the graph ID.
 
+### Quota traversal
+
+With `graph_traversal_mode: quota` the direct neighbours of the seeds — one declared link or one traversable learned association away — are ranked among themselves and the best `graph_neighbor_quota` are admitted:
+
+```text
+priority = query relevance × (1 + dynamic gain × learned weight × trust) × OKF multiplier
+```
+
+A learned association therefore raises a neighbour's rank whether or not a declared link also exists. A learned-only neighbour must still reach `hebbian_dynamic_query_relevance_floor` on its own, and every neighbour must reach `graph_neighbor_min_relevance`; the quota is left unfilled rather than padded. Admitted neighbours always score below the seeds.
+
+The scored walk (`graph_traversal_mode: threshold`) compares a neighbour with a threshold derived from the seed scores. Under rank fusion the seeds are normalised to a top score of 1.0 while a neighbour is scaled by hop decay and cosine relevance, so no neighbour can clear it.
+
+## What gets learned, and how it is forgotten
+
+Each learning query reinforces the pair formed by its strongest seeds. With `hebbian_learn_traversed_edges: true` it also reinforces the edge from a seed to every neighbour the query reached from it, by `seed score × query relevance` (dampened by the source policy like any other update). That is what closes the loop: a link that keeps being travelled gains weight, and weight is what lifts a neighbour into the quota.
+
+Forgetting is selected by `hebbian_decay_mode`:
+
+- `query` multiplies every untouched weight by `decay` on each learning query. It follows traffic rather than time, and compounds with the recency term and the consolidation downscale.
+- `time` makes a weight a function of the synapse alone: its frequency, halved every `hebbian_frequency_half_life_days` without use, plus the recency term. Weights are recomputed on each learning update and at the start of each consolidation cycle; consolidation applies no downscale on top. Switching an existing state to `time` needs no migration — stored frequencies are aged from their last co-activation on first refresh.
+
 ## Trust score
 
 A learned weight measures association strength. A separate trust factor measures whether that association has earned the right to influence retrieval.
@@ -37,7 +58,7 @@ seed activation × dynamic hop decay × (0.5 + learned weight) × dynamic gain �
 Trust is bounded to `[trust_floor, 1]` and combines:
 
 1. **Frequency** — recurrent co-activation reaches full confidence at `hebbian_dynamic_frequency_saturation`.
-2. **Consolidation** — an edge that survived at least one consolidation candidate cycle receives full consolidation confidence; an unconsolidated one is discounted.
+2. **Consolidation** — an edge that has survived at least one consolidation cycle (`consolidated_cycles`) receives full consolidation confidence; one learned since the last cycle is discounted.
 3. **Recency** — inactive associations decay toward, but never below, the configured recency floor.
 
 This is intentionally conservative. A strong but one-shot association can still be traversed, but it cannot outrank a repeated, consolidated, recent relation by accident.

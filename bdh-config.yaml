@@ -197,6 +197,19 @@ beta: 0.3     # recency weight
 decay: 0.95   # decay factor per session for unused links
 hebbian_min_score: 0.15  # min activation score to create a synapse (prevents spurious connections)
 
+# Forgetting.
+#   query — every learning query multiplies each untouched weight by `decay`:
+#           forgetting follows traffic, and stacks with the recency term and
+#           the nightly downscale.
+#   time  — a weight depends only on the synapse's frequency and on the time
+#           since it was last used; frequency halves every half-life and the
+#           nightly downscale is not applied on top.
+hebbian_decay_mode: time
+hebbian_frequency_half_life_days: 30
+# Reinforce the edge between a seed and each neighbour a query reached from it.
+# A link that keeps being travelled gains weight and wins the neighbour quota.
+hebbian_learn_traversed_edges: true
+
 # Trusted dynamic Hebbian adjacency — learned-only edges; static wikilinks are unchanged.
 hebbian_dynamic_edges_enabled: true
 hebbian_dynamic_min_weight: 0.15
