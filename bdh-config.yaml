@@ -178,6 +178,7 @@ graph_neighbor_min_relevance: 0.35  # below this the quota stays unfilled
 # `context_budget_chars` in the /api/query body.
 retrieval_context_budget_chars: 8000   # retrieved_context (include_context: true)
 retrieval_context_min_note_chars: 400  # guaranteed excerpt per admitted note
+retrieval_context_min_neighbor_chars: 200  # smaller guarantee for notes reached through the graph
 llm_context_budget_chars: 10000        # note context in the synthesis prompt
 attention_relevance_batch_size: 256 # Chroma embedding IDs per traversal relevance batch
 

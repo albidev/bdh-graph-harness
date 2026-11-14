@@ -89,6 +89,7 @@ CONFIG = {
     # Context budgets, in characters, shared across the ranked notes by score.
     'retrieval_context_budget_chars': 8000,   # retrieved_context returned by /api/query
     'retrieval_context_min_note_chars': 400,  # guaranteed excerpt per admitted note
+    'retrieval_context_min_neighbor_chars': 200,  # ...and per note reached through the graph
     'llm_context_budget_chars': 10000,        # note context inside the synthesis prompt
     'hebbian_learning_seed_count': 2,  # conservative write budget; separate from retrieval seeds
     # Forgetting. 'query' multiplies untouched weights by `decay` on every

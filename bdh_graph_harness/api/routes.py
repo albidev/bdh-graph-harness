@@ -25,6 +25,7 @@ from bdh_graph_harness.config import (
 from bdh_graph_harness.visualization import render_viz_html, get_template_path
 from bdh_graph_harness.retrieval.attention import attention
 from bdh_graph_harness.retrieval.context_packing import (
+    DEFAULT_MIN_NEIGHBOR_CHARS,
     DEFAULT_MIN_NOTE_CHARS,
     DEFAULT_RETRIEVED_CONTEXT_BUDGET_CHARS,
     build_retrieved_context,
@@ -1098,6 +1099,9 @@ async def api_query(request, app_state: dict, ws_clients: set) -> web.Response:
                 settings.get('retrieval_context_budget_chars', DEFAULT_RETRIEVED_CONTEXT_BUDGET_CHARS),
             ),
             min_note_chars=settings.get('retrieval_context_min_note_chars', DEFAULT_MIN_NOTE_CHARS),
+            min_neighbor_chars=settings.get(
+                'retrieval_context_min_neighbor_chars', DEFAULT_MIN_NEIGHBOR_CHARS,
+            ),
         )
         response_payload['retrieved_context'] = retrieved_context
         response_payload['retrieved_context_meta'] = context_meta

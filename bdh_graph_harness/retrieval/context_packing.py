@@ -25,6 +25,7 @@ from typing import Sequence
 
 TRUNCATION_MARKER = " […]"
 DEFAULT_MIN_NOTE_CHARS = 400
+DEFAULT_MIN_NEIGHBOR_CHARS = 200
 DEFAULT_RETRIEVED_CONTEXT_BUDGET_CHARS = 8000
 DEFAULT_LLM_CONTEXT_BUDGET_CHARS = 10000
 MIN_CONTEXT_BUDGET_CHARS = 200
@@ -39,12 +40,14 @@ class PackItem:
 
     ``overhead`` is the number of characters the caller spends around the body
     (heading, separator); it is charged against the budget for admitted notes.
+    ``min_chars`` overrides the guaranteed excerpt for this note.
     """
 
     key: str
     score: float
     text: str
     overhead: int = 0
+    min_chars: int | None = None
 
 
 @dataclass(frozen=True)
@@ -105,7 +108,7 @@ def pack_items(
     omitted: list[str] = []
 
     for index, item in enumerate(items):
-        floor = min(len(item.text), min_chars)
+        floor = min(len(item.text), max(1, int(item.min_chars)) if item.min_chars else min_chars)
         overhead = max(0, item.overhead)
         if not admitted and not omitted and remaining > overhead:
             # The best-ranked note always gets in: a budget too small for the
@@ -157,12 +160,19 @@ def build_retrieved_context(
     budget_chars: int,
     *,
     min_note_chars: int = DEFAULT_MIN_NOTE_CHARS,
+    min_neighbor_chars: int | None = None,
 ) -> tuple[str, dict]:
     """Render ranked activated notes as ``## Title`` sections within a budget.
 
     ``activated_notes`` is the ranked API payload (``id``, ``title``,
-    ``score``). Returns the context string and a metadata dict describing what
-    each note received; the metadata carries ids and sizes only, never text.
+    ``score``, optional ``role``). Returns the context string and a metadata
+    dict describing what each note received; the metadata carries ids and sizes
+    only, never text.
+
+    Notes reached through the graph are supporting material next to the seeds
+    that retrieval ranked directly: ``min_neighbor_chars`` gives them a smaller
+    guaranteed excerpt, so admitting them does not shorten the seeds by a full
+    excerpt each. They still share the remaining room by score.
     """
     separator = "\n\n"
     items, headings = [], {}
@@ -173,11 +183,13 @@ def build_retrieved_context(
             continue
         heading = f"## {note.get('title', note['id'])}\n"
         headings[note["id"]] = heading
+        is_neighbor = note.get("role") not in (None, "seed")
         items.append(PackItem(
             key=note["id"],
             score=float(note.get("score") or 0.0),
             text=text.strip(),
             overhead=len(heading) + len(separator),
+            min_chars=min_neighbor_chars if is_neighbor else None,
         ))
 
     packed, omitted = pack_items(items, budget_chars, min_chars=min_note_chars)

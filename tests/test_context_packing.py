@@ -181,6 +181,36 @@ def test_retrieved_context_fits_the_callers_budget_and_reports_what_was_cut():
 # Synthesis prompt
 # ---------------------------------------------------------------------------
 
+def test_neighbours_get_a_smaller_guaranteed_excerpt_than_seeds():
+    long_text = _sentences("body", 400)
+    nodes = {nid: {"text": long_text} for nid in ("s1", "s2", "n1", "n2")}
+    activated = [
+        {"id": "s1", "title": "Seed one", "score": 1.0, "role": "seed"},
+        {"id": "s2", "title": "Seed two", "score": 0.8, "role": "seed"},
+        {"id": "n1", "title": "Neighbour one", "score": 0.3, "role": "graph_neighbor"},
+        {"id": "n2", "title": "Neighbour two", "score": 0.3, "role": "hebbian_neighbor"},
+    ]
+    budget = 1400
+    _, uniform = build_retrieved_context(activated, nodes, budget, min_note_chars=400)
+    context, tiered = build_retrieved_context(
+        activated, nodes, budget, min_note_chars=400, min_neighbor_chars=150,
+    )
+    assert len(context) <= budget
+    # With one floor for everyone the budget cannot hold all four notes.
+    assert uniform["omitted"] == ["n2"]
+    assert tiered["omitted"] == []
+    chars = {note["id"]: note["chars"] for note in tiered["notes"]}
+    assert chars["s1"] >= 400 and chars["s2"] >= 400
+    assert 100 <= chars["n1"] < 400 and 100 <= chars["n2"] < 400
+
+
+def test_notes_without_a_role_keep_the_full_guarantee():
+    nodes = {"a": {"text": "x" * 5000}, "b": {"text": "y" * 5000}}
+    activated = [{"id": "a", "title": "A", "score": 0.9}, {"id": "b", "title": "B", "score": 0.2}]
+    _, meta = build_retrieved_context(activated, nodes, 1000, min_note_chars=400, min_neighbor_chars=50)
+    assert all(note["chars"] >= 390 for note in meta["notes"])
+
+
 def test_prompt_context_is_unchanged_for_short_notes():
     nodes = {"seed": {"title": "Seed", "text": "body"}}
     assert format_context({"seed": 0.75, "missing": 0.1}, nodes) == "### Seed (activation: 0.750)\nbody\n"
