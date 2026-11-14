@@ -160,6 +160,14 @@ active_threshold: 0.25 # min activation score
 hub_dampening: true    # dampen high-degree hub nodes
 hub_degree_threshold: 15
 max_neighbors_per_hop: 10
+
+# Context budgets (characters). The budget is shared across the ranked notes in
+# proportion to their score: a long note can no longer crowd out the others, and
+# short notes hand their unused room on. A caller may pass its own
+# `context_budget_chars` in the /api/query body.
+retrieval_context_budget_chars: 8000   # retrieved_context (include_context: true)
+retrieval_context_min_note_chars: 400  # guaranteed excerpt per admitted note
+llm_context_budget_chars: 10000        # note context in the synthesis prompt
 attention_relevance_batch_size: 256 # Chroma embedding IDs per traversal relevance batch
 
 # OKF document compatibility and metadata-aware retrieval.

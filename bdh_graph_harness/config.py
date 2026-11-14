@@ -86,6 +86,10 @@ CONFIG = {
     'chroma_path': '.bdh-chroma',
     'chroma_collection': 'notes',
     'seed_count': 5,
+    # Context budgets, in characters, shared across the ranked notes by score.
+    'retrieval_context_budget_chars': 8000,   # retrieved_context returned by /api/query
+    'retrieval_context_min_note_chars': 400,  # guaranteed excerpt per admitted note
+    'llm_context_budget_chars': 10000,        # note context inside the synthesis prompt
     'hebbian_learning_seed_count': 2,  # conservative write budget; separate from retrieval seeds
     'max_hop': 2,
     'active_threshold': 0.25,

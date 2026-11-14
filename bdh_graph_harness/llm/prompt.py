@@ -10,17 +10,54 @@ These signals are all OPTIONAL. When absent, the prompt degrades to the
 previous behavior, so existing callers (CLI, MCP, tests) are unaffected.
 """
 
+from bdh_graph_harness.config import CONFIG
+from bdh_graph_harness.retrieval.context_packing import (
+    DEFAULT_LLM_CONTEXT_BUDGET_CHARS,
+    DEFAULT_MIN_NOTE_CHARS,
+    PackItem,
+    coerce_budget_chars,
+    pack_items,
+)
 
-def format_context(active_notes, nodes):
-    """Format active notes as context for an LLM."""
-    sorted_notes = sorted(active_notes.items(), key=lambda x: -x[1])
-    parts = []
-    for note_id, score in sorted_notes:
+_NOTE_SEPARATOR = "\n---\n"
+
+
+def _pack_note_context(active_notes, nodes, annotate=None, context_budget_chars=None):
+    """Render activated notes as prompt sections within one shared budget.
+
+    The budget is split across notes by activation score instead of cutting
+    every note at the same length, so a long, highly activated note keeps more
+    of its text while short notes cost only what they need.
+    """
+    budget = coerce_budget_chars(
+        context_budget_chars,
+        CONFIG.get('llm_context_budget_chars', DEFAULT_LLM_CONTEXT_BUDGET_CHARS),
+    )
+    items, headings = [], {}
+    for note_id, score in sorted(active_notes.items(), key=lambda x: -x[1]):
         node = nodes.get(note_id)
         if not node:
             continue
-        parts.append(f"### {node['title']} (activation: {score:.3f})\n{node['text'][:2000]}\n")
-    return "\n---\n".join(parts)
+        annotation = annotate(note_id) if annotate else ""
+        heading = f"### {node['title']} (activation: {score:.3f}{annotation})\n"
+        headings[note_id] = heading
+        items.append(PackItem(
+            key=note_id,
+            score=score,
+            text=node['text'],
+            overhead=len(heading) + 1 + len(_NOTE_SEPARATOR),
+        ))
+    packed, _omitted = pack_items(
+        items,
+        budget,
+        min_chars=CONFIG.get('retrieval_context_min_note_chars', DEFAULT_MIN_NOTE_CHARS),
+    )
+    return _NOTE_SEPARATOR.join(f"{headings[entry.key]}{entry.text}\n" for entry in packed)
+
+
+def format_context(active_notes, nodes, context_budget_chars=None):
+    """Format active notes as context for an LLM."""
+    return _pack_note_context(active_notes, nodes, context_budget_chars=context_budget_chars)
 
 
 def _format_associative_context(associative_context, nodes):
@@ -71,7 +108,8 @@ def _node_state_note(note_id, nodes, state):
     return f" [{', '.join(tags)}]" if tags else ""
 
 
-def build_messages(query, active_notes, nodes, state=None, associative_context=None):
+def build_messages(query, active_notes, nodes, state=None, associative_context=None,
+                   context_budget_chars=None):
     """Build the system + user messages list for an LLM call.
 
     Returns a list of {"role", "content"} dicts.
@@ -83,6 +121,9 @@ def build_messages(query, active_notes, nodes, state=None, associative_context=N
     ``associative_context`` (optional): a list of learned Hebbian neighbors
     (from attention's ``associative_context`` lane) that are NOT part of the
     primary activation. Used as a separate, non-ranking correlation lane.
+
+    ``context_budget_chars`` (optional): size of the note context, shared
+    across the activated notes by score. Defaults to ``llm_context_budget_chars``.
 
     When both are omitted, behavior matches the pre-Level-B prompt exactly.
     """
@@ -102,17 +143,12 @@ def build_messages(query, active_notes, nodes, state=None, associative_context=N
                 {"role": "user", "content": user_prompt}]
 
     # Primary context with optional per-note quality/dormancy annotation.
-    sorted_notes = sorted(active_notes.items(), key=lambda x: -x[1])
-    context_parts = []
-    for note_id, score in sorted_notes:
-        node = nodes.get(note_id)
-        if not node:
-            continue
-        annotation = _node_state_note(note_id, nodes, state) if has_state else ""
-        context_parts.append(
-            f"### {node['title']} (activation: {score:.3f}{annotation})\n{node['text'][:2000]}\n"
-        )
-    context = "\n---\n".join(context_parts)
+    context = _pack_note_context(
+        active_notes,
+        nodes,
+        annotate=(lambda note_id: _node_state_note(note_id, nodes, state)) if has_state else None,
+        context_budget_chars=context_budget_chars,
+    )
 
     if not has_state and not has_assoc:
         # Pre-Level-B behavior, unchanged.
