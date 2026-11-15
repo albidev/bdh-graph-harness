@@ -86,12 +86,30 @@ CONFIG = {
     'chroma_path': '.bdh-chroma',
     'chroma_collection': 'notes',
     'seed_count': 5,
+    # Context budgets, in characters, shared across the ranked notes by score.
+    'retrieval_context_budget_chars': 8000,   # retrieved_context returned by /api/query
+    'retrieval_context_min_note_chars': 400,  # guaranteed excerpt per admitted note
+    'retrieval_context_min_neighbor_chars': 200,  # ...and per note reached through the graph
+    'llm_context_budget_chars': 10000,        # note context inside the synthesis prompt
     'hebbian_learning_seed_count': 2,  # conservative write budget; separate from retrieval seeds
+    # Forgetting. 'query' multiplies untouched weights by `decay` on every
+    # learning query; 'time' derives the weight from frequency and elapsed time
+    # only (frequency halves every half-life) and skips the nightly downscale.
+    'hebbian_decay_mode': 'query',
+    'hebbian_frequency_half_life_days': 30.0,
+    # Reinforce the edge between a seed and each neighbour the query reached
+    # from it, so links that keep being travelled gain weight.
+    'hebbian_learn_traversed_edges': False,
     'max_hop': 2,
     'active_threshold': 0.25,
     'hub_dampening': True,
     'hub_degree_threshold': 25,      # dampen only very high-degree hubs (e.g. wiki/index)
     'max_neighbors_per_hop': 10,
+    # Graph expansion from the seeds. 'threshold' is the scored k-hop walk;
+    # 'quota' admits the best few direct neighbours ranked by query relevance.
+    'graph_traversal_mode': 'threshold',
+    'graph_neighbor_quota': 3,
+    'graph_neighbor_min_relevance': 0.35,
     'attention_relevance_batch_size': 256,
     'hop_decay': 0.5,  # score decay per hop (single application, not compound)
     'hebbian_gain': 0.0,  # multiplier on learned synapse weight during propagation; 0 = disabled

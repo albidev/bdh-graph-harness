@@ -24,6 +24,13 @@ from bdh_graph_harness.config import (
 )
 from bdh_graph_harness.visualization import render_viz_html, get_template_path
 from bdh_graph_harness.retrieval.attention import attention
+from bdh_graph_harness.retrieval.context_packing import (
+    DEFAULT_MIN_NEIGHBOR_CHARS,
+    DEFAULT_MIN_NOTE_CHARS,
+    DEFAULT_RETRIEVED_CONTEXT_BUDGET_CHARS,
+    build_retrieved_context,
+    coerce_budget_chars,
+)
 from bdh_graph_harness.retrieval.shadow import append_dynamic_shadow, build_dynamic_shadow
 from bdh_graph_harness.memory import hebbian_update, save_state
 from bdh_graph_harness.memory.source_policy import (
@@ -500,10 +507,32 @@ async def _run_attention_and_plasticity_unlocked(
             for item in routing.get('activation_details', [])
             if item.get('role') == 'seed' and item['id'] in active
         }
+        # The edge from a seed to a neighbour this query reached is evidence
+        # about that edge, not a new pairing: reinforcing it is what lets a
+        # link that keeps being travelled win the neighbour quota next time.
+        traversed_edges = None
+        if config.get('hebbian_learn_traversed_edges', False):
+            traversed_edges = [
+                (
+                    item['parent_id'],
+                    item['id'],
+                    learning_active[item['parent_id']] * float(item.get('query_relevance') or 0.0),
+                )
+                for item in routing.get('activation_details', [])
+                if item.get('role') in ('graph_neighbor', 'hebbian_neighbor')
+                and item.get('hop') == 1
+                and item.get('parent_id') in learning_active
+                and item['id'] in active
+            ] or None
+        # Callers and test doubles written for the four-argument signature keep
+        # working when there is nothing to add.
+        update_args = (learning_active, ctx.state, n, source)
+        if traversed_edges:
+            update_args += (traversed_edges,)
         # Acquire lock, then run hebbian_update + save_state in a thread
         async with ctx.state_lock:
             ctx.state, updated_keys, pruned_count = await asyncio.to_thread(
-                hebbian_update, learning_active, ctx.state, n, source
+                hebbian_update, *update_args
             )
             if ctx.persisted_state is not None:
                 ctx.persisted_state = project_runtime_state_to_persisted(
@@ -748,6 +777,8 @@ async def api_query(request, app_state: dict, ws_clients: set) -> web.Response:
       - source: "assistant_response" triggers Hebbian dampening
       - learn: false performs retrieval without Hebbian update or neurogenesis
       - respond: false skips the BDH synthesis LLM and returns activated notes only
+      - include_context: true returns the activated note bodies as retrieved_context
+      - context_budget_chars: size of retrieved_context, shared across the ranked notes
       - user_prompt: original user question, combined with query for LLM context
       - query_variants: optional list of language-agnostic retrieval variants
     """
@@ -772,6 +803,14 @@ async def api_query(request, app_state: dict, ws_clients: set) -> web.Response:
     learn = data.get('learn', True) is not False
     respond = data.get('respond', True) is not False
     include_context = data.get('include_context', False) is True
+    context_budget = data.get('context_budget_chars')
+    if context_budget is not None and (
+        isinstance(context_budget, bool) or not isinstance(context_budget, int) or context_budget <= 0
+    ):
+        return web.json_response({
+            'error': 'context_budget_chars must be a positive integer',
+            'field': 'context_budget_chars',
+        }, status=400)
     user_prompt = data.get('user_prompt', '').strip()
     query_variants = data.get('query_variants') or None
     llm_config = resolve_llm_config_for_source(ctx.config.settings, source)
@@ -1047,18 +1086,25 @@ async def api_query(request, app_state: dict, ws_clients: set) -> web.Response:
         # Opt-in note bodies are returned only in this HTTP response. Do not put
         # private vault text on the graph WebSocket broadcast, whose audience is
         # broader than the requesting Hermes turn.
-        parts = []
-        remaining = 8000
-        for item in activated_notes:
-            node = n.get(item['id'])
-            text = node.get('text', '') if isinstance(node, dict) else ''
-            if not isinstance(text, str) or not text.strip() or remaining <= 0:
-                continue
-            section = f"## {item['title']}\n{text.strip()}"
-            section = section[:remaining]
-            parts.append(section)
-            remaining -= len(section) + 2
-        response_payload['retrieved_context'] = '\n\n'.join(parts)
+        #
+        # The budget is shared across the ranked notes so that one long note
+        # cannot crowd out the ones ranked after it. A caller with a smaller
+        # window passes its own budget instead of cutting the string blindly.
+        settings = ctx.config.settings
+        retrieved_context, context_meta = build_retrieved_context(
+            activated_notes,
+            n,
+            coerce_budget_chars(
+                context_budget,
+                settings.get('retrieval_context_budget_chars', DEFAULT_RETRIEVED_CONTEXT_BUDGET_CHARS),
+            ),
+            min_note_chars=settings.get('retrieval_context_min_note_chars', DEFAULT_MIN_NOTE_CHARS),
+            min_neighbor_chars=settings.get(
+                'retrieval_context_min_neighbor_chars', DEFAULT_MIN_NEIGHBOR_CHARS,
+            ),
+        )
+        response_payload['retrieved_context'] = retrieved_context
+        response_payload['retrieved_context_meta'] = context_meta
     return web.json_response(response_payload)
 
 

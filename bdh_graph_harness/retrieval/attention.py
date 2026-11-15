@@ -109,7 +109,14 @@ def _hebbian_dynamic_trust(synapse, now=None):
     saturation = max(0.01, float(CONFIG.get("hebbian_dynamic_frequency_saturation", 2.0)))
     frequency_factor = min(1.0, frequency / saturation)
 
-    cycles = max(0, int(synapse.get("consolidation_candidate_cycles", 0)))
+    # An association counts as consolidated once it has survived a sleep cycle.
+    # ``consolidation_candidate_cycles`` only exists while a synapse is a prune
+    # candidate, so on its own it would trust the weakest edges the most.
+    cycles = max(
+        0,
+        int(synapse.get("consolidated_cycles", 0)),
+        int(synapse.get("consolidation_candidate_cycles", 0)),
+    )
     consolidation_factor = 1.0 if cycles else float(
         CONFIG.get("hebbian_dynamic_unconsolidated_trust", 0.6)
     )
@@ -422,6 +429,120 @@ def _build_hebbian_adjacency(hebbian_state, valid_node_ids):
     }
 
 
+def _admit_neighbors_by_quota(
+    *,
+    query_emb,
+    collection,
+    seeds,
+    nodes,
+    edges,
+    hebbian_adjacency,
+    okf_decision_for,
+    active,
+    activation_details,
+    raw_vector_scores,
+    bm25_scores,
+    retrieval_scores,
+):
+    """Expand the seeds with the best few of their direct neighbours.
+
+    Seeds carry rank-normalised retrieval scores while a neighbour can only be
+    judged by its own relevance to the query, so the two cannot share one
+    threshold: on a fused ranking no neighbour ever clears it. This expansion
+    ranks the neighbours among themselves instead and admits a fixed number.
+
+    Candidates are the notes one declared link or one traversable learned
+    association away from a seed. They are ordered by relevance to the query,
+    adjusted by the OKF policy and raised by a learned association between the
+    seed and the neighbour, so links that keep being used win the quota.
+
+    Mutates ``active`` and ``activation_details``; returns traversal statistics.
+    """
+    quota = max(0, int(CONFIG.get('graph_neighbor_quota', 3)))
+    stats = {'mode': 'quota', 'quota': quota, 'candidates': 0, 'admitted': 0}
+    if quota == 0 or not seeds:
+        return stats
+
+    seed_ids = {note_id for note_id, _score in seeds}
+    candidates = {}
+    # Seeds arrive best first, so the first seed reaching a neighbour is its parent.
+    for seed_id, _seed_score in seeds:
+        for edge in edges.get(seed_id, []):
+            target_id = _resolve_target(edge['target'], nodes)
+            if target_id is None or target_id in seed_ids:
+                continue
+            candidates.setdefault(target_id, {
+                'parent_id': seed_id, 'static': True, 'weight': 0.0, 'trust': 0.0,
+            })['static'] = True
+        for target_id, weight, trust in hebbian_adjacency.get(seed_id, []):
+            if target_id in seed_ids:
+                continue
+            candidate = candidates.setdefault(target_id, {
+                'parent_id': seed_id, 'static': False, 'weight': 0.0, 'trust': 0.0,
+            })
+            if weight * trust > candidate['weight'] * candidate['trust']:
+                candidate['weight'], candidate['trust'] = weight, trust
+    stats['candidates'] = len(candidates)
+    if not candidates:
+        return stats
+
+    relevance = _query_relevance(query_emb, collection, list(candidates))
+    min_relevance = float(CONFIG.get('graph_neighbor_min_relevance', 0.0))
+    learned_only_floor = float(CONFIG.get('hebbian_dynamic_query_relevance_floor', 0.0))
+    gain = float(CONFIG.get('hebbian_dynamic_gain', 1.0))
+    ranked = []
+    for target_id, candidate in candidates.items():
+        query_relevance = relevance.get(target_id)
+        if query_relevance is None or query_relevance < min_relevance:
+            continue
+        # Past co-activation alone does not make a note relevant to this query.
+        if not candidate['static'] and query_relevance < learned_only_floor:
+            continue
+        decision = okf_decision_for(target_id)
+        priority = query_relevance * (1.0 + gain * candidate['weight'] * candidate['trust'])
+        if decision:
+            priority *= decision["multiplier"]
+        if priority <= 0:
+            continue
+        ranked.append((priority, target_id, query_relevance, decision))
+    ranked.sort(key=lambda item: (-item[0], item[1]))
+    admitted = ranked[:quota]
+    if not admitted:
+        return stats
+
+    # Neighbours rank below every seed and keep their own order.
+    ceiling = min(score for _note_id, score in seeds) * CONFIG.get('hop_decay', 0.5)
+    best_priority = admitted[0][0]
+    for priority, target_id, query_relevance, decision in admitted:
+        candidate = candidates[target_id]
+        if candidate['static'] and candidate['weight'] > 0:
+            matched_by = 'static_and_hebbian_edge'
+        elif candidate['static']:
+            matched_by = 'static_edge'
+        else:
+            matched_by = 'hebbian_edge'
+        score = ceiling * priority / best_priority
+        active[target_id] = score
+        activation_details[target_id] = {
+            'role': 'hebbian_neighbor' if matched_by == 'hebbian_edge' else 'graph_neighbor',
+            'hop': 1,
+            'parent_id': candidate['parent_id'],
+            'matched_by': matched_by,
+            'hebbian_edge_weight': round(candidate['weight'], 4),
+            'hebbian_edge_trust': round(candidate['trust'], 4),
+            'query_relevance': round(query_relevance, 4),
+            'vector_score': round(raw_vector_scores.get(target_id, 0.0), 4),
+            'bm25_score': round(bm25_scores.get(target_id, 0.0), 4),
+            'hybrid_score': round(retrieval_scores.get(target_id, 0.0), 4),
+            'hebbian_boost': 0.0,
+            'final_score': round(score, 4),
+        }
+        if decision:
+            activation_details[target_id]['okf_policy'] = decision
+    stats['admitted'] = len(admitted)
+    return stats
+
+
 def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=None,
               hebbian_state=None, routing_meta=None):
     """
@@ -653,11 +774,16 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
     learned_adjacency = _build_hebbian_adjacency(hebbian_state, set(nodes))
     associative_context_enabled = CONFIG.get('hebbian_associative_context_enabled', False)
     hebbian_adjacency = {} if associative_context_enabled else learned_adjacency
+    # 'quota' admits the best few direct neighbours of the seeds (see
+    # _admit_neighbors_by_quota); 'threshold' is the scored walk below. In quota
+    # mode the walk is given no hops, so it leaves the seeds untouched.
+    quota_traversal = CONFIG.get('graph_traversal_mode', 'threshold') == 'quota'
+    walk_hops = 0 if quota_traversal else max_hop
     static_targets = []
     dynamic_targets = []
     candidate_frontier = set(seed_ids)
     candidate_seen = set(seed_ids)
-    for _ in range(max_hop):
+    for _ in range(walk_hops):
         next_frontier = set()
         for current_id in candidate_frontier:
             for edge in edges.get(current_id, []):
@@ -695,7 +821,7 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
 
     while queue:
         current_id, score, hop, parent_id = queue.popleft()
-        if hop >= max_hop:
+        if hop >= walk_hops:
             continue
 
         # Static wikilinks and learned co-activations share the same bounded
@@ -833,7 +959,25 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
                     activation_details[target_id]['okf_policy'] = target_decision
                 queue.append((target_id, new_score, hop + 1, current_id))
 
+    traversal_stats = {'mode': 'threshold', 'admitted': len(active) - len(seed_ids)}
+    if quota_traversal and max_hop > 0:
+        traversal_stats = _admit_neighbors_by_quota(
+            query_emb=query_emb,
+            collection=collection,
+            seeds=seeds,
+            nodes=nodes,
+            edges=edges,
+            hebbian_adjacency=hebbian_adjacency,
+            okf_decision_for=okf_decision_for,
+            active=active,
+            activation_details=activation_details,
+            raw_vector_scores=raw_vector_scores,
+            bm25_scores=bm25_scores,
+            retrieval_scores=retrieval_scores,
+        )
+
     if routing_meta is not None:
+        routing_meta['traversal'] = traversal_stats
         if okf_policy_enabled:
             routing_meta["okf_policy"].update({
                 "evaluated_nodes": len(okf_policy_decisions),

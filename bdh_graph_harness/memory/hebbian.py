@@ -11,6 +11,20 @@ Key design choices
 * Topology is seeds → activated nodes (directed), not a clique.
 * Pruning is deferred to the consolidation cycle; here synapses are only
   decayed and never deleted.
+
+Forgetting
+----------
+``hebbian_decay_mode`` selects how an unused synapse fades:
+
+* ``query`` (legacy default): every learning query multiplies the weight of
+  each untouched synapse by ``decay``. Forgetting then tracks traffic, not
+  time: a busy day erases what a quiet month would have kept, and it stacks
+  with the recency term and with the nightly downscale.
+* ``time``: the weight is a function of the synapse's frequency and of the
+  time since its last co-activation, nothing else. Frequency halves every
+  ``hebbian_frequency_half_life_days``; weights are recomputed on each
+  learning update and each consolidation cycle, and the nightly downscale is
+  not applied on top.
 """
 import base64
 import json
@@ -126,10 +140,91 @@ def _compute_weight(
 
 
 # ---------------------------------------------------------------------------
+# Time-based forgetting
+# ---------------------------------------------------------------------------
+
+DEFAULT_FREQUENCY_HALF_LIFE_DAYS = 30.0
+
+
+def is_time_decay(config: dict | None = None) -> bool:
+    """Return whether forgetting is driven by elapsed time instead of query count."""
+    cfg = config if config is not None else CONFIG
+    return cfg.get('hebbian_decay_mode', 'query') == 'time'
+
+
+def _elapsed_hours(timestamp: str | None, now: datetime) -> float | None:
+    """Hours between an ISO timestamp and ``now``; ``None`` when unparsable."""
+    if not timestamp:
+        return None
+    try:
+        moment = datetime.fromisoformat(str(timestamp).replace('Z', '+00:00'))
+    except (TypeError, ValueError):
+        return None
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    return max((now - moment).total_seconds() / 3600.0, 0.0)
+
+
+def _decayed_frequency(syn: dict, now: datetime, half_life_days: float) -> float:
+    """Frequency as of ``now``: it halves every ``half_life_days`` without use."""
+    frequency = float(syn.get('frequency', 0.0))
+    hours = _elapsed_hours(syn.get('last_coactivated') or syn.get('created'), now)
+    if hours is None or half_life_days <= 0:
+        return frequency
+    return frequency * 0.5 ** (hours / 24.0 / half_life_days)
+
+
+def current_weight(syn: dict, *, now: datetime | None = None, config: dict | None = None) -> float | None:
+    """Weight a synapse has at ``now`` under time-based forgetting.
+
+    Returns ``None`` for a synapse with no usable timestamp: its stored weight
+    is the only evidence there is, so it is left as it stands.
+    """
+    cfg = config if config is not None else CONFIG
+    now = now or datetime.now(timezone.utc)
+    hours = _elapsed_hours(syn.get('last_coactivated') or syn.get('created'), now)
+    if hours is None:
+        return None
+    half_life = float(cfg.get('hebbian_frequency_half_life_days', DEFAULT_FREQUENCY_HALF_LIFE_DAYS))
+    frequency = _decayed_frequency(syn, now, half_life)
+    recency = (
+        exp(-hours / max(float(cfg.get('tau_recency_hours', 24.0)), 1e-6))
+        if syn.get('last_coactivated') else 0.0
+    )
+    return (
+        cfg.get('alpha', 0.7) * _frequency_component(frequency, cfg.get('hebbian_frequency_scale', 10.0))
+        + cfg.get('beta', 0.3) * recency
+    )
+
+
+def refresh_weights(state: dict, *, now: datetime | None = None, config: dict | None = None,
+                    skip=()) -> int:
+    """Recompute every synapse weight from its frequency and age.
+
+    Called by the learning update and by consolidation in ``time`` mode, so a
+    stored weight is never more than one cycle stale. Returns the number of
+    synapses refreshed.
+    """
+    now = now or datetime.now(timezone.utc)
+    refreshed = 0
+    for key, syn in state.get('synapses', {}).items():
+        if key in skip:
+            continue
+        weight = current_weight(syn, now=now, config=config)
+        if weight is None:
+            continue
+        syn['weight'] = round(weight, 6)
+        refreshed += 1
+    return refreshed
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
-def hebbian_update(active_notes, state, nodes=None, source=None):
+def hebbian_update(active_notes, state, nodes=None, source=None, traversed_edges=None):
     """Reinforce links from strong seeds to activated notes.
 
     Args:
@@ -138,6 +233,10 @@ def hebbian_update(active_notes, state, nodes=None, source=None):
         nodes: optional full node map; used only by the periodic quality prune.
         source: 'assistant_response' or 'nightly_semantic_consolidation' dampen
                 the update; anything else uses full strength.
+        traversed_edges: optional ``(seed_id, neighbour_id, strength)`` triples
+                for the neighbours this query reached from a seed. Each one
+                reinforces the edge it travelled, so the links that keep
+                being used gain weight and the ones that are not fade.
 
     Returns:
         (state, updated_keys, pruned_count)
@@ -164,8 +263,35 @@ def hebbian_update(active_notes, state, nodes=None, source=None):
     freq_scale = CONFIG.get('hebbian_frequency_scale', 10.0)
     tau_recency = CONFIG.get('tau_recency_hours', 24.0)
 
-    now = datetime.now(timezone.utc).isoformat()
+    now_dt = datetime.now(timezone.utc)
+    now = now_dt.isoformat()
+    time_decay = is_time_decay()
+    half_life = float(CONFIG.get('hebbian_frequency_half_life_days', DEFAULT_FREQUENCY_HALF_LIFE_DAYS))
     updated_keys = set()
+
+    def reinforce(key, increment):
+        updated_keys.add(key)
+        if key not in state['synapses']:
+            syn_entry = {
+                'weight': 0.0,
+                'frequency': 0.0,
+                'last_coactivated': None,
+                'created': now,
+            }
+            # Provenance: store the source label so downstream
+            # consumers can trace where a synapse was born.
+            if source_policy is not None:
+                syn_entry['source'] = source_policy.provenance_label
+            state['synapses'][key] = syn_entry
+
+        syn = state['synapses'][key]
+        if time_decay:
+            # Bring the stored frequency forward to now before adding to it.
+            syn['frequency'] = _decayed_frequency(syn, now_dt, half_life)
+        syn['frequency'] += increment
+        syn['last_coactivated'] = now
+        # Incremental: recompute from stored state so decay persists.
+        syn['weight'] = _compute_weight(syn, alpha, beta, freq_scale, tau_recency)
 
     # Directed seed → later seed edges. The key is stored canonical/undirected,
     # but we create each pair exactly once using the score product of the two ends.
@@ -173,40 +299,33 @@ def hebbian_update(active_notes, state, nodes=None, source=None):
         seed_score = strong[seed_id]
         for target_id in seeds[i + 1:]:
             target_score = strong[target_id]
-            key = _ordered_key(seed_id, target_id)
-            updated_keys.add(key)
-
-            if key not in state['synapses']:
-                syn_entry = {
-                    'weight': 0.0,
-                    'frequency': 0.0,
-                    'last_coactivated': None,
-                    'created': now,
-                }
-                # Provenance: store the source label so downstream
-                # consumers can trace where a synapse was born.
-                if source_policy is not None:
-                    syn_entry['source'] = source_policy.provenance_label
-                state['synapses'][key] = syn_entry
-
-            syn = state['synapses'][key]
             # Increment weighted by co-activation strength.
-            increment = freq_increment * seed_score * target_score
-            syn['frequency'] += increment
-            syn['last_coactivated'] = now
-            # Incremental: recompute from stored state so decay persists.
-            syn['weight'] = _compute_weight(syn, alpha, beta, freq_scale, tau_recency)
+            reinforce(
+                _ordered_key(seed_id, target_id),
+                freq_increment * seed_score * target_score,
+            )
 
-    # Decay synapses that were not touched by this query.
-    decay_rate = CONFIG.get('decay', 0.95)
-    touched = updated_keys
-    for key, syn in list(state['synapses'].items()):
-        if key in touched:
+    # Edges actually travelled from a seed to an admitted neighbour.
+    for source_id, target_id, strength in traversed_edges or ():
+        if source_id == target_id or not strength or strength <= 0:
             continue
-        syn['weight'] *= decay_rate
-        # Floor instead of delete; consolidation owns pruning.
-        if syn['weight'] < 0:
-            syn['weight'] = 0.0
+        reinforce(_ordered_key(source_id, target_id), freq_increment * float(strength))
+
+    if time_decay:
+        # Untouched synapses fade with elapsed time, not with the number of
+        # queries the vault happened to receive.
+        refresh_weights(state, now=now_dt, skip=updated_keys)
+    else:
+        # Decay synapses that were not touched by this query.
+        decay_rate = CONFIG.get('decay', 0.95)
+        touched = updated_keys
+        for key, syn in list(state['synapses'].items()):
+            if key in touched:
+                continue
+            syn['weight'] *= decay_rate
+            # Floor instead of delete; consolidation owns pruning.
+            if syn['weight'] < 0:
+                syn['weight'] = 0.0
 
     # Try to re-activate dormant nodes that received strong activation.
     reactivated = 0

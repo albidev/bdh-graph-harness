@@ -160,6 +160,26 @@ active_threshold: 0.25 # min activation score
 hub_dampening: true    # dampen high-degree hub nodes
 hub_degree_threshold: 15
 max_neighbors_per_hop: 10
+
+# Graph expansion from the seeds.
+#   threshold — scored k-hop walk; a neighbour must clear the activation
+#               threshold. On a rank-fused seed ranking (hybrid_fusion: rrf) no
+#               neighbour can, so the walk adds nothing.
+#   quota     — the direct neighbours of the seeds are ranked among themselves
+#               by relevance to the query (raised by a learned association with
+#               the seed) and the best few are admitted.
+graph_traversal_mode: quota
+graph_neighbor_quota: 3             # neighbours admitted per query
+graph_neighbor_min_relevance: 0.35  # below this the quota stays unfilled
+
+# Context budgets (characters). The budget is shared across the ranked notes in
+# proportion to their score: a long note can no longer crowd out the others, and
+# short notes hand their unused room on. A caller may pass its own
+# `context_budget_chars` in the /api/query body.
+retrieval_context_budget_chars: 8000   # retrieved_context (include_context: true)
+retrieval_context_min_note_chars: 400  # guaranteed excerpt per admitted note
+retrieval_context_min_neighbor_chars: 200  # smaller guarantee for notes reached through the graph
+llm_context_budget_chars: 10000        # note context in the synthesis prompt
 attention_relevance_batch_size: 256 # Chroma embedding IDs per traversal relevance batch
 
 # OKF document compatibility and metadata-aware retrieval.
@@ -177,6 +197,19 @@ alpha: 0.7    # frequency weight
 beta: 0.3     # recency weight
 decay: 0.95   # decay factor per session for unused links
 hebbian_min_score: 0.15  # min activation score to create a synapse (prevents spurious connections)
+
+# Forgetting.
+#   query — every learning query multiplies each untouched weight by `decay`:
+#           forgetting follows traffic, and stacks with the recency term and
+#           the nightly downscale.
+#   time  — a weight depends only on the synapse's frequency and on the time
+#           since it was last used; frequency halves every half-life and the
+#           nightly downscale is not applied on top.
+hebbian_decay_mode: time
+hebbian_frequency_half_life_days: 30
+# Reinforce the edge between a seed and each neighbour a query reached from it.
+# A link that keeps being travelled gains weight and wins the neighbour quota.
+hebbian_learn_traversed_edges: true
 
 # Trusted dynamic Hebbian adjacency — learned-only edges; static wikilinks are unchanged.
 hebbian_dynamic_edges_enabled: true

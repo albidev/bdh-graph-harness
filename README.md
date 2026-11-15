@@ -388,9 +388,19 @@ See `bdh-config.yaml` for shipped settings and `config.py` for internal defaults
 | `seed_count` | 5 | Top-k embedding matches as seed nodes |
 | `max_hop` | 2 | Graph traversal depth from seeds |
 | `active_threshold` | 0.25 | Min activation score (overridden by adaptive) |
+| `graph_traversal_mode` | `threshold` (shipped config: `quota`) | `threshold` walks k hops and admits neighbours above the activation threshold; `quota` admits the best direct neighbours of the seeds, ranked by query relevance |
+| `graph_neighbor_quota` | 3 | Neighbours admitted per query in `quota` mode |
+| `graph_neighbor_min_relevance` | 0.35 | Minimum query relevance for a neighbour; the quota is left unfilled rather than padded |
+| `retrieval_context_budget_chars` | 8000 | Size of `retrieved_context`, shared across ranked notes by score; overridable per request with `context_budget_chars` |
+| `retrieval_context_min_note_chars` | 400 | Guaranteed excerpt for every note admitted to a context |
+| `retrieval_context_min_neighbor_chars` | 200 | Guaranteed excerpt for a note reached through the graph rather than ranked as a seed |
+| `llm_context_budget_chars` | 10000 | Note context inside the synthesis prompt, shared the same way |
 | `alpha` | 0.7 | Frequency weight in Hebbian |
 | `beta` | 0.3 | Recency weight in Hebbian |
 | `decay` | 0.95 | Per-session decay for unused synapses |
+| `hebbian_decay_mode` | `query` (shipped config: `time`) | `query` decays untouched weights on every learning query; `time` derives each weight from frequency and elapsed time only, and skips the nightly downscale |
+| `hebbian_frequency_half_life_days` | 30 | In `time` mode, a synapse's frequency halves over this many days without use |
+| `hebbian_learn_traversed_edges` | `false` (shipped config: `true`) | Reinforce the edge from a seed to each neighbour the query reached from it |
 | `hybrid_search` | `true` | Enable BM25 hybrid mode (currently true in both shipped config and internal defaults) |
 | `hybrid_alpha` | 0.7 | Vector search weight (only when `hybrid_search: true`) |
 | `hybrid_beta` | 0.3 | BM25 search weight (only when `hybrid_search: true`) |
