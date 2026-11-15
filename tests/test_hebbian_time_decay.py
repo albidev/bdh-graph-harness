@@ -170,7 +170,8 @@ def test_an_association_that_survived_a_sleep_cycle_is_trusted_more():
 # ---------------------------------------------------------------------------
 
 def _attention_with_neighbour(query, nodes, edges, collection, k=None, max_hop=None,
-                              bm25_index=None, hebbian_state=None, routing_meta=None):
+                              bm25_index=None, hebbian_state=None, routing_meta=None,
+                              vault_settings=None):
     if routing_meta is not None:
         routing_meta.update({
             'vector_top_score': 0.9, 'bm25_top_score': 0.0, 'hybrid_top_score': 0.9,

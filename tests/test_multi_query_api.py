@@ -59,7 +59,7 @@ def mock_app_mq_setup(monkeypatch):
         'variant two': {'gamma': 0.75, 'delta': 0.65},
     }
 
-    def fake_attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=None, hebbian_state=None, routing_meta=None):
+    def fake_attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=None, hebbian_state=None, routing_meta=None, vault_settings=None):
         result = dict(query_result_map.get(query, {}))
         if routing_meta is not None:
             top = max(result.values(), default=0.0)

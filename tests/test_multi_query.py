@@ -130,7 +130,7 @@ def test_variant_retrieval_is_seed_only(monkeypatch):
     calls = []
 
     def fake_attention(query, nodes, edges, collection, k, max_hop,
-                       bm25_index, hebbian_state, routing_meta=None):
+                       bm25_index, hebbian_state, routing_meta=None, vault_settings=None):
         calls.append((query, max_hop))
         return {query: 1.0}
 
