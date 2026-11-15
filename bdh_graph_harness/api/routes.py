@@ -426,13 +426,14 @@ async def _run_attention_and_plasticity_unlocked(
             max_hop=config.get('max_hop', 2),
             max_variants=config.get('multi_query_max_variants', 3),
             enabled=True,
+            vault_settings=config,
         )
     else:
         # Attention — run blocking I/O (embeddings) in a thread
         routing = {}
         active = await asyncio.to_thread(
             attention, query, n, e, coll, None, None, bm25, ctx.state,
-            routing_meta=routing,
+            routing_meta=routing, vault_settings=config,
         )
         # Make the legacy single-query routing metadata contract-consistent with
         # the multi-query path without forcing multi-query retrieval.

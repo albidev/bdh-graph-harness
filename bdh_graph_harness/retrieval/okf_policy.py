@@ -19,15 +19,20 @@ _LOCAL_PATH_RE = re.compile(r"^[A-Za-z]:[\\/]")
 _OFF_MODES = {False, None, "", "off", 0}
 
 
-def is_okf_retrieval_policy_enabled() -> bool:
+def is_okf_retrieval_policy_enabled(config: Mapping[str, Any] | None = None) -> bool:
     """Return whether OKF metadata may affect retrieval ranking.
 
     ``okf_mode`` is the compatibility gate. The separate policy flag lets a
     deployment keep OKF parsing/export enabled while temporarily disabling
     trust-aware ranking during an experiment.
+
+    ``config`` is the settings of the vault being queried. Both keys are
+    per-vault in a multi-vault deployment, so reading the global ``CONFIG``
+    alone would ignore them; without ``config`` the global value is used.
     """
-    mode = CONFIG.get("okf_mode", False)
-    return bool(CONFIG.get("okf_retrieval_policy_enabled", True)) and mode not in _OFF_MODES
+    cfg = CONFIG if config is None else config
+    mode = cfg.get("okf_mode", False)
+    return bool(cfg.get("okf_retrieval_policy_enabled", True)) and mode not in _OFF_MODES
 
 
 def _metadata_for_node(node: Mapping[str, Any] | None) -> Mapping[str, Any]:

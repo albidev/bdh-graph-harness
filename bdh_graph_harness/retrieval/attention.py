@@ -544,7 +544,7 @@ def _admit_neighbors_by_quota(
 
 
 def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=None,
-              hebbian_state=None, routing_meta=None):
+              hebbian_state=None, routing_meta=None, vault_settings=None):
     """
     BDH-style attention: find relevant notes via ChromaDB KNN search (seed)
     + graph traversal (k-hop expansion). Returns active note set with scores.
@@ -562,6 +562,10 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
     Args:
         hebbian_state: Optional Hebbian state dict. When provided, seed selection
                       is boosted by Hebbian synapse weights to recently active notes.
+        vault_settings: Settings of the vault being queried. Only the keys a
+                      vault may override for retrieval are read from it (today
+                      the OKF policy gate); everything else still comes from the
+                      global CONFIG.
     """
     # Dispatch to IaF if enabled
     if CONFIG.get('experimental_integrate_fire', False):
@@ -695,7 +699,7 @@ def attention(query, nodes, edges, collection, k=None, max_hop=None, bm25_index=
 
     # Keep raw retrieval scores separate from OKF and Hebbian adjustments.
     retrieval_scores = dict(scores)
-    okf_policy_enabled = is_okf_retrieval_policy_enabled()
+    okf_policy_enabled = is_okf_retrieval_policy_enabled(vault_settings)
     scores, okf_policy_decisions = apply_okf_retrieval_policy(
         scores,
         nodes,

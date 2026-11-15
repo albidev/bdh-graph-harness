@@ -215,6 +215,7 @@ def _gather_variant_results(
     hebbian_state: dict | None,
     k: int,
     max_hop: int,
+    vault_settings: dict | None = None,
 ) -> list[tuple[QueryVariant, dict]]:
     """Run attention() for each variant and return (variant, active) pairs.
 
@@ -231,7 +232,7 @@ def _gather_variant_results(
         # independent variant matches.
         active = attention(
             variant.query, nodes, edges, collection, k, 0,
-            bm25_index, hebbian_state, None,
+            bm25_index, hebbian_state, None, vault_settings=vault_settings,
         )
         gathered.append((variant, active))
     return gathered
@@ -250,6 +251,7 @@ def multi_query_attention(
     max_hop: int | None = None,
     max_variants: int | None = None,
     enabled: bool = True,
+    vault_settings: dict | None = None,
 ) -> tuple[dict, dict]:
     """Retrieve once per query variant, fuse, and return canonical activation.
 
@@ -281,7 +283,8 @@ def multi_query_attention(
     # (embeddings + graph traversal); callers run this function inside
     # asyncio.to_thread, so the per-variant calls stay off the event loop.
     gathered = _gather_variant_results(
-        variants, nodes, edges, collection, bm25_index, hebbian_state, k, max_hop
+        variants, nodes, edges, collection, bm25_index, hebbian_state, k, max_hop,
+        vault_settings,
     )
 
     fusion_method = CONFIG.get('multi_query_fusion', 'rrb')
@@ -301,6 +304,7 @@ def multi_query_attention(
     canonical_active = attention(
         original_query, nodes, edges, collection, k, max_hop,
         bm25_index, hebbian_state, routing_meta=routing_meta,
+        vault_settings=vault_settings,
     )
 
     details_by_id = {
@@ -333,7 +337,7 @@ def multi_query_attention(
     for detail in details_by_id.values():
         note_id = detail['id']
         enriched = dict(detail)
-        if is_okf_retrieval_policy_enabled() and "okf_policy" not in enriched:
+        if is_okf_retrieval_policy_enabled(vault_settings) and "okf_policy" not in enriched:
             enriched["okf_policy"] = evaluate_okf_metadata(nodes.get(note_id))
         if note_id in matched_by:
             enriched['matched_by'] = matched_by[note_id]
