@@ -121,6 +121,7 @@ def test_admitted_neighbours_carry_traversal_provenance(graph):
     assert details['near']['parent_id'] == 's1'
     assert details['near']['matched_by'] == 'static_edge'
     assert details['near']['query_relevance'] == pytest.approx(0.60, abs=1e-3)
+    assert details['near']['hebbian_boost'] == 0.0
     assert details['mid']['parent_id'] == 's2'
     assert details['s1']['role'] == 'seed'
 
@@ -146,11 +147,24 @@ def test_a_learned_association_lifts_a_linked_neighbour_into_the_quota(graph):
     assert set(plain) == {'s1', 's2', 'near'}
 
     state = {'synapses': _synapse('s2', 'mid', 0.5)}
-    learned, routing = _run(graph, {'graph_neighbor_quota': 1}, state=state)
+    learned, routing = _run(graph, {'graph_neighbor_quota': 1, 'hebbian_dynamic_gain': 1.0}, state=state)
     assert set(learned) == {'s1', 's2', 'mid'}
     detail = {item['id']: item for item in routing['activation_details']}['mid']
     assert detail['matched_by'] == 'static_and_hebbian_edge'
     assert detail['hebbian_edge_weight'] == 0.5
+    assert detail['hebbian_boost'] == pytest.approx(
+        detail['hebbian_edge_weight'] * detail['hebbian_edge_trust'], abs=0.0001
+    )
+    assert detail['hebbian_boost'] > 0
+
+
+def test_neighbor_boost_reports_actual_configured_gain(graph):
+    state = {'synapses': _synapse('s2', 'mid', 0.5)}
+    _, routing = _run(graph, {'graph_neighbor_quota': 2, 'hebbian_dynamic_gain': 0.25}, state=state)
+    detail = {item['id']: item for item in routing['activation_details']}['mid']
+    assert detail['hebbian_boost'] == pytest.approx(
+        0.25 * detail['hebbian_edge_weight'] * detail['hebbian_edge_trust'], abs=0.0001
+    )
 
 
 def test_a_learned_association_makes_an_unlinked_note_reachable(graph):

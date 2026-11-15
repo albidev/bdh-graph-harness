@@ -534,7 +534,9 @@ def _admit_neighbors_by_quota(
             'vector_score': round(raw_vector_scores.get(target_id, 0.0), 4),
             'bm25_score': round(bm25_scores.get(target_id, 0.0), 4),
             'hybrid_score': round(retrieval_scores.get(target_id, 0.0), 4),
-            'hebbian_boost': 0.0,
+            # This is the relative multiplier applied to the neighbour's
+            # query relevance before quota ranking (not a seed-score boost).
+            'hebbian_boost': round(gain * candidate['weight'] * candidate['trust'], 4),
             'final_score': round(score, 4),
         }
         if decision:
